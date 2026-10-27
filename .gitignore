@@ -45,3 +45,7 @@ result
 
 # Python bytecode (scripts/)
 __pycache__/
+
+# QA benchmark corpus and results (scripts/qa); audio is never committed
+/.qa-corpus/
+/.qa-results/
