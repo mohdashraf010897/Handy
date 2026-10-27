@@ -28,6 +28,13 @@ async setFlowSettings(settings: FlowSettings) : Promise<Result<FlowSettings, str
 async getFlowBuiltinAppTones() : Promise<AppToneRule[]> {
     return await TAURI_INVOKE("get_flow_builtin_app_tones");
 },
+/**
+ * The app that was frontmost at the last hotkey press (excluding this app),
+ * held in memory only. `None` before the first dictation or on Linux.
+ */
+async getFlowLastApp() : Promise<LastFlowApp | null> {
+    return await TAURI_INVOKE("get_flow_last_app");
+},
 async changeBinding(id: string, binding: string) : Promise<Result<BindingResponse, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_binding", { id, binding }) };
@@ -1302,6 +1309,22 @@ export type LanguageStatus =
  * Auto can't work here; `language` is used instead.
  */
 { kind: "auto_unavailable"; language: string; reason: AutoUnavailableReason }
+/**
+ * The last app dictated into, and the rule that currently applies to it.
+ */
+export type LastFlowApp = { app_id: string; app_name: string | null; 
+/**
+ * Tone the current rules give this app (even while tone is off).
+ */
+tone: Tone; 
+/**
+ * Pattern of the matching rule; `None` when no rule matches.
+ */
+matched_rule: string | null; 
+/**
+ * Whether the matching rule is a user rule rather than a built-in one.
+ */
+user_rule: boolean }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
 export type ModelInfo = { id: string; name: string; description: string; filename: string; source: ModelSource; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean; supports_streaming: boolean; supports_language_detection: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }

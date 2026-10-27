@@ -3,6 +3,7 @@
 //! Only the app identity is read (macOS bundle id and name, Windows exe name);
 //! window titles are never read because they routinely contain private data.
 
+use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use crate::flow::settings::{AppToneRule, FlowSettings, Tone};
@@ -181,14 +182,51 @@ pub fn tone_for(context: Option<&AppContext>, settings: &FlowSettings) -> Tone {
     let Some(app_id) = context.and_then(|c| c.app_id.as_deref()) else {
         return Tone::Default;
     };
+    matching_rule(app_id, settings)
+        .map(|(_, tone, _)| tone)
+        .unwrap_or_default()
+}
+
+/// The first rule matching `app_id` as `(pattern, tone, is_user_rule)`,
+/// ignoring whether tone is enabled.
+pub fn matching_rule<'a>(
+    app_id: &str,
+    settings: &'a FlowSettings,
+) -> Option<(&'a str, Tone, bool)> {
     settings
         .app_tones
         .iter()
-        .map(|rule| (rule.app_id.as_str(), rule.tone))
-        .chain(BUILTIN_APP_TONES.iter().copied())
-        .find(|(pattern, _)| app_matches(pattern, app_id))
-        .map(|(_, tone)| tone)
-        .unwrap_or_default()
+        .map(|rule| (rule.app_id.as_str(), rule.tone, true))
+        .chain(
+            BUILTIN_APP_TONES
+                .iter()
+                .map(|&(pattern, tone)| (pattern, tone, false)),
+        )
+        .find(|(pattern, _, _)| app_matches(pattern, app_id))
+}
+
+/// The last app other than this one that was frontmost at a hotkey press.
+/// Kept in memory only so the settings UI can offer it as a rule.
+static LAST_APP: Mutex<Option<AppContext>> = Mutex::new(None);
+
+/// Remembers a captured app unless it is this app's own window.
+pub fn remember(context: Option<&AppContext>, own_ids: &[&str]) {
+    let Some(context) = context else { return };
+    let Some(app_id) = context.app_id.as_deref() else {
+        return;
+    };
+    if own_ids.iter().any(|own| app_matches(own, app_id)) {
+        return;
+    }
+    *LAST_APP.lock().unwrap_or_else(PoisonError::into_inner) = Some(context.clone());
+}
+
+/// The app remembered by [`remember`], if any.
+pub fn last_app() -> Option<AppContext> {
+    LAST_APP
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
 }
 
 fn normalize(id: &str) -> String {
@@ -327,6 +365,37 @@ mod tests {
             app_name: Some("Slack".into()),
         };
         assert!(non_empty(named).is_some());
+    }
+
+    #[test]
+    fn matching_rule_reports_source_and_ignores_enabled_flag() {
+        let settings = FlowSettings {
+            tone_enabled: false,
+            app_tones: vec![rule("com.apple.*", Tone::Code)],
+        };
+        assert_eq!(
+            matching_rule("com.apple.mail", &settings),
+            Some(("com.apple.*", Tone::Code, true))
+        );
+        assert_eq!(
+            matching_rule("Slack.exe", &settings),
+            Some(("slack", Tone::Casual, false))
+        );
+        assert_eq!(matching_rule("com.example.unknown", &settings), None);
+    }
+
+    #[test]
+    fn remember_skips_own_app_and_missing_ids() {
+        remember(Some(&ctx("com.tinyspeck.slackmacgap")), &["com.pais.handy"]);
+        remember(Some(&ctx("com.pais.handy")), &["com.pais.handy"]);
+        remember(Some(&ctx("Handy.exe")), &["", "handy.exe"]);
+        remember(None, &[]);
+        let name_only = AppContext {
+            app_id: None,
+            app_name: Some("Unknown".into()),
+        };
+        remember(Some(&name_only), &[]);
+        assert_eq!(last_app(), Some(ctx("com.tinyspeck.slackmacgap")));
     }
 
     #[test]

@@ -660,6 +660,7 @@ pub fn run(cli_args: CliArgs) {
             flow::commands::get_flow_settings,
             flow::commands::set_flow_settings,
             flow::commands::get_flow_builtin_app_tones,
+            flow::commands::get_flow_last_app,
             shortcut::change_binding,
             shortcut::reset_binding,
             shortcut::change_shortcut_activation_setting,
