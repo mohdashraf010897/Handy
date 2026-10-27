@@ -49,6 +49,48 @@ normalisation variants rather than misrecognitions:
 
 Per-utterance hypotheses are in `.qa-results/<model>/results.json` after a run.
 
+### Addendum: Parakeet TDT 0.6B v3 as a stand-in for Underdog Bark
+
+[Underdog Bark 3.0](https://huggingface.co/ConwayResearch/Underdog-Bark-3.0) (ConwayResearch,
+released 2026-10-15, CC BY 4.0) is a fine-tune of NVIDIA Parakeet TDT 0.6B v3, not a Whisper
+model. Handy cannot load it today:
+
+| Variant                 | Size       | Published format                      | Loads in Handy        |
+| ----------------------- | ---------- | ------------------------------------- | --------------------- |
+| Bark 3.0 / Plus / Clean | 163–180 MB | `model.bark` (MLX), CoreML            | No                    |
+| Bark 3.0 Pro            | 1.25 GB    | transformers safetensors              | Only after conversion |
+| Community Pro GGUF      | 364 MB     | Starling engine, not whisper.cpp GGUF | No                    |
+
+transcribe.cpp's `convert-parakeet.py` reads NeMo checkpoints only, so converting Bark Pro means
+remapping transformers weights to NeMo layout and re-validating tensors.
+
+As a cheap proxy we benchmarked the stock base model from Handy's catalog,
+`parakeet-tdt-0.6b-v3` Q8_0. **This does not test Bark itself.** It only shows where Bark's
+base sits relative to our current models. Re-run of all three models at 2026-10-27 22:22 IST,
+same binary, settings and corpus:
+
+| Model                         | Subset     | Utts |   WER |    RTF | p50 ms | p95 ms | First-run p50 / p95 ms | Warm load p50 ms |
+| ----------------------------- | ---------- | ---: | ----: | -----: | -----: | -----: | ---------------------: | ---------------: |
+| parakeet-unified-en-0.6b-Q8_0 | all        |   40 | 1.76% | 0.0087 |     64 |    110 |              105 / 147 |              349 |
+| parakeet-tdt-0.6b-v3-Q8_0     | all        |   40 | 1.99% | 0.0088 |     70 |    106 |              117 / 151 |              382 |
+| parakeet-tdt-0.6b-v3-Q8_0     | test-clean |   30 | 1.71% | 0.0087 |     70 |    107 |              115 / 157 |              382 |
+| parakeet-tdt-0.6b-v3-Q8_0     | test-other |   10 | 2.87% | 0.0091 |     68 |    104 |              117 / 144 |              382 |
+| whisper-small-Q8_0            | all        |   40 | 3.87% | 0.0216 |    163 |    237 |              189 / 257 |              222 |
+
+WER for Parakeet Unified and Whisper Small reproduced exactly. Their latencies ran 3–15% higher
+than the 21:06 run, which is normal run-to-run variation on a shared laptop. Compare models
+within a single run.
+
+Parakeet v3's 17 errors: 5 spelling variants (realize → realise, befal → befall, hollan →
+holland), 2 contraction, 2 word joining, 8 genuine misrecognitions.
+
+**Reading.** v3 ties Parakeet Unified on test-clean and is worse on test-other (3 errors vs 2 on
+just 10 clips, so a weak signal). Bark's own card reports it slightly _worse_ than stock v3 on
+LibriSpeech (1.89% vs 1.52% clean, 4.08% vs 3.13% other) and better on meetings (AMI 7.82% vs
+9.42%) and parliamentary speech (VoxPopuli 2.05% vs 3.05%). Our audiobook corpus cannot show
+that gain. To decide on Bark we would need (a) a conversational test set (e.g. AMI, CC BY 4.0)
+and (b) a transcribe.cpp GGUF of Bark Pro. Both are open follow-ups, not step-0 work.
+
 ## Re-running
 
 ```bash
@@ -62,6 +104,9 @@ hf download handy-computer/parakeet-unified-en-0.6b-gguf parakeet-unified-en-0.6
   --revision 7e948f21b7bdbac698d3318db9d350f1096f3b6c
 hf download handy-computer/whisper-small-gguf whisper-small-Q8_0.gguf \
   --revision c0214bd34be9296695486f838e0142f900803159
+# Optional, for the addendum:
+hf download handy-computer/parakeet-tdt-0.6b-v3-gguf parakeet-tdt-0.6b-v3-Q8_0.gguf \
+  --revision 85ac09ea12fc4b1112fa76810059364bc6adc9de
 
 # 3. Benchmark. HANDY_APP defaults to this repo's release bundle.
 HANDY_APP=/path/to/Handy.app scripts/qa/bench.sh --repeat 3 \
@@ -76,6 +121,7 @@ Model file sha256 (match `src-tauri/src/catalog/catalog.json`):
 
 - `parakeet-unified-en-0.6b-Q8_0.gguf` `4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795`
 - `whisper-small-Q8_0.gguf` `9b9c8811bbcc82a7766f0fb0925614bdacb0923b2cc630daeac17108b655b860`
+- `parakeet-tdt-0.6b-v3-Q8_0.gguf` `5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7`
 
 Model ids for the CLI are `repo/filename`, not the catalog `id`. Passing `whisper-small` fails
 with "Model not found".
@@ -190,5 +236,7 @@ LLM step reported separately so it can be budgeted on its own.
 - **Corpus download:** the first full-tarball stream timed out after 52 minutes. The fetcher was
   made resumable and switched to the fastest mirror; the second run finished test-other in 40 s.
 - **Whisper Small download:** stalled at 14 MB on the first attempt and finished on a retry.
+- **Parakeet v3 download:** stalled at 273 MB and resumed on retry (about 17 minutes total).
+- **Underdog Bark** itself was not benchmarked; see the addendum.
 - The binary is the Architect's build at `5f5d13d0`, not rebuilt from this branch. This branch
   changes no app source, so the results apply to it.
