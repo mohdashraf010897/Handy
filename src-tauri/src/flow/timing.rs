@@ -7,7 +7,7 @@
 //! `release_to_pasted_ms`: hotkey release until the paste call returned.
 //!
 //! The line holds durations and flags only — never transcript text or the
-//! identity of the frontmost app.
+//! identity of the frontmost app (that is logged at debug level only).
 
 use std::future::Future;
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};
@@ -19,6 +19,7 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::actions::{TranscriptionCompleteEvent, TranscriptionOutcome};
+use crate::flow::context::AppContext;
 
 /// Released sessions kept while awaiting completion; older ones were cancelled.
 const MAX_INFLIGHT: usize = 4;
@@ -43,6 +44,8 @@ struct Session {
     cleanup_ran: bool,
     paste_start: Option<Instant>,
     paste_end: Option<Instant>,
+    app: Option<AppContext>,
+    app_capture_us: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -160,6 +163,8 @@ struct TimingReport {
     model: String,
     audio_s: f64,
     cleanup_ran: bool,
+    app_captured: bool,
+    app_capture_us: Option<u64>,
     press_to_mic_ready_ms: Option<f64>,
     release_to_asr_start_ms: Option<f64>,
     asr_ms: Option<f64>,
@@ -187,6 +192,8 @@ impl TimingReport {
             model,
             audio_s: (audio_seconds * 100.0).round() / 100.0,
             cleanup_ran: session.cleanup_ran,
+            app_captured: session.app.is_some(),
+            app_capture_us: session.app_capture_us,
             press_to_mic_ready_ms: span_ms(session.pressed_at, session.mic_ready_at),
             release_to_asr_start_ms: span_ms(session.released_at, session.asr_start),
             asr_ms: span_ms(session.asr_start, session.asr_end),
@@ -216,6 +223,20 @@ pub fn press(app: &AppHandle) {
     let now = Instant::now();
     LISTENER.call_once(|| register_listener(app));
     tracker().press(now);
+}
+
+/// Attaches the frontmost app captured at press to the recording session.
+pub fn attach_app(app: Option<AppContext>, capture_us: u64) {
+    if let Some(session) = tracker().recording.as_mut() {
+        debug!(
+            "flow: session {} frontmost app {:?} ({:?}) captured in {capture_us} us",
+            session.id,
+            app.as_ref().and_then(|a| a.app_id.as_deref()),
+            app.as_ref().and_then(|a| a.app_name.as_deref()),
+        );
+        session.app = app;
+        session.app_capture_us = Some(capture_us);
+    }
 }
 
 /// Marks the first real microphone samples of the recording session.
@@ -452,6 +473,32 @@ mod tests {
         assert_eq!(session.id, live);
         session.paste_start = Some(at(base, 6_300));
         assert_eq!(tracker.pasting().map(|s| s.id), Some(live));
+    }
+
+    #[test]
+    fn report_flags_app_capture_without_identity() {
+        let base = Instant::now();
+        let mut tracker = Tracker::new();
+        tracker.press(base);
+        if let Some(session) = tracker.recording.as_mut() {
+            session.app = Some(AppContext {
+                app_id: Some("com.tinyspeck.slackmacgap".into()),
+                app_name: Some("Slack".into()),
+            });
+            session.app_capture_us = Some(250);
+        }
+        tracker.release(at(base, 1_000));
+        let done = at(base, 1_100);
+        let session = tracker
+            .complete(done, Duration::from_millis(100))
+            .expect("session completes");
+        let report =
+            TimingReport::new(&session, TranscriptionOutcome::Empty, 0.0, "m".into(), done);
+        assert!(report.app_captured);
+        assert_eq!(report.app_capture_us, Some(250));
+        let json = serde_json::to_string(&report).expect("serializes");
+        assert!(!json.contains("slack"), "identity leaked: {json}");
+        assert!(!json.contains("Slack"), "identity leaked: {json}");
     }
 
     #[test]
