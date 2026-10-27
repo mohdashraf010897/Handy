@@ -3,7 +3,10 @@
 //! Everything here is reached from upstream code through one-line hooks in
 //! `actions.rs` and `lib.rs`, so upstream merges stay conflict-free.
 
+pub mod commands;
 pub mod context;
+pub mod prompt;
+pub mod settings;
 pub mod timing;
 
 use tauri::AppHandle;

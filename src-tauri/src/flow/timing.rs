@@ -20,6 +20,7 @@ use tauri_specta::Event;
 
 use crate::actions::{TranscriptionCompleteEvent, TranscriptionOutcome};
 use crate::flow::context::AppContext;
+use crate::flow::settings::Tone;
 
 /// Released sessions kept while awaiting completion; older ones were cancelled.
 const MAX_INFLIGHT: usize = 4;
@@ -46,6 +47,7 @@ struct Session {
     paste_end: Option<Instant>,
     app: Option<AppContext>,
     app_capture_us: Option<u64>,
+    tone: Option<Tone>,
 }
 
 #[derive(Debug)]
@@ -127,6 +129,19 @@ impl Tracker {
         })
     }
 
+    fn choose_tone(
+        &mut self,
+        now: Instant,
+        choose: impl FnOnce(Option<&AppContext>) -> Tone,
+    ) -> Tone {
+        let Some(session) = self.awaiting_cleanup(now) else {
+            return Tone::Default;
+        };
+        let tone = choose(session.app.as_ref());
+        session.tone = Some(tone);
+        tone
+    }
+
     fn awaiting_paste(&mut self) -> Option<&mut Session> {
         self.inflight
             .iter_mut()
@@ -163,6 +178,7 @@ struct TimingReport {
     model: String,
     audio_s: f64,
     cleanup_ran: bool,
+    tone: Option<Tone>,
     app_captured: bool,
     app_capture_us: Option<u64>,
     press_to_mic_ready_ms: Option<f64>,
@@ -192,6 +208,7 @@ impl TimingReport {
             model,
             audio_s: (audio_seconds * 100.0).round() / 100.0,
             cleanup_ran: session.cleanup_ran,
+            tone: session.tone,
             app_captured: session.app.is_some(),
             app_capture_us: session.app_capture_us,
             press_to_mic_ready_ms: span_ms(session.pressed_at, session.mic_ready_at),
@@ -262,6 +279,13 @@ pub fn asr<T>(transcribe: impl FnOnce() -> T) -> T {
         }
     }
     output
+}
+
+/// Picks the cleanup tone from the app captured for the live session about
+/// to be cleaned up, and records it. `Default` when there is no live session
+/// (e.g. a retry from history), so retries never inherit a dictation's tone.
+pub fn choose_tone(choose: impl FnOnce(Option<&AppContext>) -> Tone) -> Tone {
+    tracker().choose_tone(Instant::now(), choose)
 }
 
 /// Times LLM cleanup of the live session; `Some` output means it ran.
@@ -499,6 +523,35 @@ mod tests {
         let json = serde_json::to_string(&report).expect("serializes");
         assert!(!json.contains("slack"), "identity leaked: {json}");
         assert!(!json.contains("Slack"), "identity leaked: {json}");
+    }
+
+    #[test]
+    fn tone_is_chosen_only_for_a_live_session() {
+        let base = Instant::now();
+        let mut tracker = Tracker::new();
+        let none = tracker.choose_tone(base, |_| panic!("no live session to choose for"));
+        assert_eq!(none, Tone::Default);
+
+        tracker.press(base);
+        if let Some(session) = tracker.recording.as_mut() {
+            session.app = Some(AppContext {
+                app_id: Some("com.apple.mail".into()),
+                app_name: None,
+            });
+        }
+        tracker.release(at(base, 1_000));
+        let session = tracker.awaiting_asr().expect("awaiting asr");
+        session.asr_start = Some(at(base, 1_010));
+        session.asr_end = Some(at(base, 1_200));
+        let tone = tracker.choose_tone(at(base, 1_201), |app| {
+            assert_eq!(
+                app.and_then(|a| a.app_id.as_deref()),
+                Some("com.apple.mail")
+            );
+            Tone::Formal
+        });
+        assert_eq!(tone, Tone::Formal);
+        assert_eq!(tracker.inflight[0].tone, Some(Tone::Formal));
     }
 
     #[test]

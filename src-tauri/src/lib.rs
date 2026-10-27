@@ -657,6 +657,9 @@ pub fn run(cli_args: CliArgs) {
 
     let specta_builder = Builder::<tauri::Wry>::new()
         .commands(collect_commands![
+            flow::commands::get_flow_settings,
+            flow::commands::set_flow_settings,
+            flow::commands::get_flow_builtin_app_tones,
             shortcut::change_binding,
             shortcut::reset_binding,
             shortcut::change_shortcut_activation_setting,
