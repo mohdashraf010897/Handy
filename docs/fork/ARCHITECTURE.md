@@ -117,6 +117,18 @@ docs/fork/
 
 `src/bindings.ts` is generated on debug runs (`lib.rs:799-804`) and will conflict on every sync: always resolve by regenerating (`bun run tauri dev` once), never by hand.
 
+### Step 1 as built (timing, app context, tone)
+
+Deviations from the plan above, all to keep upstream hunks to single calls:
+
+- No `process_transcription_output` signature change. `flow::timing` keeps a small per-dictation session tracker (press → release → ASR → cleanup → paste); the captured `AppContext` and chosen tone live on that session, so `transcription_jobs.rs` is untouched and history retries get no tone.
+- No `flow::init`: the tracker is a static, and its `TranscriptionCompleteEvent` listener is registered on the first hotkey press.
+- `flow_settings.json` is a plain JSON file in the app data dir (atomic temp-file rename; a corrupt file is moved to `flow_settings.json.corrupt` and defaults are used), cached in memory.
+- Tone appends only a style instruction to the selected cleanup prompt; the app name/id is never sent to the provider and is logged at debug level only.
+- Hooks: 9 hunks (`lib.rs`: `mod flow;`, 3 commands; `actions.rs`: press, mic ready, release, ASR, cleanup + tone, paste start, paste end). Paste uses two one-line marks rather than wrapping the paste call, because wrapping made rustfmt reflow a 15-line block.
+
+Each finished dictation logs one `info` line, `flow_timing {json}`; the headline metric is `release_to_pasted_ms`.
+
 ### Branch model
 
 ```text
