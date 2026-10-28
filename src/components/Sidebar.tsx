@@ -12,6 +12,7 @@ import {
   PostProcessingSettings,
   ModelsSettings,
 } from "./settings";
+import { FLOW_TONE_SECTION } from "./flow";
 
 export type SidebarSection = keyof typeof SECTIONS_CONFIG;
 
@@ -62,6 +63,7 @@ export const SECTIONS_CONFIG = {
     component: PostProcessingSettings,
     enabled: (settings) => settings?.post_process_enabled ?? false,
   },
+  flowTone: FLOW_TONE_SECTION,
   debug: {
     labelKey: "sidebar.debug",
     icon: FlaskConical,

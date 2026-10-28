@@ -10,6 +10,7 @@ pub mod cli;
 mod clipboard;
 mod commands;
 pub mod engine_supervisor;
+mod flow;
 mod helpers;
 mod input;
 mod language_detection;
@@ -656,6 +657,10 @@ pub fn run(cli_args: CliArgs) {
 
     let specta_builder = Builder::<tauri::Wry>::new()
         .commands(collect_commands![
+            flow::commands::get_flow_settings,
+            flow::commands::set_flow_settings,
+            flow::commands::get_flow_builtin_app_tones,
+            flow::commands::get_flow_last_app,
             shortcut::change_binding,
             shortcut::reset_binding,
             shortcut::change_shortcut_activation_setting,

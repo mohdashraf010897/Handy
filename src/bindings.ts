@@ -5,6 +5,36 @@
 
 
 export const commands = {
+/**
+ * Current Flow settings (defaults if `flow_settings.json` is missing).
+ */
+async getFlowSettings() : Promise<FlowSettings> {
+    return await TAURI_INVOKE("get_flow_settings");
+},
+/**
+ * Validates and saves Flow settings; returns what was stored.
+ */
+async setFlowSettings(settings: FlowSettings) : Promise<Result<FlowSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_flow_settings", { settings }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The built-in app → tone presets, applied after the user's rules.
+ */
+async getFlowBuiltinAppTones() : Promise<AppToneRule[]> {
+    return await TAURI_INVOKE("get_flow_builtin_app_tones");
+},
+/**
+ * The app that was frontmost at the last hotkey press (excluding this app),
+ * held in memory only. `None` before the first dictation or on Linux.
+ */
+async getFlowLastApp() : Promise<LastFlowApp | null> {
+    return await TAURI_INVOKE("get_flow_last_app");
+},
 async changeBinding(id: string, binding: string) : Promise<Result<BindingResponse, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_binding", { id, binding }) };
@@ -1139,6 +1169,11 @@ language_detection_window_secs?: number;
  * `overlay_position` (position `none` → style `None`).
  */
 overlay_style?: OverlayStyle }
+/**
+ * Maps an app (macOS bundle id or Windows exe name) to a tone. A trailing
+ * `*` matches any suffix; matching ignores case and a `.exe` suffix.
+ */
+export type AppToneRule = { app_id: string; tone: Tone }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AutoUnavailableReason = 
@@ -1175,6 +1210,16 @@ export type ChineseScript =
 "traditional_hk"
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
+export type FlowSettings = { 
+/**
+ * Adjust the cleanup prompt to the frontmost app. Has no effect while
+ * post-processing is off.
+ */
+tone_enabled: boolean; 
+/**
+ * User rules; they take precedence over the built-in app list.
+ */
+app_tones: AppToneRule[] }
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; 
 /**
@@ -1264,6 +1309,22 @@ export type LanguageStatus =
  * Auto can't work here; `language` is used instead.
  */
 { kind: "auto_unavailable"; language: string; reason: AutoUnavailableReason }
+/**
+ * The last app dictated into, and the rule that currently applies to it.
+ */
+export type LastFlowApp = { app_id: string; app_name: string | null; 
+/**
+ * Tone the current rules give this app (even while tone is off).
+ */
+tone: Tone; 
+/**
+ * Pattern of the matching rule; `None` when no rule matches.
+ */
+matched_rule: string | null; 
+/**
+ * Whether the matching rule is a user rule rather than a built-in one.
+ */
+user_rule: boolean }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
 export type ModelInfo = { id: string; name: string; description: string; filename: string; source: ModelSource; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean; supports_streaming: boolean; supports_language_detection: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
@@ -1434,6 +1495,26 @@ export type StreamWorkKind = "transcribing" | "polishing"
  * and `Dark` force one of the two palettes Handy already ships.
  */
 export type Theme = "system" | "light" | "dark"
+/**
+ * Writing style asked of LLM cleanup for a given app.
+ */
+export type Tone = 
+/**
+ * Leave the user's cleanup prompt unchanged.
+ */
+"default" | 
+/**
+ * Chat apps: conversational, light punctuation.
+ */
+"casual" | 
+/**
+ * Email and documents: complete sentences, professional register.
+ */
+"formal" | 
+/**
+ * Editors and terminals: keep identifiers, commands and paths verbatim.
+ */
+"code"
 export type TranscribeAcceleratorSetting = "auto" | "cpu" | "gpu"
 /**
  * Emitted when a dictation finishes (not on cancel); onboarding uses it to measure speed.

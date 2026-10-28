@@ -418,7 +418,12 @@ pub(crate) async fn process_transcription_output(
     let mut post_process_prompt: Option<String> = None;
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+        if let Some(processed_text) = crate::flow::timing::cleanup(post_process_transcription(
+            &crate::flow::prompt::with_tone(app, &settings),
+            &final_text,
+        ))
+        .await
+        {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
@@ -444,6 +449,7 @@ pub(crate) async fn process_transcription_output(
 impl ShortcutAction for TranscribeAction {
     fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
         let start_time = Instant::now();
+        crate::flow::on_press(app);
         debug!("TranscribeAction::start called for binding: {}", binding_id);
 
         // Load model in the background
@@ -573,6 +579,7 @@ impl ShortcutAction for TranscribeAction {
                     }
 
                     debug!("Microphone is receiving samples; recording is ready");
+                    crate::flow::timing::mic_ready();
                     utils::emit_recording_ready(&app_clone);
 
                     // The start chime is a readiness cue, so it must follow the
@@ -620,6 +627,7 @@ impl ShortcutAction for TranscribeAction {
     }
 
     fn stop(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
+        let flow_session = crate::flow::on_release();
         // Prevent a slow microphone from emitting a ready event or start chime
         // after the user has already requested stop.
         app.state::<Arc<AudioRecordingManager>>()
@@ -711,7 +719,8 @@ impl ShortcutAction for TranscribeAction {
                     // otherwise a batch run of the samples. A cancel is surfaced
                     // as an error, so it never starts a batch run.
                     let transcription_time = Instant::now();
-                    let transcription_result = tm.transcribe_recording(samples);
+                    let transcription_result =
+                        crate::flow::timing::asr(flow_session, || tm.transcribe_recording(samples));
 
                     // Await WAV save and verify
                     let wav_saved = match wav_handle.await {
@@ -826,6 +835,7 @@ impl ShortcutAction for TranscribeAction {
                                             return;
                                         }
 
+                                        crate::flow::timing::paste_start(flow_session);
                                         let outcome =
                                             match utils::paste(final_text, ah_clone.clone()) {
                                                 Ok(()) => {
@@ -841,6 +851,7 @@ impl ShortcutAction for TranscribeAction {
                                                     TranscriptionOutcome::Failed
                                                 }
                                             };
+                                        crate::flow::timing::paste_end(flow_session);
                                         // A new session may have started while
                                         // this paste ran; the UI is now its.
                                         if RECORDING_SESSION.load(Ordering::SeqCst) == session {
