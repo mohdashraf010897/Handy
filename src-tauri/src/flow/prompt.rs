@@ -17,19 +17,27 @@ fn tone_instruction(tone: Tone) -> Option<&'static str> {
     match tone {
         Tone::Default => None,
         Tone::Casual => Some(
-            "Style: the text is going into a chat message. Keep it conversational and \
-             concise; light punctuation is fine. Do not add greetings, sign-offs or \
-             formality that was not spoken.",
+            "Style: the text is going into a chat message. Make it sound like a quick, \
+             friendly message: use contractions (do not -> don't), keep it short, and drop \
+             the final period on a one-sentence message. Keep words like hey and thanks. \
+             Write file names, numbers and links in their usual written form. \
+             Do not add greetings, sign-offs, emoji or content that was not spoken.",
         ),
         Tone::Formal => Some(
-            "Style: the text is going into an email or document. Use complete sentences, \
-             correct capitalization and punctuation, and a professional register. Do not \
-             add greetings, sign-offs or content that was not spoken.",
+            "Style: the text is going into an email or document. Rewrite it in a polished, \
+             professional register: complete sentences, no contractions (can't -> cannot), \
+             no slang or filler, and casual words made formal (hey -> hello, thanks -> \
+             thank you, gonna -> going to, yeah -> yes, can you -> could you). End every \
+             sentence with a period or question mark. Keep the meaning and every fact \
+             unchanged. Do not add greetings, sign-offs or content that was not spoken.",
         ),
         Tone::Code => Some(
-            "Style: the text is going into a code editor or terminal. Keep identifiers, \
-             commands, file paths, flags and technical terms exactly as spoken, and do not \
-             rephrase technical content or add explanations.",
+            "Style: the text is going into a code editor or terminal. Turn spoken symbols \
+             into characters inside identifiers, paths and commands (config dot yaml -> \
+             config.yaml, dash dash force -> --force, user underscore id -> user_id, \
+             slash etc -> /etc). Keep identifiers, flags and technical terms exactly as \
+             spoken, remove filler words (um, uh, so, like), do not add markdown or \
+             backticks, and do not rephrase technical content or add explanations.",
         ),
     }
 }
