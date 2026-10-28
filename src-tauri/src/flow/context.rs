@@ -257,6 +257,13 @@ mod tests {
         }
     }
 
+    fn enabled() -> FlowSettings {
+        FlowSettings {
+            tone_enabled: true,
+            ..FlowSettings::default()
+        }
+    }
+
     fn rule(app_id: &str, tone: Tone) -> AppToneRule {
         AppToneRule {
             app_id: app_id.into(),
@@ -266,7 +273,7 @@ mod tests {
 
     #[test]
     fn builtin_apps_map_to_their_presets() {
-        let settings = FlowSettings::default();
+        let settings = enabled();
         let cases = [
             ("com.tinyspeck.slackmacgap", Tone::Casual),
             ("com.apple.mail", Tone::Formal),
@@ -287,7 +294,7 @@ mod tests {
 
     #[test]
     fn wildcard_matches_prefix_only() {
-        let settings = FlowSettings::default();
+        let settings = enabled();
         assert_eq!(
             tone_for(Some(&ctx("com.jetbrains.intellij")), &settings),
             Tone::Code
@@ -334,7 +341,7 @@ mod tests {
             tone_for(Some(&ctx("com.tinyspeck.slackmacgap")), &disabled),
             Tone::Default
         );
-        let settings = FlowSettings::default();
+        let settings = enabled();
         assert_eq!(tone_for(None, &settings), Tone::Default);
         let name_only = AppContext {
             app_id: None,

@@ -20,8 +20,9 @@ import {
   validateAppId,
 } from "./toneRules";
 
+// Mirrors `FlowSettings::default()` in src-tauri/src/flow/settings.rs.
 const DEFAULT_FLOW_SETTINGS: FlowSettings = {
-  tone_enabled: true,
+  tone_enabled: false,
   app_tones: [],
 };
 

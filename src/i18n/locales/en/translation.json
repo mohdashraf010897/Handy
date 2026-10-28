@@ -1020,10 +1020,10 @@
       }
     },
     "reset": {
-      "hint": "Defaults: per-app tone on, no custom rules.",
+      "hint": "Defaults: per-app tone off, no custom rules.",
       "button": "Reset to defaults",
       "confirmTitle": "Reset per-app tone?",
-      "confirmBody": "This removes all your rules and turns per-app tone back on.",
+      "confirmBody": "This removes all your rules and turns per-app tone off.",
       "confirmDetail": "Built-in presets are kept. This can't be undone.",
       "cancel": "Cancel",
       "confirm": "Reset"

@@ -41,7 +41,8 @@ pub struct AppToneRule {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(default)]
 pub struct FlowSettings {
-    /// Adjust the cleanup prompt to the frontmost app. Has no effect while
+    /// Adjust the cleanup prompt to the frontmost app. Off by default (opt-in,
+    /// so upgrading never changes cleanup output); no effect while
     /// post-processing is off.
     pub tone_enabled: bool,
     /// User rules; they take precedence over the built-in app list.
@@ -51,7 +52,7 @@ pub struct FlowSettings {
 impl Default for FlowSettings {
     fn default() -> Self {
         Self {
-            tone_enabled: true,
+            tone_enabled: false,
             app_tones: Vec::new(),
         }
     }
@@ -172,7 +173,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let settings = load_from(&dir.path().join(FILE_NAME));
         assert_eq!(settings, FlowSettings::default());
-        assert!(settings.tone_enabled);
+        assert!(!settings.tone_enabled, "per-app tone is opt-in");
     }
 
     #[test]
@@ -205,8 +206,16 @@ mod tests {
         )
         .expect("write");
         let settings = load_from(&path);
-        assert!(settings.tone_enabled);
+        assert!(!settings.tone_enabled);
         assert_eq!(settings.app_tones[0].tone, Tone::Casual);
+    }
+
+    #[test]
+    fn saved_enabled_flag_survives_the_default_change() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(FILE_NAME);
+        fs::write(&path, r#"{"tone_enabled":true,"app_tones":[]}"#).expect("write");
+        assert!(load_from(&path).tone_enabled);
     }
 
     #[test]
