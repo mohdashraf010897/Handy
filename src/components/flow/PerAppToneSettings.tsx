@@ -51,7 +51,7 @@ interface RuleRowProps {
   index: number;
   rules: AppToneRule[];
   disabled: boolean;
-  onChange: (index: number, rule: AppToneRule) => void;
+  onChange: (index: number, patch: Partial<AppToneRule>) => Promise<boolean>;
   onRemove: (index: number) => void;
 }
 
@@ -73,14 +73,18 @@ const RuleRow: React.FC<RuleRowProps> = ({
     setError(null);
   }, [rule.app_id]);
 
-  const commit = () => {
+  const commit = async () => {
     if (draft.trim() === rule.app_id) {
       setError(null);
       return;
     }
     const nextError = validateAppId(draft, rules, index);
     setError(nextError);
-    if (!nextError) onChange(index, { ...rule, app_id: draft.trim() });
+    if (nextError) return;
+    // A rejected save rolls the rule back; show that instead of the draft.
+    if (!(await onChange(index, { app_id: draft.trim() }))) {
+      setDraft(rule.app_id);
+    }
   };
 
   const appLabel = draft.trim() || rule.app_id;
@@ -102,11 +106,11 @@ const RuleRow: React.FC<RuleRowProps> = ({
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             onChange={(event) => setDraft(event.target.value)}
-            onBlur={commit}
+            onBlur={() => void commit()}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
-                commit();
+                void commit();
               } else if (event.key === "Escape") {
                 setDraft(rule.app_id);
                 setError(null);
@@ -118,7 +122,7 @@ const RuleRow: React.FC<RuleRowProps> = ({
           value={rule.tone}
           disabled={disabled}
           label={t("flow.rules.toneFor", { app: appLabel })}
-          onChange={(tone) => onChange(index, { ...rule, tone })}
+          onChange={(tone) => void onChange(index, { tone })}
         />
         <Button
           variant="danger-ghost"
@@ -372,10 +376,12 @@ export const PerAppToneSettings: React.FC = () => {
 
   const rules = settings?.app_tones ?? [];
 
-  const saveRules = useCallback(
-    (app_tones: AppToneRule[]) =>
-      settings ? save({ ...settings, app_tones }) : Promise.resolve(false),
-    [save, settings],
+  // Rule edits are applied to the store's latest rules, not this render's,
+  // so quick consecutive edits (e.g. blur-commit then a click) all land.
+  const updateRules = useCallback(
+    (update: (current: AppToneRule[]) => AppToneRule[]) =>
+      save((current) => ({ ...current, app_tones: update(current.app_tones) })),
+    [save],
   );
 
   const focusRule = (index: number) =>
@@ -383,16 +389,13 @@ export const PerAppToneSettings: React.FC = () => {
       document.getElementById(ruleInputId(index))?.focus(),
     );
 
-  const upsertTone = async (appId: string, tone: Tone) => {
-    const index = findRuleIndex(rules, appId);
-    if (index === -1) {
-      await saveRules([...rules, { app_id: appId, tone }]);
-    } else {
-      await saveRules(
-        rules.map((rule, i) => (i === index ? { ...rule, tone } : rule)),
-      );
-    }
-  };
+  const upsertTone = (appId: string, tone: Tone) =>
+    updateRules((current) => {
+      const index = findRuleIndex(current, appId);
+      return index === -1
+        ? [...current, { app_id: appId, tone }]
+        : current.map((rule, i) => (i === index ? { ...rule, tone } : rule));
+    });
 
   const overrideBuiltin = async (builtin: AppToneRule) => {
     const index = findRuleIndex(rules, builtin.app_id);
@@ -400,7 +403,14 @@ export const PerAppToneSettings: React.FC = () => {
       focusRule(index);
       return;
     }
-    if (await saveRules([...rules, { ...builtin }])) focusRule(rules.length);
+    const saved = await updateRules((current) =>
+      findRuleIndex(current, builtin.app_id) === -1
+        ? [...current, { ...builtin }]
+        : current,
+    );
+    const latest = useFlowStore.getState().settings?.app_tones ?? [];
+    const added = findRuleIndex(latest, builtin.app_id);
+    if (saved && added !== -1) focusRule(added);
   };
 
   if (isLoading && !settings) {
@@ -432,7 +442,9 @@ export const PerAppToneSettings: React.FC = () => {
       <SettingsGroup title={t("flow.title")}>
         <ToggleSwitch
           checked={settings.tone_enabled}
-          onChange={(tone_enabled) => void save({ ...settings, tone_enabled })}
+          onChange={(tone_enabled) =>
+            void save((current) => ({ ...current, tone_enabled }))
+          }
           isUpdating={isSaving}
           label={t("flow.enable.label")}
           description={t("flow.enable.description")}
@@ -477,7 +489,7 @@ export const PerAppToneSettings: React.FC = () => {
         <AddRuleForm
           rules={rules}
           disabled={isSaving}
-          onAdd={(rule) => saveRules([...rules, rule])}
+          onAdd={(rule) => updateRules((current) => [...current, rule])}
         />
         {rules.length === 0 ? (
           <Row>
@@ -491,10 +503,14 @@ export const PerAppToneSettings: React.FC = () => {
               index={index}
               rules={rules}
               disabled={isSaving}
-              onChange={(i, next) =>
-                void saveRules(rules.map((r, j) => (j === i ? next : r)))
+              onChange={(i, patch) =>
+                updateRules((current) =>
+                  current.map((r, j) => (j === i ? { ...r, ...patch } : r)),
+                )
               }
-              onRemove={(i) => void saveRules(rules.filter((_, j) => j !== i))}
+              onRemove={(i) =>
+                void updateRules((current) => current.filter((_, j) => j !== i))
+              }
             />
           ))
         )}
@@ -558,6 +574,7 @@ export const PerAppToneSettings: React.FC = () => {
             <Button
               variant="danger"
               size="sm"
+              disabled={isSaving}
               onClick={async () => {
                 if (await save(DEFAULT_FLOW_SETTINGS)) setConfirmReset(false);
               }}
