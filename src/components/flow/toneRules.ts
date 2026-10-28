@@ -1,4 +1,10 @@
-import type { AppToneRule, Tone } from "@/bindings";
+import type { AppToneRule, FlowSettings, Tone } from "@/bindings";
+
+// Mirrors `FlowSettings::default()` in src-tauri/src/flow/settings.rs.
+export const DEFAULT_FLOW_SETTINGS: FlowSettings = {
+  tone_enabled: false,
+  app_tones: [],
+};
 
 /** Display order of the tone presets. */
 export const TONES: readonly Tone[] = ["default", "casual", "formal", "code"];
@@ -61,3 +67,16 @@ export const overridingRule = (
       (!isWildcard && appMatches(rule.app_id, builtin.app_id)),
   );
 };
+
+/** Whether settings differ from the defaults, i.e. Reset would change something. */
+export const isFlowCustomized = (
+  settings: FlowSettings,
+  defaults: FlowSettings = DEFAULT_FLOW_SETTINGS,
+): boolean =>
+  settings.tone_enabled !== defaults.tone_enabled ||
+  settings.app_tones.length !== defaults.app_tones.length ||
+  settings.app_tones.some(
+    (rule, index) =>
+      rule.app_id !== defaults.app_tones[index].app_id ||
+      rule.tone !== defaults.app_tones[index].tone,
+  );

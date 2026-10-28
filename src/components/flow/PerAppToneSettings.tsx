@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw, RotateCcw, Trash2 } from "lucide-react";
-import type { AppToneRule, FlowSettings, LastFlowApp, Tone } from "@/bindings";
+import type { AppToneRule, LastFlowApp, Tone } from "@/bindings";
 import { useSettings } from "@/hooks/useSettings";
 import { useFlowStore } from "@/stores/flowStore";
 import { Alert } from "../ui/Alert";
@@ -14,17 +14,13 @@ import { PostProcessingToggle } from "../settings/PostProcessingToggle";
 import { TonePicker } from "./TonePicker";
 import {
   type AppIdError,
+  DEFAULT_FLOW_SETTINGS,
   TONES,
   findRuleIndex,
+  isFlowCustomized,
   overridingRule,
   validateAppId,
 } from "./toneRules";
-
-// Mirrors `FlowSettings::default()` in src-tauri/src/flow/settings.rs.
-const DEFAULT_FLOW_SETTINGS: FlowSettings = {
-  tone_enabled: false,
-  app_tones: [],
-};
 
 const ruleInputId = (index: number) => `flow-rule-app-${index}`;
 
@@ -435,7 +431,7 @@ export const PerAppToneSettings: React.FC = () => {
   }
 
   const postProcessEnabled = getSetting("post_process_enabled") ?? false;
-  const isCustomized = !settings.tone_enabled || rules.length > 0;
+  const isCustomized = isFlowCustomized(settings);
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">

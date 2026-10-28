@@ -2,8 +2,10 @@
 import assert from "node:assert/strict";
 import type { AppToneRule, Tone } from "@/bindings";
 import {
+  DEFAULT_FLOW_SETTINGS,
   appMatches,
   findRuleIndex,
+  isFlowCustomized,
   normalizeAppId,
   overridingRule,
   validateAppId,
@@ -44,5 +46,27 @@ assert.equal(
   undefined,
 );
 assert.equal(overridingRule(rule("discord"), rules), undefined);
+
+// Reset is offered only when settings differ from the defaults.
+assert.equal(isFlowCustomized(DEFAULT_FLOW_SETTINGS), false);
+assert.equal(isFlowCustomized({ tone_enabled: false, app_tones: [] }), false);
+assert.equal(isFlowCustomized({ tone_enabled: true, app_tones: [] }), true);
+assert.equal(
+  isFlowCustomized({ tone_enabled: false, app_tones: [rule("slack")] }),
+  true,
+);
+assert.equal(
+  isFlowCustomized({ tone_enabled: true, app_tones: [rule("slack")] }),
+  true,
+);
+const customDefaults = { tone_enabled: true, app_tones: [rule("slack")] };
+assert.equal(isFlowCustomized(customDefaults, customDefaults), false);
+assert.equal(
+  isFlowCustomized(
+    { tone_enabled: true, app_tones: [rule("slack", "formal")] },
+    customDefaults,
+  ),
+  true,
+);
 
 console.log("toneRules tests passed");
