@@ -627,7 +627,7 @@ impl ShortcutAction for TranscribeAction {
     }
 
     fn stop(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
-        crate::flow::on_release();
+        let flow_session = crate::flow::on_release();
         // Prevent a slow microphone from emitting a ready event or start chime
         // after the user has already requested stop.
         app.state::<Arc<AudioRecordingManager>>()
@@ -720,7 +720,7 @@ impl ShortcutAction for TranscribeAction {
                     // as an error, so it never starts a batch run.
                     let transcription_time = Instant::now();
                     let transcription_result =
-                        crate::flow::timing::asr(|| tm.transcribe_recording(samples));
+                        crate::flow::timing::asr(flow_session, || tm.transcribe_recording(samples));
 
                     // Await WAV save and verify
                     let wav_saved = match wav_handle.await {
@@ -835,7 +835,7 @@ impl ShortcutAction for TranscribeAction {
                                             return;
                                         }
 
-                                        crate::flow::timing::paste_start();
+                                        crate::flow::timing::paste_start(flow_session);
                                         let outcome =
                                             match utils::paste(final_text, ah_clone.clone()) {
                                                 Ok(()) => {
@@ -851,7 +851,7 @@ impl ShortcutAction for TranscribeAction {
                                                     TranscriptionOutcome::Failed
                                                 }
                                             };
-                                        crate::flow::timing::paste_end();
+                                        crate::flow::timing::paste_end(flow_session);
                                         // A new session may have started while
                                         // this paste ran; the UI is now its.
                                         if RECORDING_SESSION.load(Ordering::SeqCst) == session {

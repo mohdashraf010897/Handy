@@ -122,7 +122,7 @@ docs/fork/
 
 Deviations from the plan above, all to keep upstream hunks to single calls:
 
-- No `process_transcription_output` signature change. `flow::timing` keeps a small per-dictation session tracker (press → release → ASR → cleanup → paste); the captured `AppContext` and chosen tone live on that session, so `transcription_jobs.rs` is untouched and history retries get no tone.
+- No `process_transcription_output` signature change. `flow::timing` keeps a small per-dictation session tracker (press → release → ASR → cleanup → paste); the captured `AppContext` and chosen tone live on that session. The release hook returns the session id, which `stop()`'s task passes to the ASR and paste marks, so overlapping dictations never swap marks. The ASR mark also records the tokio task id, and cleanup/tone attach only to the session whose ASR ran in the same task. A history retry (`transcription_jobs.rs`, untouched) runs outside that task, so it always gets the `Default` tone and never touches a live session.
 - No `flow::init`: the tracker is a static, and its `TranscriptionCompleteEvent` listener is registered on the first hotkey press.
 - `flow_settings.json` is a plain JSON file in the app data dir (atomic temp-file rename; a corrupt file is moved to `flow_settings.json.corrupt` and defaults are used), cached in memory.
 - Tone appends only a style instruction to the selected cleanup prompt; the app name/id is never sent to the provider and never logged (the default file log level is Debug).

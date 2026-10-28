@@ -22,13 +22,12 @@ use crate::actions::{TranscriptionCompleteEvent, TranscriptionOutcome};
 use crate::flow::context::AppContext;
 use crate::flow::settings::Tone;
 
+type TaskId = tokio::task::Id;
+
 /// Released sessions kept while awaiting completion; older ones were cancelled.
 const MAX_INFLIGHT: usize = 4;
 /// Released sessions older than this are dropped (cancelled or lost).
 const STALE_AFTER: Duration = Duration::from_secs(300);
-/// Cleanup only attaches to a session whose ASR ended this recently, which
-/// keeps the history "retry" path from being attributed to a live dictation.
-const LIVE_WINDOW: Duration = Duration::from_secs(30);
 /// Tolerance when matching a completion event to its release mark.
 const MATCH_SLACK: Duration = Duration::from_millis(5);
 
@@ -45,6 +44,9 @@ struct Session {
     cleanup_ran: bool,
     paste_start: Option<Instant>,
     paste_end: Option<Instant>,
+    /// The async task that ran ASR; cleanup in that same task belongs to this
+    /// session. History retries run outside it, so they never match.
+    task: Option<TaskId>,
     app: Option<AppContext>,
     app_capture_us: Option<u64>,
     tone: Option<Tone>,
@@ -91,7 +93,7 @@ impl Tracker {
         }
     }
 
-    fn release(&mut self, now: Instant) {
+    fn release(&mut self, now: Instant) -> u64 {
         let mut session = match self.recording.take() {
             Some(session) => session,
             None => Session {
@@ -109,32 +111,45 @@ impl Tracker {
             let dropped = self.inflight.remove(0);
             debug!("flow_timing: dropping unfinished session {}", dropped.id);
         }
+        let id = session.id;
         self.inflight.push(session);
+        id
     }
 
     fn by_id(&mut self, id: u64) -> Option<&mut Session> {
         self.inflight.iter_mut().find(|s| s.id == id)
     }
 
-    fn awaiting_asr(&mut self) -> Option<&mut Session> {
-        self.inflight.last_mut().filter(|s| s.asr_start.is_none())
+    fn asr_start(&mut self, id: u64, now: Instant, task: Option<TaskId>) -> bool {
+        let Some(session) = self.by_id(id) else {
+            return false;
+        };
+        session.asr_start = Some(now);
+        session.task = task;
+        true
     }
 
-    /// The just-transcribed live session, if cleanup has not started on it.
-    fn awaiting_cleanup(&mut self, now: Instant) -> Option<&mut Session> {
-        self.inflight.last_mut().filter(|s| {
-            s.cleanup_start.is_none()
-                && s.asr_end
-                    .is_some_and(|end| now.saturating_duration_since(end) < LIVE_WINDOW)
-        })
+    fn asr_end(&mut self, id: u64, now: Instant) {
+        if let Some(session) = self.by_id(id) {
+            session.asr_end = Some(now);
+        }
+    }
+
+    /// The session whose ASR ran in `task`, if its cleanup has not started.
+    /// `None` outside a dictation task (e.g. a retry from history).
+    fn awaiting_cleanup(&mut self, task: Option<TaskId>) -> Option<&mut Session> {
+        let task = task?;
+        self.inflight
+            .iter_mut()
+            .find(|s| s.task == Some(task) && s.asr_end.is_some() && s.cleanup_start.is_none())
     }
 
     fn choose_tone(
         &mut self,
-        now: Instant,
+        task: Option<TaskId>,
         choose: impl FnOnce(Option<&AppContext>) -> Tone,
     ) -> Tone {
-        let Some(session) = self.awaiting_cleanup(now) else {
+        let Some(session) = self.awaiting_cleanup(task) else {
             return Tone::Default;
         };
         let tone = choose(session.app.as_ref());
@@ -142,17 +157,16 @@ impl Tracker {
         tone
     }
 
-    fn awaiting_paste(&mut self) -> Option<&mut Session> {
-        self.inflight
-            .iter_mut()
-            .rev()
-            .find(|s| s.asr_end.is_some() && s.paste_start.is_none())
+    fn paste_start(&mut self, id: u64, now: Instant) {
+        if let Some(session) = self.by_id(id) {
+            session.paste_start.get_or_insert(now);
+        }
     }
 
-    fn pasting(&mut self) -> Option<&mut Session> {
-        self.inflight
-            .iter_mut()
-            .find(|s| s.paste_start.is_some() && s.paste_end.is_none())
+    fn paste_end(&mut self, id: u64, now: Instant) {
+        if let Some(session) = self.by_id(id).filter(|s| s.paste_start.is_some()) {
+            session.paste_end.get_or_insert(now);
+        }
     }
 
     /// Removes the session a completion event belongs to. The event carries
@@ -261,39 +275,38 @@ pub fn mic_ready() {
     tracker().mic_ready(Instant::now());
 }
 
-/// Marks the hotkey release and queues the session for completion.
-pub fn release() {
-    tracker().release(Instant::now());
+/// Marks the hotkey release, queues the session for completion and returns
+/// its id; the stop hook passes it to the ASR and paste marks.
+pub fn release() -> u64 {
+    tracker().release(Instant::now())
 }
 
-/// Times the speech-to-text call of the session just released.
-pub fn asr<T>(transcribe: impl FnOnce() -> T) -> T {
-    let id = tracker().awaiting_asr().map(|session| {
-        session.asr_start = Some(Instant::now());
-        session.id
-    });
+/// Times the speech-to-text call of `session` and ties the session to the
+/// current async task, so its cleanup can be found without guessing.
+pub fn asr<T>(session: u64, transcribe: impl FnOnce() -> T) -> T {
+    let started = tracker().asr_start(session, Instant::now(), tokio::task::try_id());
     let output = transcribe();
-    if let Some(id) = id {
-        if let Some(session) = tracker().by_id(id) {
-            session.asr_end = Some(Instant::now());
-        }
+    if started {
+        tracker().asr_end(session, Instant::now());
     }
     output
 }
 
-/// Picks the cleanup tone from the app captured for the live session about
-/// to be cleaned up, and records it. `Default` when there is no live session
-/// (e.g. a retry from history), so retries never inherit a dictation's tone.
+/// Picks the cleanup tone from the app captured for the dictation being
+/// cleaned up in this task, and records it. `Default` outside a dictation
+/// task (e.g. a retry from history), so retries never inherit a tone.
 pub fn choose_tone(choose: impl FnOnce(Option<&AppContext>) -> Tone) -> Tone {
-    tracker().choose_tone(Instant::now(), choose)
+    tracker().choose_tone(tokio::task::try_id(), choose)
 }
 
-/// Times LLM cleanup of the live session; `Some` output means it ran.
+/// Times LLM cleanup of this task's dictation; `Some` output means it ran.
 pub async fn cleanup<T>(post_process: impl Future<Output = Option<T>>) -> Option<T> {
-    let id = tracker().awaiting_cleanup(Instant::now()).map(|session| {
-        session.cleanup_start = Some(Instant::now());
-        session.id
-    });
+    let id = tracker()
+        .awaiting_cleanup(tokio::task::try_id())
+        .map(|session| {
+            session.cleanup_start = Some(Instant::now());
+            session.id
+        });
     let output = post_process.await;
     if let Some(id) = id {
         if let Some(session) = tracker().by_id(id) {
@@ -304,18 +317,14 @@ pub async fn cleanup<T>(post_process: impl Future<Output = Option<T>>) -> Option
     output
 }
 
-/// Marks the paste start of the newest transcribed session not yet pasted.
-pub fn paste_start() {
-    if let Some(session) = tracker().awaiting_paste() {
-        session.paste_start = Some(Instant::now());
-    }
+/// Marks the paste start of `session`.
+pub fn paste_start(session: u64) {
+    tracker().paste_start(session, Instant::now());
 }
 
-/// Marks the paste end of the session currently pasting.
-pub fn paste_end() {
-    if let Some(session) = tracker().pasting() {
-        session.paste_end = Some(Instant::now());
-    }
+/// Marks the paste end of `session`.
+pub fn paste_end(session: u64) {
+    tracker().paste_end(session, Instant::now());
 }
 
 fn register_listener(app: &AppHandle) {
@@ -365,33 +374,72 @@ mod tests {
         base + Duration::from_millis(ms)
     }
 
-    fn transcribed(tracker: &mut Tracker, base: Instant, press: u64, release: u64) -> u64 {
-        let id = tracker.press(at(base, press));
-        tracker.release(at(base, release));
-        let session = tracker.awaiting_asr().expect("released session awaits ASR");
-        session.asr_start = Some(at(base, release + 10));
-        session.asr_end = Some(at(base, release + 210));
+    /// Distinct real task ids, as the dictation tasks would have.
+    fn task_ids(n: usize) -> Vec<TaskId> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let mut ids = Vec::new();
+            for _ in 0..n {
+                ids.push(
+                    tokio::spawn(async { tokio::task::id() })
+                        .await
+                        .expect("task"),
+                );
+            }
+            ids
+        })
+    }
+
+    fn with_app(tracker: &mut Tracker, app_id: &str) {
+        if let Some(session) = tracker.recording.as_mut() {
+            session.app = Some(AppContext {
+                app_id: Some(app_id.into()),
+                app_name: None,
+            });
+        }
+    }
+
+    /// Press, release and run ASR (ending 200 ms after it starts) in `task`.
+    fn transcribed(
+        tracker: &mut Tracker,
+        base: Instant,
+        press: u64,
+        release: u64,
+        task: Option<TaskId>,
+    ) -> u64 {
+        tracker.press(at(base, press));
+        let id = tracker.release(at(base, release));
+        assert!(tracker.asr_start(id, at(base, release + 10), task));
+        tracker.asr_end(id, at(base, release + 210));
         id
+    }
+
+    fn tone_by_app(app: Option<&AppContext>) -> Tone {
+        match app.and_then(|a| a.app_id.as_deref()) {
+            Some("com.apple.mail") => Tone::Formal,
+            Some("com.tinyspeck.slackmacgap") => Tone::Casual,
+            _ => Tone::Default,
+        }
     }
 
     #[test]
     fn full_typed_session_reports_every_stage() {
         let base = Instant::now();
+        let task = task_ids(1)[0];
         let mut tracker = Tracker::new();
         tracker.press(base);
         tracker.mic_ready(at(base, 40));
-        tracker.release(at(base, 2_000));
-        let session = tracker.awaiting_asr().expect("awaiting asr");
-        session.asr_start = Some(at(base, 2_005));
-        session.asr_end = Some(at(base, 2_305));
-        let session = tracker.awaiting_cleanup(at(base, 2_306)).expect("cleanup");
+        let id = tracker.release(at(base, 2_000));
+        assert!(tracker.asr_start(id, at(base, 2_005), Some(task)));
+        tracker.asr_end(id, at(base, 2_305));
+        let session = tracker.awaiting_cleanup(Some(task)).expect("cleanup");
         session.cleanup_start = Some(at(base, 2_306));
         session.cleanup_end = Some(at(base, 2_806));
         session.cleanup_ran = true;
-        let session = tracker.awaiting_paste().expect("paste");
-        session.paste_start = Some(at(base, 2_810));
-        let session = tracker.pasting().expect("pasting");
-        session.paste_end = Some(at(base, 2_900));
+        tracker.paste_start(id, at(base, 2_810));
+        tracker.paste_end(id, at(base, 2_900));
 
         let done = at(base, 2_901);
         let session = tracker
@@ -421,7 +469,7 @@ mod tests {
     fn non_typed_outcome_has_no_pasted_metric() {
         let base = Instant::now();
         let mut tracker = Tracker::new();
-        transcribed(&mut tracker, base, 0, 1_000);
+        transcribed(&mut tracker, base, 0, 1_000, None);
         let done = at(base, 1_300);
         let session = tracker
             .complete(done, Duration::from_millis(300))
@@ -437,10 +485,11 @@ mod tests {
     fn release_without_press_creates_orphan_session() {
         let base = Instant::now();
         let mut tracker = Tracker::new();
-        tracker.release(base);
+        let id = tracker.release(base);
         let session = tracker
             .complete(at(base, 50), Duration::from_millis(50))
             .expect("orphan completes");
+        assert_eq!(session.id, id);
         assert_eq!(session.pressed_at, None);
         assert_eq!(span_ms(session.pressed_at, session.mic_ready_at), None);
     }
@@ -449,8 +498,8 @@ mod tests {
     fn completion_matches_the_latest_session_released_before_stop() {
         let base = Instant::now();
         let mut tracker = Tracker::new();
-        let cancelled = transcribed(&mut tracker, base, 0, 1_000);
-        let live = transcribed(&mut tracker, base, 5_000, 6_000);
+        let cancelled = transcribed(&mut tracker, base, 0, 1_000, None);
+        let live = transcribed(&mut tracker, base, 5_000, 6_000, None);
 
         let session = tracker
             .complete(at(base, 6_400), Duration::from_millis(400))
@@ -473,30 +522,105 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_is_not_attributed_to_stale_or_started_sessions() {
+    fn marks_for_an_unknown_session_are_ignored() {
         let base = Instant::now();
         let mut tracker = Tracker::new();
-        transcribed(&mut tracker, base, 0, 1_000);
-        assert!(tracker
-            .awaiting_cleanup(at(base, 1_210) + LIVE_WINDOW)
-            .is_none());
-        let session = tracker
-            .awaiting_cleanup(at(base, 1_300))
-            .expect("fresh session");
-        session.cleanup_start = Some(at(base, 1_300));
-        assert!(tracker.awaiting_cleanup(at(base, 1_301)).is_none());
+        let id = tracker.release(base);
+        assert!(!tracker.asr_start(id + 1, at(base, 10), None));
+        tracker.paste_start(id + 1, at(base, 20));
+        tracker.paste_end(id, at(base, 30));
+        let session = &tracker.inflight[0];
+        assert_eq!(session.asr_start, None);
+        assert_eq!(session.paste_start, None);
+        assert_eq!(session.paste_end, None, "no end without a start");
     }
 
     #[test]
-    fn paste_attaches_to_newest_transcribed_session() {
+    fn cleanup_attaches_once_and_only_to_its_own_task() {
         let base = Instant::now();
+        let tasks = task_ids(2);
         let mut tracker = Tracker::new();
-        transcribed(&mut tracker, base, 0, 1_000);
-        let live = transcribed(&mut tracker, base, 5_000, 6_000);
-        let session = tracker.awaiting_paste().expect("paste");
-        assert_eq!(session.id, live);
-        session.paste_start = Some(at(base, 6_300));
-        assert_eq!(tracker.pasting().map(|s| s.id), Some(live));
+        let id = transcribed(&mut tracker, base, 0, 1_000, Some(tasks[0]));
+        assert!(tracker.awaiting_cleanup(None).is_none());
+        assert!(tracker.awaiting_cleanup(Some(tasks[1])).is_none());
+        let session = tracker.awaiting_cleanup(Some(tasks[0])).expect("own task");
+        assert_eq!(session.id, id);
+        session.cleanup_start = Some(at(base, 1_300));
+        assert!(tracker.awaiting_cleanup(Some(tasks[0])).is_none());
+    }
+
+    #[test]
+    fn overlapping_sessions_keep_their_own_tone_and_marks() {
+        let base = Instant::now();
+        let tasks = task_ids(2);
+        let (task_a, task_b) = (tasks[0], tasks[1]);
+        let mut tracker = Tracker::new();
+
+        // A (Mail) is transcribing when B (Slack) is pressed and released.
+        tracker.press(base);
+        with_app(&mut tracker, "com.apple.mail");
+        let a = tracker.release(at(base, 1_000));
+        assert!(tracker.asr_start(a, at(base, 1_010), Some(task_a)));
+        tracker.press(at(base, 1_100));
+        with_app(&mut tracker, "com.tinyspeck.slackmacgap");
+        let b = tracker.release(at(base, 1_500));
+
+        // Formerly A got Default here because B was the newest session.
+        tracker.asr_end(a, at(base, 1_600));
+        assert_eq!(tracker.choose_tone(Some(task_a), tone_by_app), Tone::Formal);
+
+        // B's ASR and cleanup run while A is still pasting.
+        assert!(tracker.asr_start(b, at(base, 1_700), Some(task_b)));
+        tracker.asr_end(b, at(base, 1_900));
+        tracker.paste_start(a, at(base, 1_950));
+        assert_eq!(tracker.choose_tone(Some(task_b), tone_by_app), Tone::Casual);
+        tracker.paste_start(b, at(base, 2_000));
+        tracker.paste_end(b, at(base, 2_050));
+        tracker.paste_end(a, at(base, 2_100));
+
+        let session = |id| {
+            tracker
+                .inflight
+                .iter()
+                .find(|s| s.id == id)
+                .expect("session")
+        };
+        let (sa, sb) = (session(a), session(b));
+        assert_eq!((sa.tone, sb.tone), (Some(Tone::Formal), Some(Tone::Casual)));
+        assert_eq!(sa.asr_end, Some(at(base, 1_600)));
+        assert_eq!(sb.asr_start, Some(at(base, 1_700)));
+        assert_eq!(span_ms(sa.paste_start, sa.paste_end), Some(150.0));
+        assert_eq!(span_ms(sb.paste_start, sb.paste_end), Some(50.0));
+    }
+
+    #[test]
+    fn retry_outside_a_dictation_task_gets_default_and_leaves_live_session() {
+        let base = Instant::now();
+        let task = task_ids(1)[0];
+        let mut tracker = Tracker::new();
+        tracker.press(base);
+        with_app(&mut tracker, "com.apple.mail");
+        let live = tracker.release(at(base, 1_000));
+        assert!(tracker.asr_start(live, at(base, 1_010), Some(task)));
+        tracker.asr_end(live, at(base, 1_200));
+
+        let retry = tracker.choose_tone(None, |_| panic!("retry must not see a session"));
+        assert_eq!(retry, Tone::Default);
+        assert_eq!(tracker.inflight[0].tone, None);
+        assert_eq!(tracker.choose_tone(Some(task), tone_by_app), Tone::Formal);
+    }
+
+    #[test]
+    fn retry_block_on_has_no_task_id_but_a_spawned_dictation_does() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("runtime");
+        assert_eq!(runtime.block_on(async { tokio::task::try_id() }), None);
+        let spawned = runtime
+            .block_on(runtime.spawn(async { tokio::task::try_id() }))
+            .expect("task");
+        assert!(spawned.is_some());
     }
 
     #[test]
@@ -526,42 +650,13 @@ mod tests {
     }
 
     #[test]
-    fn tone_is_chosen_only_for_a_live_session() {
-        let base = Instant::now();
-        let mut tracker = Tracker::new();
-        let none = tracker.choose_tone(base, |_| panic!("no live session to choose for"));
-        assert_eq!(none, Tone::Default);
-
-        tracker.press(base);
-        if let Some(session) = tracker.recording.as_mut() {
-            session.app = Some(AppContext {
-                app_id: Some("com.apple.mail".into()),
-                app_name: None,
-            });
-        }
-        tracker.release(at(base, 1_000));
-        let session = tracker.awaiting_asr().expect("awaiting asr");
-        session.asr_start = Some(at(base, 1_010));
-        session.asr_end = Some(at(base, 1_200));
-        let tone = tracker.choose_tone(at(base, 1_201), |app| {
-            assert_eq!(
-                app.and_then(|a| a.app_id.as_deref()),
-                Some("com.apple.mail")
-            );
-            Tone::Formal
-        });
-        assert_eq!(tone, Tone::Formal);
-        assert_eq!(tracker.inflight[0].tone, Some(Tone::Formal));
-    }
-
-    #[test]
     fn new_press_supersedes_unreleased_session() {
         let base = Instant::now();
         let mut tracker = Tracker::new();
         let first = tracker.press(base);
         let second = tracker.press(at(base, 100));
         assert_ne!(first, second);
-        tracker.release(at(base, 200));
+        assert_eq!(tracker.release(at(base, 200)), second);
         assert_eq!(tracker.inflight.len(), 1);
         assert_eq!(tracker.inflight[0].id, second);
     }

@@ -36,7 +36,8 @@ fn own_app_ids(app: &AppHandle) -> [&'static str; 2] {
     [identifier.as_str(), exe.as_str()]
 }
 
-/// Hotkey release hook (`TranscribeAction::stop`).
-pub fn on_release() {
-    timing::release();
+/// Hotkey release hook (`TranscribeAction::stop`). Returns the dictation's
+/// session id for the ASR and paste hooks.
+pub fn on_release() -> u64 {
+    timing::release()
 }
