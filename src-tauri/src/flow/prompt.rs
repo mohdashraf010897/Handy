@@ -180,4 +180,66 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn each_tone_sends_a_different_selected_prompt() {
+        let settings = settings_with_prompt("Clean: ${output}");
+        let prompts: Vec<String> = [Tone::Default, Tone::Casual, Tone::Formal, Tone::Code]
+            .into_iter()
+            .map(|tone| {
+                tone_settings(&settings, tone).post_process_prompts[0]
+                    .prompt
+                    .clone()
+            })
+            .collect();
+        assert_eq!(prompts[0], "Clean: ${output}");
+        for (i, a) in prompts.iter().enumerate() {
+            assert!(a.contains("${output}"), "placeholder kept: {a}");
+            for b in &prompts[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+    }
+
+    /// Calls the real cleanup path with Apple Intelligence once per tone.
+    /// Run: `cargo test apple_intelligence_cleanup_per_tone -- --ignored --nocapture`
+    #[test]
+    #[ignore = "calls on-device Apple Intelligence; needs Apple silicon with it enabled"]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn apple_intelligence_cleanup_per_tone() {
+        use crate::settings::APPLE_INTELLIGENCE_PROVIDER_ID;
+
+        assert!(
+            crate::apple_intelligence::check_apple_intelligence_availability(),
+            "Apple Intelligence is not available on this Mac"
+        );
+        let mut settings = get_default_settings();
+        settings.post_process_provider_id = APPLE_INTELLIGENCE_PROVIDER_ID.into();
+        let default_prompt = settings.post_process_prompts[0].id.clone();
+        settings.post_process_selected_prompt_id = Some(default_prompt);
+        let transcript = "um hey so can you uh send me the file later \
+                          i need to check the config dot yaml before the meeting";
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        let mut prompts = Vec::new();
+        for tone in [Tone::Default, Tone::Casual, Tone::Formal, Tone::Code] {
+            let toned = tone_settings(&settings, tone);
+            prompts.push(toned.post_process_prompts[0].prompt.clone());
+            let output = runtime
+                .block_on(crate::actions::post_process_transcription(
+                    &toned, transcript,
+                ))
+                .unwrap_or_default();
+            println!("{tone:?}: {output}");
+            assert!(!output.trim().is_empty(), "{tone:?} returned nothing");
+        }
+        for (i, a) in prompts.iter().enumerate() {
+            for b in &prompts[i + 1..] {
+                assert_ne!(a, b, "tones sent the same prompt");
+            }
+        }
+    }
 }

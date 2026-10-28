@@ -5,8 +5,12 @@
 
 pub mod commands;
 pub mod context;
+#[cfg(debug_assertions)]
+pub mod debug;
 pub mod prompt;
 pub mod settings;
+#[cfg(test)]
+mod test_log;
 pub mod timing;
 
 use std::sync::OnceLock;
@@ -16,8 +20,13 @@ use tauri::AppHandle;
 /// Hotkey press hook (`TranscribeAction::start`): marks t0, then captures
 /// the frontmost app synchronously so it is the app the user dictates into.
 pub fn on_press(app: &AppHandle) {
+    press_with(app, context::capture_timed);
+}
+
+/// Press steps with the frontmost-app capture supplied by the caller.
+fn press_with(app: &AppHandle, capture: impl FnOnce() -> (Option<context::AppContext>, u64)) {
     timing::press(app);
-    let (context, capture_us) = context::capture_timed();
+    let (context, capture_us) = capture();
     context::remember(context.as_ref(), &own_app_ids(app));
     timing::attach_app(context, capture_us);
 }

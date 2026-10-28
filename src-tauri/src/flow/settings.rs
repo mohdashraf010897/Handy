@@ -104,9 +104,14 @@ pub fn load_from(path: &Path) -> Result<FlowSettings, String> {
         Ok(settings) => settings,
         Err(e) => {
             let backup = corrupt_backup_path(path);
+            // Not `{e}`: serde quotes the offending value, which may be an
+            // app id from a rule.
             warn!(
-                "flow: {} is invalid ({e}); moved to {} and using defaults",
+                "flow: {} is invalid ({:?} error at line {} column {}); moved to {} and using defaults",
                 path.display(),
+                e.classify(),
+                e.line(),
+                e.column(),
                 backup.display()
             );
             if let Err(e) = fs::rename(path, &backup) {
@@ -179,6 +184,12 @@ pub fn set(app: &AppHandle, settings: FlowSettings) -> Result<FlowSettings, Stri
     save_to(&settings_path(app)?, &settings)?;
     *CACHE.write().unwrap_or_else(PoisonError::into_inner) = Some(settings.clone());
     Ok(settings)
+}
+
+/// Replaces the cached settings for this process without saving them.
+#[cfg(debug_assertions)]
+pub(crate) fn override_in_memory(settings: FlowSettings) {
+    *CACHE.write().unwrap_or_else(PoisonError::into_inner) = Some(settings);
 }
 
 #[cfg(test)]
@@ -297,6 +308,29 @@ mod tests {
             ]
         );
         assert!(path.exists(), "a recoverable file is not moved aside");
+    }
+
+    #[test]
+    fn invalid_settings_warnings_never_name_an_app() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(FILE_NAME);
+        let lines = crate::flow::test_log::capture(|| {
+            fs::write(&path, r#"{"app_tones":"com.tinyspeck.slackmacgap"}"#).expect("write");
+            load_from(&path).expect("load");
+            fs::write(
+                &path,
+                r#"{"app_tones":[{"app_id":"com.apple.mail","tone":"poetic"},{"tone":"x"}]}"#,
+            )
+            .expect("write");
+            load_from(&path).expect("load");
+        });
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        for (_, line) in &lines {
+            let lower = line.to_lowercase();
+            for identity in ["slack", "tinyspeck", "com.apple", "mail"] {
+                assert!(!lower.contains(identity), "{identity} logged: {line}");
+            }
+        }
     }
 
     #[test]

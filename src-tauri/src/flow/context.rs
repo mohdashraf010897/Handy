@@ -209,6 +209,10 @@ pub fn matching_rule<'a>(
 /// Kept in memory only so the settings UI can offer it as a rule.
 static LAST_APP: Mutex<Option<AppContext>> = Mutex::new(None);
 
+/// Serializes tests that write the process-wide [`LAST_APP`].
+#[cfg(test)]
+pub(crate) static LAST_APP_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// Remembers a captured app unless it is this app's own window.
 pub fn remember(context: Option<&AppContext>, own_ids: &[&str]) {
     let Some(context) = context else { return };
@@ -393,6 +397,9 @@ mod tests {
 
     #[test]
     fn remember_skips_own_app_and_missing_ids() {
+        let _lock = LAST_APP_TEST_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         remember(Some(&ctx("com.tinyspeck.slackmacgap")), &["com.pais.handy"]);
         remember(Some(&ctx("com.pais.handy")), &["com.pais.handy"]);
         remember(Some(&ctx("Handy.exe")), &["", "handy.exe"]);

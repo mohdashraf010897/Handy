@@ -590,6 +590,8 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
         }
         times_ms.push(t.elapsed().as_millis() as u64);
     }
+    #[cfg(debug_assertions)]
+    flow::debug::run_headless(app, &model_id, &samples);
     let best_ms = times_ms.iter().copied().min().unwrap_or(0);
     let rtf = if best_ms > 0 {
         audio_secs / (best_ms as f64 / 1000.0)

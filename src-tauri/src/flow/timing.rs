@@ -3,7 +3,9 @@
 //! Upstream code marks pipeline points through one-line hooks; this module
 //! groups the marks into sessions and logs exactly one `flow_timing {json}`
 //! info line when a dictation finishes (typed, empty, silent or failed).
-//! Cancelled dictations log nothing. The headline metric is
+//! Cancelled dictations log nothing: cancel does not reach this module, so a
+//! cancelled session stays queued, never matched by a later completion or
+//! cleanup, until it is pruned (`MAX_INFLIGHT`, `STALE_AFTER`). The headline metric is
 //! `release_to_pasted_ms`: hotkey release until the paste call returned.
 //!
 //! The line holds durations and flags only — never transcript text or the
@@ -87,6 +89,19 @@ impl Tracker {
         id
     }
 
+    fn attach_app(&mut self, app: Option<AppContext>, capture_us: u64) {
+        if let Some(session) = self.recording.as_mut() {
+            // Never log the app's identity: the default file log level is Debug.
+            debug!(
+                "flow: session {} app_captured={} in {capture_us} us",
+                session.id,
+                app.is_some(),
+            );
+            session.app = app;
+            session.app_capture_us = Some(capture_us);
+        }
+    }
+
     fn mic_ready(&mut self, now: Instant) {
         if let Some(session) = self.recording.as_mut() {
             session.mic_ready_at.get_or_insert(now);
@@ -121,6 +136,17 @@ impl Tracker {
     }
 
     fn asr_start(&mut self, id: u64, now: Instant, task: Option<TaskId>) -> bool {
+        if !self.inflight.iter().any(|s| s.id == id) {
+            return false;
+        }
+        // Tokio only guarantees task ids unique among running tasks, so the
+        // task of a cancelled, never-completed session may be recycled; it
+        // must not let that stale session claim this one's cleanup and tone.
+        if task.is_some() {
+            for stale in self.inflight.iter_mut().filter(|s| s.task == task) {
+                stale.task = None;
+            }
+        }
         let Some(session) = self.by_id(id) else {
             return false;
         };
@@ -258,16 +284,7 @@ pub fn press(app: &AppHandle) {
 
 /// Attaches the frontmost app captured at press to the recording session.
 pub fn attach_app(app: Option<AppContext>, capture_us: u64) {
-    if let Some(session) = tracker().recording.as_mut() {
-        // Never log the app's identity: the default file log level is Debug.
-        debug!(
-            "flow: session {} app_captured={} in {capture_us} us",
-            session.id,
-            app.is_some(),
-        );
-        session.app = app;
-        session.app_capture_us = Some(capture_us);
-    }
+    tracker().attach_app(app, capture_us);
 }
 
 /// Marks the first real microphone samples of the recording session.
@@ -325,6 +342,24 @@ pub fn paste_start(session: u64) {
 /// Marks the paste end of `session`.
 pub fn paste_end(session: u64) {
     tracker().paste_end(session, Instant::now());
+}
+
+/// What the flow recorded for a session still awaiting completion.
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SessionSummary {
+    pub tone: Option<Tone>,
+    pub cleanup_ran: bool,
+    pub app_captured: bool,
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn summary(session: u64) -> Option<SessionSummary> {
+    tracker().by_id(session).map(|s| SessionSummary {
+        tone: s.tone,
+        cleanup_ran: s.cleanup_ran,
+        app_captured: s.app.is_some(),
+    })
 }
 
 fn register_listener(app: &AppHandle) {
@@ -647,6 +682,151 @@ mod tests {
         let json = serde_json::to_string(&report).expect("serializes");
         assert!(!json.contains("slack"), "identity leaked: {json}");
         assert!(!json.contains("Slack"), "identity leaked: {json}");
+        // A new field must be reviewed for identity before it is logged.
+        let value: serde_json::Value = serde_json::from_str(&json).expect("json");
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "app_capture_us",
+                "app_captured",
+                "asr_ms",
+                "audio_s",
+                "cleanup_ms",
+                "cleanup_ran",
+                "model",
+                "outcome",
+                "paste_ms",
+                "press_to_mic_ready_ms",
+                "release_to_asr_start_ms",
+                "release_to_done_ms",
+                "release_to_pasted_ms",
+                "session",
+                "tone",
+            ]
+        );
+    }
+
+    #[test]
+    fn tracker_log_lines_never_name_the_app() {
+        let base = Instant::now();
+        let lines = crate::flow::test_log::capture(|| {
+            let mut tracker = Tracker::new();
+            tracker.press(base);
+            tracker.attach_app(
+                Some(AppContext {
+                    app_id: Some("com.tinyspeck.slackmacgap".into()),
+                    app_name: Some("Slack".into()),
+                }),
+                250,
+            );
+            // Superseded before release, then more releases than are kept.
+            tracker.press(at(base, 10));
+            tracker.attach_app(None, 5);
+            for i in 0..=(MAX_INFLIGHT as u64) {
+                tracker.press(at(base, 100 + i));
+                tracker.attach_app(
+                    Some(AppContext {
+                        app_id: Some("com.apple.mail".into()),
+                        app_name: Some("Mail".into()),
+                    }),
+                    1,
+                );
+                tracker.release(at(base, 200 + i));
+            }
+        });
+        let joined = lines
+            .iter()
+            .map(|(level, line)| format!("{level} {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("app_captured=true"), "{joined}");
+        assert!(joined.contains("superseded"), "{joined}");
+        assert!(joined.contains("dropping unfinished"), "{joined}");
+        let lower = joined.to_lowercase();
+        for identity in ["slack", "tinyspeck", "com.apple", "mail"] {
+            assert!(!lower.contains(identity), "{identity} logged: {joined}");
+        }
+    }
+
+    #[test]
+    fn cancelled_mid_transcription_does_not_leak_into_the_next_dictation() {
+        let base = Instant::now();
+        let tasks = task_ids(2);
+        let (task_a, task_b) = (tasks[0], tasks[1]);
+        let mut tracker = Tracker::new();
+
+        // A (Mail): pressed, released, cancelled while transcribing. `asr`
+        // still marks the end when the cancelled transcription returns, but
+        // the pipeline then returns early: no cleanup, paste or completion.
+        tracker.press(base);
+        with_app(&mut tracker, "com.apple.mail");
+        let a = tracker.release(at(base, 1_000));
+        assert!(tracker.asr_start(a, at(base, 1_010), Some(task_a)));
+        tracker.asr_end(a, at(base, 1_300));
+
+        // B (Slack): a normal dictation in its own task.
+        tracker.press(at(base, 3_000));
+        with_app(&mut tracker, "com.tinyspeck.slackmacgap");
+        let b = tracker.release(at(base, 4_000));
+        assert_ne!(a, b);
+        assert!(tracker.asr_start(b, at(base, 4_010), Some(task_b)));
+        tracker.asr_end(b, at(base, 4_200));
+        assert_eq!(tracker.choose_tone(Some(task_b), tone_by_app), Tone::Casual);
+        tracker
+            .awaiting_cleanup(Some(task_b))
+            .expect("b awaits cleanup")
+            .cleanup_start = Some(at(base, 4_210));
+        tracker.paste_start(b, at(base, 4_400));
+        tracker.paste_end(b, at(base, 4_450));
+
+        let done = at(base, 4_460);
+        let session = tracker
+            .complete(done, Duration::from_millis(460))
+            .expect("b completes");
+        assert_eq!(session.id, b);
+        let report =
+            TimingReport::new(&session, TranscriptionOutcome::Typed, 1.0, "m".into(), done);
+        assert_eq!(report.tone, Some(Tone::Casual));
+        assert_eq!(report.release_to_asr_start_ms, Some(10.0));
+        assert_eq!(report.release_to_pasted_ms, Some(450.0));
+
+        // A's record is never logged; it waits, untouched, until pruned.
+        assert_eq!(tracker.inflight.len(), 1);
+        let stale = &tracker.inflight[0];
+        assert_eq!((stale.id, stale.tone, stale.cleanup_start), (a, None, None));
+        tracker.release(at(base, 1_000) + STALE_AFTER);
+        assert!(tracker.inflight.iter().all(|s| s.id != a), "A pruned");
+    }
+
+    #[test]
+    fn recycled_task_id_of_a_cancelled_session_does_not_steal_the_tone() {
+        let base = Instant::now();
+        let task = task_ids(1)[0];
+        let mut tracker = Tracker::new();
+        tracker.press(base);
+        with_app(&mut tracker, "com.apple.mail");
+        let a = tracker.release(at(base, 1_000));
+        assert!(tracker.asr_start(a, at(base, 1_010), Some(task)));
+        tracker.asr_end(a, at(base, 1_300));
+
+        // A was cancelled; its finished task's id is handed to B's task.
+        tracker.press(at(base, 3_000));
+        with_app(&mut tracker, "com.tinyspeck.slackmacgap");
+        let b = tracker.release(at(base, 4_000));
+        assert!(tracker.asr_start(b, at(base, 4_010), Some(task)));
+        tracker.asr_end(b, at(base, 4_200));
+
+        assert_eq!(tracker.choose_tone(Some(task), tone_by_app), Tone::Casual);
+        let tone_of = |tracker: &mut Tracker, id| tracker.by_id(id).expect("session").tone;
+        assert_eq!(tone_of(&mut tracker, b), Some(Tone::Casual));
+        assert_eq!(tone_of(&mut tracker, a), None);
     }
 
     #[test]
