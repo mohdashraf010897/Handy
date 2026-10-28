@@ -114,6 +114,7 @@ docs/fork/
 | `src-tauri/src/actions.rs:178-227`     | `flow::prompt::resolve` hook                             |
 | `src/components/Sidebar.tsx:34`        | add one `flow` section entry                             |
 | `src/i18n/locales/en/translation.json` | one appended `"flow"` block                              |
+| `scripts/check-translations.ts:125`    | skip `flow.*` keys (en-only; other locales fall back)    |
 
 `src/bindings.ts` is generated on debug runs (`lib.rs:799-804`) and will conflict on every sync: always resolve by regenerating (`bun run tauri dev` once), never by hand.
 

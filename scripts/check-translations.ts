@@ -121,9 +121,10 @@ function validateTranslations(): void {
       continue;
     }
 
-    // Find missing keys
+    // Find missing keys (fork: `flow.*` is en-only by design and falls back
+    // to en at runtime; see docs/fork/ARCHITECTURE.md)
     const missing = referenceKeyPaths.filter(
-      (keyPath) => !hasKeyPath(langData, keyPath),
+      (keyPath) => keyPath[0] !== "flow" && !hasKeyPath(langData, keyPath),
     );
 
     // Find extra keys (keys in language but not in reference)
