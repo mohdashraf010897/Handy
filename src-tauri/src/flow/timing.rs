@@ -7,7 +7,7 @@
 //! `release_to_pasted_ms`: hotkey release until the paste call returned.
 //!
 //! The line holds durations and flags only — never transcript text or the
-//! identity of the frontmost app (that is logged at debug level only).
+//! identity of the frontmost app, which is not logged at any level.
 
 use std::future::Future;
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};
@@ -245,11 +245,11 @@ pub fn press(app: &AppHandle) {
 /// Attaches the frontmost app captured at press to the recording session.
 pub fn attach_app(app: Option<AppContext>, capture_us: u64) {
     if let Some(session) = tracker().recording.as_mut() {
+        // Never log the app's identity: the default file log level is Debug.
         debug!(
-            "flow: session {} frontmost app {:?} ({:?}) captured in {capture_us} us",
+            "flow: session {} app_captured={} in {capture_us} us",
             session.id,
-            app.as_ref().and_then(|a| a.app_id.as_deref()),
-            app.as_ref().and_then(|a| a.app_name.as_deref()),
+            app.is_some(),
         );
         session.app = app;
         session.app_capture_us = Some(capture_us);
