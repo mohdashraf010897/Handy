@@ -970,5 +970,90 @@
     "learnMore": "How to fix",
     "recorderBlocked": "Can't record shortcuts right now — macOS Secure Input is blocking key events. Resolve the Secure Input warning first.",
     "dismiss": "Dismiss"
+  },
+  "flow": {
+    "sidebar": "Per-app Tone",
+    "title": "Per-app tone",
+    "loading": "Loading…",
+    "loadError": "Couldn't load per-app tone settings.",
+    "retry": "Try again",
+    "enable": {
+      "label": "Match tone to the app",
+      "description": "Adjust the style of cleaned-up text to the app you dictate into, such as casual in chat and formal in email."
+    },
+    "notice": {
+      "postProcessOff": "Per-app tone only takes effect when AI post-processing is on. Turn it on below, then choose a provider in the Post Process section.",
+      "postProcessOn": "Applied during AI post-processing (configured in the Post Process section).",
+      "postProcessHint": "Tone is applied as part of AI post-processing.",
+      "privacy": "Only a short style instruction is added to the prompt. The app's name or ID is never sent to the AI provider."
+    },
+    "lastApp": {
+      "title": "Last dictated app",
+      "description": "The app in front the last time you dictated. Kept on this device only and forgotten when Handy quits.",
+      "empty": "Dictate into any app, then come back here to set its tone in one click.",
+      "refresh": "Refresh",
+      "noRule": "No rule matches, so it uses {{tone}}.",
+      "userRule": "Uses {{tone}} from your rule “{{rule}}”.",
+      "builtinRule": "Uses {{tone}} from the built-in rule “{{rule}}”.",
+      "add": "Set a tone for this app:",
+      "change": "Change its tone:",
+      "pickerLabel": "Tone for {{app}}"
+    },
+    "rules": {
+      "title": "Your rules",
+      "description": "Checked top to bottom before the built-in presets. The first match wins.",
+      "appIdFor": "App ID for rule {{index}}",
+      "toneFor": "Tone for {{app}}",
+      "remove": "Remove rule for {{app}}",
+      "empty": "No custom rules yet. Built-in presets still apply.",
+      "add": {
+        "label": "Add an app",
+        "placeholder": "com.tinyspeck.slackmacgap or slack.exe",
+        "toneLabel": "Tone for the new rule",
+        "button": "Add rule",
+        "hint": "Use a macOS bundle ID or a Windows executable name. End with * to match a prefix, such as com.jetbrains.*"
+      },
+      "errors": {
+        "empty": "Enter an app ID.",
+        "wildcardOnly": "A rule can't match every app. Add a prefix before *.",
+        "duplicate": "There's already a rule for this app."
+      }
+    },
+    "reset": {
+      "hint": "Defaults: per-app tone on, no custom rules.",
+      "button": "Reset to defaults",
+      "confirmTitle": "Reset per-app tone?",
+      "confirmBody": "This removes all your rules and turns per-app tone back on.",
+      "confirmDetail": "Built-in presets are kept. This can't be undone.",
+      "cancel": "Cancel",
+      "confirm": "Reset"
+    },
+    "builtins": {
+      "title": "Built-in presets",
+      "description": "Shipped with Handy. Add your own rule to override one.",
+      "summary": "Show {{count}} built-in rules",
+      "overridden": "Overridden: {{tone}}",
+      "override": "Override",
+      "overrideFor": "Override built-in rule for {{app}}"
+    },
+    "tones": {
+      "title": "Tones",
+      "default": {
+        "label": "Default",
+        "description": "No extra style instruction. The post-processing prompt is used as is."
+      },
+      "casual": {
+        "label": "Casual",
+        "description": "Conversational and concise, for chat apps."
+      },
+      "formal": {
+        "label": "Formal",
+        "description": "Complete sentences and a professional register, for email and documents."
+      },
+      "code": {
+        "label": "Code",
+        "description": "Keeps identifiers, commands and paths exactly as spoken, for editors and terminals."
+      }
+    }
   }
 }
