@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- lowyap tray glyph (idle), 64-unit grid. Bubble with the cursor cut out; template-safe (alpha only). -->
+  <path fill="#121117" fill-rule="evenodd" d="M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6ZM23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z"/>
+</svg>
