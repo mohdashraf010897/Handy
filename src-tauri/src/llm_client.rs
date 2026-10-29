@@ -184,15 +184,12 @@ fn build_headers(provider: &PostProcessProvider, api_key: &str) -> Result<Header
 
     // Common headers
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert(
-        REFERER,
-        HeaderValue::from_static("https://github.com/cjpais/Handy"),
-    );
+    headers.insert(REFERER, HeaderValue::from_static(crate::brand::HOMEPAGE));
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_static("Handy/1.0 (+https://github.com/cjpais/Handy)"),
+        HeaderValue::from_static(crate::brand::USER_AGENT),
     );
-    headers.insert("X-Title", HeaderValue::from_static("Handy"));
+    headers.insert("X-Title", HeaderValue::from_static(crate::brand::NAME));
 
     // Provider-specific auth headers
     if !api_key.is_empty() {
@@ -879,6 +876,16 @@ mod tests {
             build_headers(&provider("custom", "http://localhost:11434/v1"), "key").unwrap();
         assert_eq!(headers[AUTHORIZATION], "Bearer key");
         assert!(headers.get("x-api-key").is_none());
+    }
+
+    #[test]
+    fn headers_identify_this_app_not_upstream() {
+        let headers = build_headers(&provider("custom", "http://localhost:11434/v1"), "").unwrap();
+        for name in [REFERER, USER_AGENT] {
+            let value = headers[&name].to_str().unwrap().to_lowercase();
+            assert!(!value.contains("handy"), "{name}: {value}");
+        }
+        assert_eq!(headers["X-Title"], crate::brand::NAME);
     }
 
     #[test]
