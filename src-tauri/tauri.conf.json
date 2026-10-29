@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Handy",
+  "productName": "lowyap",
+  "mainBinaryName": "lowyap",
   "version": "0.9.8",
-  "identifier": "com.pais.handy",
+  "identifier": "com.lowyap.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -29,6 +30,8 @@
     "targets": "all",
     "resources": ["resources/**/*", "../LICENSE", "../THIRD-PARTY-NOTICES.md"],
     "license": "MIT",
+    "publisher": "lowyap",
+    "copyright": "lowyap contributors. Based on Handy by CJ Pais (MIT).",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -51,7 +54,7 @@
           "libssl3t64 | libssl3"
         ],
         "files": {
-          "/usr/lib/Handy": "transcribe-libs"
+          "/usr/lib/lowyap": "transcribe-libs"
         }
       },
       "rpm": {
@@ -63,7 +66,7 @@
           "type": "none"
         },
         "files": {
-          "/usr/lib/Handy": "transcribe-libs"
+          "/usr/lib/lowyap": "transcribe-libs"
         }
       },
       "appimage": {

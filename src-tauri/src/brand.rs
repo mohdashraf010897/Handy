@@ -33,4 +33,38 @@ mod tests {
         );
         assert!(conf.contains(&format!("{HOMEPAGE}/releases/latest/download/latest.json")));
     }
+
+    #[test]
+    fn bundle_name_and_binary_match_brand() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["productName"], NAME);
+        assert_eq!(conf["mainBinaryName"], NAME);
+        assert!(!conf["identifier"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .contains("handy"));
+    }
+
+    #[test]
+    fn frontend_brand_mirrors_runtime_brand() {
+        let ts = include_str!("../../src/lib/brand.ts");
+        assert!(ts.contains(&format!("BRAND_NAME = \"{NAME}\"")));
+        assert!(ts.contains(&format!("BRAND_HOMEPAGE = \"{HOMEPAGE}\"")));
+    }
+
+    /// Handy is credited by name only in the acknowledgments block.
+    #[test]
+    fn english_strings_mention_handy_only_as_credit() {
+        let mut en: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/i18n/locales/en/translation.json"))
+                .unwrap();
+        let credit = en["settings"]["about"]["acknowledgments"]
+            .as_object_mut()
+            .unwrap()
+            .remove("handy");
+        assert!(credit.is_some(), "Handy credit missing");
+        assert!(!en.to_string().contains("Handy"));
+    }
 }
