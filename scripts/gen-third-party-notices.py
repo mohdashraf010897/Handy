@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Regenerate THIRD-PARTY-NOTICES.md from the model catalog, Cargo and npm.
+
+Run from the repo root after changing dependencies or syncing the catalog:
+    python3 scripts/gen-third-party-notices.py
+`catalog::tests::notices_name_every_offered_model` fails when it is stale.
+"""
+
+import json
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CATALOG = ROOT / "src-tauri/src/catalog/catalog.json"
+OUT = ROOT / "THIRD-PARTY-NOTICES.md"
+
+# Git dependencies whose Cargo.toml omits `license`; checked by hand.
+CARGO_LICENSE_OVERRIDES = {"tauri-nspanel": "MIT OR Apache-2.0"}
+
+# Must match RESTRICTED_* in src-tauri/src/catalog/mod.rs.
+RESTRICTED_LICENSE_PREFIXES = ("cc-by-nc",)
+RESTRICTED_MODELS = {"medasr"}
+
+LICENSE_LINKS = {
+    "apache-2.0": ("Apache License 2.0", "https://www.apache.org/licenses/LICENSE-2.0"),
+    "mit": ("MIT License", "https://opensource.org/license/mit"),
+    "cc-by-4.0": ("Creative Commons Attribution 4.0", "https://creativecommons.org/licenses/by/4.0/"),
+    "cc-by-sa-4.0": (
+        "Creative Commons Attribution-ShareAlike 4.0",
+        "https://creativecommons.org/licenses/by-sa/4.0/",
+    ),
+}
+
+# Catalog `other` licences, from each GGUF repo's model card.
+OTHER_LICENSES = {
+    "nemotron-3.5-asr-streaming-0.6b": ("OpenMDW License 1.1", "https://openmdw.ai/license/1-1/"),
+    "Fun-ASR-MLT-Nano-2512": (
+        "FunASR Model License 1.1",
+        "https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE",
+    ),
+    "Fun-ASR-Nano-2512": (
+        "FunASR Model License 1.1",
+        "https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE",
+    ),
+    "SenseVoiceSmall": (
+        "FunASR Model License 1.1",
+        "https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE",
+    ),
+    "multitalker-parakeet-streaming-0.6b-v1": (
+        "NVIDIA Open Model License",
+        "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+    ),
+    "nemotron-speech-streaming-en-0.6b": (
+        "NVIDIA Open Model License",
+        "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+    ),
+}
+
+
+def offered(m):
+    default = m["files"].get(m["quant"], {})
+    return (
+        m["role"] == "asr"
+        and m["id"] not in RESTRICTED_MODELS
+        and not m["license"].startswith(RESTRICTED_LICENSE_PREFIXES)
+        and "/" not in default.get("filename", "/")
+    )
+
+
+def model_rows():
+    models = json.loads(CATALOG.read_text())["models"]
+    rows = []
+    for m in sorted(filter(offered, models), key=lambda m: m["id"].lower()):
+        name, link = OTHER_LICENSES.get(m["id"]) or LICENSE_LINKS.get(m["license"], (None, None))
+        if name is None:
+            raise SystemExit(f"no licence link for {m['id']} ({m['license']}); add it")
+        repo = m["repository"]
+        rows.append(
+            f"| {m['name']} | [{repo}](https://huggingface.co/{repo}) | [{name}]({link}) |"
+        )
+    return rows
+
+
+def cargo_rows():
+    meta = json.loads(
+        subprocess.check_output(
+            ["cargo", "metadata", "--format-version", "1", "--locked"],
+            cwd=ROOT / "src-tauri",
+            stderr=subprocess.DEVNULL,
+        )
+    )
+    local = {p["id"] for p in meta["packages"] if p.get("source") is None}
+    rows = []
+    for p in sorted(meta["packages"], key=lambda p: (p["name"], p["version"])):
+        if p["id"] in local:
+            continue
+        lic = (
+            p.get("license")
+            or CARGO_LICENSE_OVERRIDES.get(p["name"])
+            or (f"see {p['license_file']}" if p.get("license_file") else "unspecified")
+        )
+        src = p.get("repository") or (
+            p["source"].split("+", 1)[1].split("?")[0]
+            if p["source"].startswith("git+")
+            else f"https://crates.io/crates/{p['name']}"
+        )
+        rows.append(f"| {p['name']} | {p['version']} | {lic} | {src} |")
+    return rows
+
+
+def npm_rows():
+    pkg = json.loads((ROOT / "package.json").read_text())
+    seen, stack, rows = set(), list(pkg.get("dependencies", {})), []
+    while stack:
+        name = stack.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        path = ROOT / "node_modules" / name / "package.json"
+        if not path.exists():
+            continue
+        dep = json.loads(path.read_text())
+        stack.extend(dep.get("dependencies", {}))
+        lic = dep.get("license")
+        if isinstance(lic, dict):
+            lic = lic.get("type")
+        repo = dep.get("repository")
+        if isinstance(repo, dict):
+            repo = repo.get("url")
+        rows.append((name, dep.get("version", "?"), lic or "unspecified", repo or ""))
+    return [f"| {n} | {v} | {l} | {r} |" for n, v, l, r in sorted(rows)]
+
+
+def main():
+    handy_license = (ROOT / "LICENSE").read_text().strip()
+    parts = [
+        "# Third-party notices",
+        "",
+        "<!-- Generated by scripts/gen-third-party-notices.py; do not edit by hand. -->",
+        "",
+        "This app is a fork of Handy and is not affiliated with or endorsed by the",
+        "Handy project, CJ Pais, or any model publisher listed below.",
+        "",
+        "## Handy",
+        "",
+        "Source: https://github.com/cjpais/Handy",
+        "",
+        "```text",
+        handy_license,
+        "```",
+        "",
+        "## Speech models",
+        "",
+        "Models are not bundled. Each is downloaded on request from Hugging Face",
+        "and used under its own licence. The files are GGUF conversions and",
+        "quantisations of the original models, published by the Handy project",
+        "(`handy-computer`); this app does not modify them. Models licensed under",
+        "the NVIDIA Open Model License are Licensed by NVIDIA Corporation under",
+        "the NVIDIA Open Model License.",
+        "",
+        "| Model | Source | Licence |",
+        "|---|---|---|",
+        *model_rows(),
+        "",
+        "Legacy Whisper `.bin` files download from",
+        "[ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)",
+        "under the MIT License; the Whisper weights are © OpenAI, MIT License.",
+        "",
+        "## Rust crates",
+        "",
+        "Every crate resolvable for any target in `src-tauri/Cargo.lock`.",
+        "Licence texts are available at each source link.",
+        "",
+        "| Crate | Version | Licence | Source |",
+        "|---|---|---|---|",
+        *cargo_rows(),
+        "",
+        "## JavaScript packages",
+        "",
+        "Runtime dependencies bundled into the app's interface.",
+        "",
+        "| Package | Version | Licence | Source |",
+        "|---|---|---|---|",
+        *npm_rows(),
+        "",
+    ]
+    OUT.write_text("\n".join(parts))
+    print(f"wrote {OUT.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

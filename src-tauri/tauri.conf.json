@@ -27,7 +27,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
-    "resources": ["resources/**/*"],
+    "resources": ["resources/**/*", "../LICENSE", "../THIRD-PARTY-NOTICES.md"],
     "license": "MIT",
     "icon": [
       "icons/32x32.png",

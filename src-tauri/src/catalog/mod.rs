@@ -585,6 +585,21 @@ mod tests {
     }
 
     #[test]
+    fn notices_name_every_offered_model() {
+        let notices = include_str!("../../../THIRD-PARTY-NOTICES.md");
+        for m in transcription_models().filter(|m| m.is_offered()) {
+            assert!(
+                notices.contains(&format!("[{}](", m.repository)),
+                "{} missing from THIRD-PARTY-NOTICES.md; run scripts/gen-third-party-notices.py",
+                m.id
+            );
+        }
+        for m in transcription_models().filter(|m| !m.license_permits_offer()) {
+            assert!(!notices.contains(&m.repository), "{} is not offered", m.id);
+        }
+    }
+
+    #[test]
     fn scores_are_normalised_0_to_1() {
         for d in CATALOG.iter() {
             assert!((0.0..=1.0).contains(&d.speed_score), "{} speed", d.id);
