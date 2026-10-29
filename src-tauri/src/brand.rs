@@ -19,4 +19,18 @@ mod tests {
         assert!(USER_AGENT.contains(HOMEPAGE));
         assert!(!USER_AGENT.to_lowercase().contains("handy"));
     }
+
+    #[test]
+    fn bundle_config_does_not_use_upstream_updater_or_signing() {
+        let conf = include_str!("../tauri.conf.json");
+        assert!(
+            !conf.contains("cjpais"),
+            "tauri.conf.json references upstream"
+        );
+        assert!(
+            !conf.contains("signCommand"),
+            "signing is per-build, not default"
+        );
+        assert!(conf.contains(&format!("{HOMEPAGE}/releases/latest/download/latest.json")));
+    }
 }
