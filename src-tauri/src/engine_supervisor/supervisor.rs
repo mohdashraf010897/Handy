@@ -1387,9 +1387,10 @@ fn worker_exe() -> io::Result<PathBuf> {
     #[cfg(unix)]
     if let Some((path, launched)) = LAUNCHED_EXE.get().and_then(Option::as_ref) {
         if file_id(path).ok().as_ref() != Some(launched) {
-            return Err(io::Error::other(
-                "Handy was updated or moved while it was running; restart Handy",
-            ));
+            return Err(io::Error::other(format!(
+                "{0} was updated or moved while it was running; restart {0}",
+                crate::brand::NAME
+            )));
         }
     }
     #[cfg(target_os = "linux")]

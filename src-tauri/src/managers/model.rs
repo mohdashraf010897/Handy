@@ -26,7 +26,7 @@ use download::{
 /// for downloading and on-disk resolution.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub enum ModelSource {
-    /// Direct HTTP download from a URL (current blob.handy.computer hosting).
+    /// Direct HTTP download from a URL.
     Url {
         url: String,
         /// Expected SHA-256 for integrity verification; `None` skips it.
@@ -760,6 +760,11 @@ impl<'a> Drop for DownloadCleanup<'a> {
     }
 }
 
+/// Pinned ggerganov/whisper.cpp commit serving the legacy Whisper `.bin`
+/// files byte-identical to their hashes below.
+const LEGACY_WHISPER_BASE: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1";
+
 /// A retired ONNX model: nothing can load it anymore, but it may still be on
 /// disk. The update screen offers its GGUF replacement and then deletes it.
 /// This table is the single source of truth for retired models; the frontend
@@ -913,7 +918,7 @@ impl ModelManager {
                 description: "Fast and fairly accurate.".to_string(),
                 filename: "ggml-small.bin".to_string(),
                 source: ModelSource::Url {
-                    url: "https://blob.handy.computer/ggml-small.bin".to_string(),
+                    url: format!("{LEGACY_WHISPER_BASE}/ggml-small.bin"),
                     sha256: Some(
                         "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
                             .to_string(),
@@ -974,7 +979,7 @@ impl ModelManager {
                 description: "Balanced accuracy and speed.".to_string(),
                 filename: "ggml-large-v3-turbo.bin".to_string(),
                 source: ModelSource::Url {
-                    url: "https://blob.handy.computer/ggml-large-v3-turbo.bin".to_string(),
+                    url: format!("{LEGACY_WHISPER_BASE}/ggml-large-v3-turbo.bin"),
                     sha256: Some(
                         "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
                             .to_string(),
@@ -1004,7 +1009,7 @@ impl ModelManager {
                 description: "Good accuracy, but slow.".to_string(),
                 filename: "ggml-large-v3-q5_0.bin".to_string(),
                 source: ModelSource::Url {
-                    url: "https://blob.handy.computer/ggml-large-v3-q5_0.bin".to_string(),
+                    url: format!("{LEGACY_WHISPER_BASE}/ggml-large-v3-q5_0.bin"),
                     sha256: Some(
                         "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1"
                             .to_string(),
@@ -1056,6 +1061,18 @@ impl ModelManager {
                 supports_language_detection: true,
             },
         );
+
+        // Handy-only quantisations with no public upstream copy: kept for installs
+        // that already have the file, never offered for download. The catalog
+        // offers whisper-medium and Breeze-ASR-25 from Hugging Face instead.
+        for (id, filename) in [
+            ("medium", "whisper-medium-q4_1.bin"),
+            ("breeze-asr", "breeze-asr-q5_k.bin"),
+        ] {
+            if !models_dir.join(filename).exists() {
+                available_models.remove(id);
+            }
+        }
 
         // Seed the bundled offline catalog before the on-disk scans, so a model
         // already in the HF cache dedups onto its richer catalog entry (the scans
@@ -2759,7 +2776,8 @@ mod tests {
                     )
                 });
             assert!(
-                !crate::catalog::mirror_fallbacks(&replacement.id).is_empty(),
+                option_env!("MODEL_MIRROR").is_none()
+                    || !crate::catalog::mirror_fallbacks(&replacement.id).is_empty(),
                 "{}: replacement {} has no mirror fallback",
                 retired.id,
                 replacement.id

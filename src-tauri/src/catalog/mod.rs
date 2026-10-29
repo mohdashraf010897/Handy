@@ -29,11 +29,15 @@ use crate::managers::model_capabilities::{CapabilityProbe, Compatibility};
 /// breaking change; additive fields are ignored.
 const SCHEMA: u32 = 2;
 
-/// Base URLs tried in order when the Hugging Face download fails. The full
-/// file URL is `{mirror}/{repo_id}/{revision}/{filename}` — the same three
-/// values that form the HF resolve URL, so a mirror is a plain static host.
-/// `scripts/mirror_models.py` populates it from this catalog.
-const MIRRORS: &[&str] = &["https://blob.handy.computer"];
+/// Base URL tried when the Hugging Face download fails, set at build time via
+/// `MODEL_MIRROR`; none by default (upstream's mirror is the Handy project's
+/// own hosting). The full file URL is `{mirror}/{repo_id}/{revision}/{filename}`
+/// — the same three values that form the HF resolve URL, so a mirror is a
+/// plain static host. `scripts/mirror_models.py` populates it from this catalog.
+const MIRRORS: &[&str] = match option_env!("MODEL_MIRROR") {
+    Some(url) => &[url],
+    None => &[],
+};
 
 /// Handy's list order and onboarding set, keyed by catalog id. Kept from the
 /// previous generator until onboarding moves to the package's recommendations.
@@ -69,8 +73,16 @@ struct CatalogRoot {
     results: HashMap<String, ModelResults>,
 }
 
+/// Licences whose terms forbid commercial use or redistribution in an app.
+/// Such models stay in the package catalog but are not offered for download.
+const RESTRICTED_LICENSE_PREFIXES: &[&str] = &["cc-by-nc"];
+
+/// Catalog ids withheld despite a permissive-looking or `other` licence tag,
+/// because their terms restrict use (e.g. Health AI Developer Foundations).
+const RESTRICTED_MODELS: &[&str] = &["medasr"];
+
 /// One model as written in `catalog.json`. Only the fields Handy needs are
-/// declared; serde ignores the rest (license, parameters, …).
+/// declared; serde ignores the rest (parameters, …).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CatalogModel {
@@ -84,6 +96,9 @@ struct CatalogModel {
     /// Commit the files and hashes are pinned to. Both HF acquisition and
     /// mirror keys use it, so downloaded bytes provably match the hashes.
     revision: String,
+    /// SPDX-style licence tag, e.g. `apache-2.0`, `cc-by-nc-4.0`, `other`.
+    #[serde(default)]
+    license: String,
     /// The loader architecture (`general.architecture`).
     family: String,
     languages: Vec<String>,
@@ -147,9 +162,17 @@ impl CatalogModel {
     /// Must match `offered_models` in `scripts/mirror_models.py`.
     fn is_offered(&self) -> bool {
         self.role == "asr"
+            && self.license_permits_offer()
             && self
                 .default_file()
                 .is_some_and(|file| !file.filename.contains('/'))
+    }
+
+    fn license_permits_offer(&self) -> bool {
+        !RESTRICTED_MODELS.contains(&self.id.as_str())
+            && !RESTRICTED_LICENSE_PREFIXES
+                .iter()
+                .any(|prefix| self.license.starts_with(prefix))
     }
 
     /// Files ordered largest first, so the list reads F32 → Q4 like the HF repo.
@@ -528,6 +551,7 @@ mod tests {
     #[test]
     fn all_flat_asr_models_are_offered_at_the_package_default() {
         for m in transcription_models()
+            .filter(|m| m.license_permits_offer())
             .filter(|m| m.default_file().is_some_and(|f| !f.filename.contains('/')))
         {
             let id = format!("{}/{}", m.repository, m.default_file().unwrap().filename);
@@ -537,6 +561,41 @@ mod tests {
                 .expect("ASR model is offered");
             assert_eq!(desc.default_quant.as_deref(), Some(m.quant.as_str()));
             assert_eq!(m.quant, "Q8_0");
+        }
+    }
+
+    #[test]
+    fn restricted_licence_models_are_not_offered() {
+        for id in ["canary-1b", "granite-speech-5.0-470m-turboctc-nc", "medasr"] {
+            let m = ROOT
+                .models
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("{id} missing from catalog"));
+            assert!(!m.is_offered(), "{id} must not be offered");
+            let repo = format!("{}/", m.repository);
+            assert!(
+                !CATALOG.iter().any(|d| d.id.starts_with(&repo)),
+                "{id} leaked into CATALOG"
+            );
+            let file = m.default_file().unwrap();
+            assert!(mirror_fallbacks(&format!("{repo}{}", file.filename)).is_empty());
+        }
+        assert!(ROOT.models.iter().all(|m| !m.license.is_empty()));
+    }
+
+    #[test]
+    fn notices_name_every_offered_model() {
+        let notices = include_str!("../../../THIRD-PARTY-NOTICES.md");
+        for m in transcription_models().filter(|m| m.is_offered()) {
+            assert!(
+                notices.contains(&format!("[{}](", m.repository)),
+                "{} missing from THIRD-PARTY-NOTICES.md; run scripts/gen-third-party-notices.py",
+                m.id
+            );
+        }
+        for m in transcription_models().filter(|m| !m.license_permits_offer()) {
+            assert!(!notices.contains(&m.repository), "{} is not offered", m.id);
         }
     }
 
@@ -575,7 +634,12 @@ mod tests {
         // networks; an offered entry without one silently loses that net.
         for d in CATALOG.iter() {
             let mirrors = mirror_fallbacks(&d.id);
-            assert!(!mirrors.is_empty(), "{}: no mirror fallbacks", d.id);
+            assert_eq!(
+                mirrors.len(),
+                MIRRORS.len(),
+                "{}: no mirror fallbacks",
+                d.id
+            );
             for m in &mirrors {
                 assert_eq!(m.sha256.len(), 64, "{}: mirror entry lacks a sha256", d.id);
                 assert!(m.size_bytes > 0, "{}: mirror entry lacks a size", d.id);
@@ -604,7 +668,7 @@ mod tests {
         };
         assert!(
             parse(&ROOT.transcribe_cpp) <= parse(engine),
-            "catalog built for transcribe.cpp {} but Handy links {}",
+            "catalog built for transcribe.cpp {} but this build links {}",
             ROOT.transcribe_cpp,
             engine
         );
@@ -612,7 +676,7 @@ mod tests {
             if let Some(min) = &m.min_engine {
                 assert!(
                     parse(min) <= parse(engine),
-                    "{} needs transcribe.cpp {min}, Handy links {engine}",
+                    "{} needs transcribe.cpp {min}, this build links {engine}",
                     m.id
                 );
             }

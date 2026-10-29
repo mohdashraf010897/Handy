@@ -1072,6 +1072,18 @@ impl Default for AppSettings {
 pub const LANGUAGE_DETECTION_WINDOW_SECS: std::ops::RangeInclusive<u32> = 2..=30;
 
 impl AppSettings {
+    /// The clean-up prompt to use: the selected one, or the first non-empty
+    /// prompt when none is selected or the selection is stale, so enabling
+    /// clean-up never skips silently on a fresh install.
+    pub fn active_post_process_prompt(&self) -> Option<&LLMPrompt> {
+        let usable = |p: &&LLMPrompt| !p.prompt.trim().is_empty();
+        self.post_process_selected_prompt_id
+            .as_deref()
+            .and_then(|id| self.post_process_prompts.iter().find(|p| p.id == id))
+            .filter(usable)
+            .or_else(|| self.post_process_prompts.iter().find(usable))
+    }
+
     /// Samples (16 kHz) of speech the language detector hears.
     pub fn language_detection_window_samples(&self) -> usize {
         let (min, max) = LANGUAGE_DETECTION_WINDOW_SECS.into_inner();
@@ -1424,6 +1436,36 @@ pub fn get_recording_retention_period(app: &AppHandle) -> RecordingRetentionPeri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fresh_install_has_an_active_clean_up_prompt() {
+        let settings = get_default_settings();
+        assert!(settings.post_process_selected_prompt_id.is_none());
+        let prompt = settings
+            .active_post_process_prompt()
+            .expect("default prompt is active");
+        assert!(prompt.prompt.contains("${output}"));
+    }
+
+    #[test]
+    fn active_prompt_prefers_selection_and_skips_stale_or_empty() {
+        let mut settings = get_default_settings();
+        let prompt = |id: &str, text: &str| LLMPrompt {
+            id: id.into(),
+            name: id.into(),
+            prompt: text.into(),
+        };
+        settings.post_process_prompts =
+            vec![prompt("blank", "  "), prompt("a", "A"), prompt("b", "B")];
+        settings.post_process_selected_prompt_id = Some("b".into());
+        assert_eq!(settings.active_post_process_prompt().unwrap().id, "b");
+        settings.post_process_selected_prompt_id = Some("deleted".into());
+        assert_eq!(settings.active_post_process_prompt().unwrap().id, "a");
+        settings.post_process_selected_prompt_id = Some("blank".into());
+        assert_eq!(settings.active_post_process_prompt().unwrap().id, "a");
+        settings.post_process_prompts = vec![prompt("blank", "")];
+        assert!(settings.active_post_process_prompt().is_none());
+    }
 
     #[test]
     fn stored_binding_returns_the_requested_binding() {

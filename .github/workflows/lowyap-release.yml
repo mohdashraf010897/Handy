@@ -1,0 +1,256 @@
+name: "lowyap release"
+# Beta release: Windows x64 only (D-37). Pushing a v* tag builds a clean NSIS
+# installer, signs the updater artifacts with our minisign key, smoke-tests the
+# installed app, and attaches installer, latest.json and SHA256SUMS to a DRAFT
+# release. A human publishes the draft. Authenticode signing is out of scope.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # dry run: build, smoke and upload artifacts, no release
+
+concurrency:
+  group: lowyap-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  SMOKE_REPO: handy-computer/moonshine-tiny-gguf
+  SMOKE_REV: f5c11906eba3f44cf305eed30feb9cbfb0b4b9d0
+  SMOKE_FILE: moonshine-tiny-Q8_0.gguf
+  SMOKE_SHA256: 2fd348d7b38f97d309cc3ec6848f3f57f537b80244950f07d2637e463f95a3a1
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    steps:
+      - name: Enable long paths
+        shell: pwsh
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+          git config --system core.longpaths true
+      - uses: actions/checkout@v5
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($pkg -ne $version) { throw "package.json $pkg != tauri.conf.json $version" }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "tag $env:GITHUB_REF_NAME does not match app version v$version"
+          }
+          Add-Content $env:GITHUB_OUTPUT "version=$version"
+          Add-Content $env:GITHUB_OUTPUT "tag=v$version"
+
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      # No Rust cache: releases always build from scratch so a stale native lib
+      # can never ship (same policy as upstream release.yml).
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+      - name: Install SPIRV-Headers
+        shell: pwsh
+        run: |
+          vcpkg install spirv-headers:x64-windows
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install spirv-headers failed" }
+          $prefix = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" -replace '\\','/'
+          Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$prefix"
+      - name: Locate VC++ runtime redist (app-local bundling)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsRoot = & $vswhere -latest -products * -property installationPath
+          $ver = (Get-Content (Join-Path $vsRoot "VC\Auxiliary\Build\Microsoft.VCRedistVersion.default.txt")).Trim()
+          $archDir = Join-Path $vsRoot "VC\Redist\MSVC\$ver\x64"
+          $crt = Get-ChildItem $archDir -Directory -Filter "Microsoft.VC*.CRT" | Sort-Object Name | Select-Object -Last 1
+          $omp = Get-ChildItem $archDir -Directory -Filter "Microsoft.VC*.OpenMP" | Sort-Object Name | Select-Object -Last 1
+          if (-not $crt -or -not $omp) { throw "VC++ redist dirs not found under $archDir" }
+          Add-Content -Path $env:GITHUB_ENV -Value "HANDY_VC_REDIST_DIRS=$($crt.FullName);$($omp.FullName)"
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+      - name: Lint and script tests
+        run: |
+          bun run lint
+          bun run check:translations
+          bun src/components/flow/toneRules.test.ts
+          bun src/stores/flowStore.test.ts
+          bun src/components/update-checker/portableInstaller.test.ts
+      # Tag builds must use the real key. Dry runs without secrets sign with a
+      # throwaway key (and matching pubkey override) so the signing and
+      # latest.json path is still exercised end to end.
+      - name: Select updater signing key
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PASS: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:KEY -and $env:PASS) {
+            $key = $env:KEY; $pass = $env:PASS
+          } elseif ($env:GITHUB_REF_TYPE -eq 'tag') {
+            throw "TAURI_SIGNING_PRIVATE_KEY and _PASSWORD secrets are required for tag builds"
+          } else {
+            Write-Host "::warning::No signing secrets; dry run signs with an ephemeral key"
+            $pass = [guid]::NewGuid().ToString()
+            Write-Host "::add-mask::$pass"
+            $path = "$env:RUNNER_TEMP\ephemeral.key"
+            bun tauri signer generate -w $path -p $pass --ci *> $null
+            if ($LASTEXITCODE -ne 0) { throw "ephemeral key generation failed" }
+            $key = (Get-Content $path -Raw).Trim()
+            $pub = (Get-Content "$path.pub" -Raw).Trim()
+            @{ plugins = @{ updater = @{ pubkey = $pub } } } | ConvertTo-Json -Depth 4 |
+              Set-Content -Encoding ascii "$env:RUNNER_TEMP\ephemeral-conf.json"
+            Add-Content $env:GITHUB_ENV "TAURI_EXTRA_CONF=$env:RUNNER_TEMP\ephemeral-conf.json"
+          }
+          Write-Host "::add-mask::$pass"
+          $d = "EOF_$([guid]::NewGuid().ToString('N'))"
+          Add-Content $env:GITHUB_ENV "TAURI_SIGNING_PRIVATE_KEY<<$d`n$key`n$d"
+          Add-Content $env:GITHUB_ENV "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<$d`n$pass`n$d"
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Build NSIS installer with signed updater artifacts
+        shell: pwsh
+        run: |
+          $extra = @()
+          if ($env:TAURI_EXTRA_CONF) { $extra = @('-c', $env:TAURI_EXTRA_CONF) }
+          bun tauri build --bundles nsis @extra
+          if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
+
+      - name: Fetch smoke model into HF cache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $hf = "$env:RUNNER_TEMP\hf"
+          Add-Content $env:GITHUB_ENV "HF_HOME=$hf"
+          $env:HF_HOME = $hf
+          python -m pip install --quiet "huggingface_hub>=0.34"
+          $path = (python -c "from huggingface_hub import hf_hub_download as d; print(d('$env:SMOKE_REPO','$env:SMOKE_FILE',revision='$env:SMOKE_REV'))").Trim()
+          $sha = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+          if ($sha -ne $env:SMOKE_SHA256) { throw "model sha256 mismatch: $sha" }
+
+      - name: Generate 16 kHz mono WAV
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Speech
+          $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
+          $s.SetOutputToWaveFile("$env:RUNNER_TEMP\hello.wav", $fmt)
+          $s.Speak("Hello world, this is a dictation test.")
+          $s.Dispose()
+          if ((Get-Item "$env:RUNNER_TEMP\hello.wav").Length -lt 10000) { throw "wav too small" }
+
+      - name: Silent install and headless transcription smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $p = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exit $($p.ExitCode)" }
+          $exe = Get-ChildItem "$env:LOCALAPPDATA","$env:ProgramFiles" -Recurse -Filter 'lowyap.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\target\\' } | Select-Object -First 1
+          if (-not $exe) { throw "installed lowyap.exe not found" }
+          Write-Host "installed: $($exe.FullName)"
+          $out = "$env:RUNNER_TEMP\smoke.json"; $err = "$env:RUNNER_TEMP\smoke.err"
+          $cliArgs = @('--transcribe-file', "$env:RUNNER_TEMP\hello.wav", '--model', "$env:SMOKE_REPO/$env:SMOKE_FILE", '--json')
+          $r = Start-Process $exe.FullName -ArgumentList $cliArgs -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $out -RedirectStandardError $err
+          Get-Content $err -Tail 25 | Write-Host
+          if ($r.ExitCode -ne 0) { throw "transcribe exit $($r.ExitCode)" }
+          $j = Get-Content $out -Raw | ConvertFrom-Json
+          Write-Host "text='$($j.text)' backend=$($j.bound_backend) rtf=$($j.rtf)"
+          if ($j.text -notmatch '(?i)hello|dictation|test') { throw "unexpected transcript: '$($j.text)'" }
+
+      - name: Stage assets, latest.json and SHA256SUMS
+        id: stage
+        shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = "$env:RUNNER_TEMP\dist"
+          New-Item -ItemType Directory $dist | Out-Null
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $sig = Get-Item "$($setup.FullName).sig"
+          Copy-Item $setup.FullName, $sig.FullName $dist
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/$($setup.Name)"
+          $entry = @{ signature = (Get-Content $sig.FullName -Raw).Trim(); url = $url }
+          $manifest = [ordered]@{
+            version   = $env:VERSION
+            notes     = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:TAG"
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64"      = $entry
+              "windows-x86_64-nsis" = $entry
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM "$dist\latest.json"
+          Push-Location $dist
+          Get-ChildItem -File | Where-Object Name -ne 'SHA256SUMS' | Sort-Object Name | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content -Encoding ascii SHA256SUMS
+          Get-Content SHA256SUMS | Write-Host
+          Pop-Location
+          Add-Content $env:GITHUB_OUTPUT "dist=$dist"
+
+      - name: Upload staged assets (dry run)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lowyap-windows-x64-dry-run
+          path: ${{ steps.stage.outputs.dist }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create draft release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          DIST: ${{ steps.stage.outputs.dist }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $notes = @"
+          Private, on-device dictation for Windows x64. Beta.
+
+          **Unsigned build.** Windows SmartScreen may warn on first run: choose
+          *More info* → *Run anyway*. Verify the download against ``SHA256SUMS``:
+
+          ``Get-FileHash .\<installer>.exe -Algorithm SHA256``
+
+          lowyap is based on [Handy](https://github.com/cjpais/Handy) by CJ Pais (MIT).
+          "@
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) { throw "release $env:TAG already exists; delete it before re-running" }
+          gh release create $env:TAG (Get-ChildItem $env:DIST -File).FullName `
+            --draft --verify-tag --title $env:TAG --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-smoke-logs
+          path: |
+            ${{ runner.temp }}/smoke.json
+            ${{ runner.temp }}/smoke.err
+          if-no-files-found: ignore
