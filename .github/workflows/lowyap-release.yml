@@ -6,6 +6,7 @@ name: "lowyap release"
 on:
   push:
     tags: ["v*"]
+    branches: [ci/no-ticket/windows-tests] # fork test branch only: dry run
   workflow_dispatch: # dry run: build, smoke and upload artifacts, no release
 
 concurrency:

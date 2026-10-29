@@ -103,13 +103,11 @@ jobs:
           bun src/components/flow/toneRules.test.ts
           bun src/stores/flowStore.test.ts
 
-      # Unsigned test build: drop upstream's Azure signCommand (CJ's account).
-      # The updater feed is pointed at this fork so a
-      # tester is never offered an upstream Handy release.
+      # Unsigned test build; updater artifacts need the release key (SV-61).
       - name: Build unsigned NSIS installer
         shell: pwsh
         run: |
-          $cfg = '{"bundle":{"createUpdaterArtifacts":false,"windows":{"signCommand":null}},"plugins":{"updater":{"endpoints":["https://github.com/mohdashraf010897/Handy/releases/latest/download/latest.json"]}}}'
+          $cfg = '{"bundle":{"createUpdaterArtifacts":false}}'
           $cfg | Set-Content -Encoding ascii "$env:RUNNER_TEMP\ci-conf.json"
           bun tauri build --bundles nsis -c "$env:RUNNER_TEMP\ci-conf.json"
           if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
@@ -155,9 +153,9 @@ jobs:
           $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
           $p = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installer exit $($p.ExitCode)" }
-          $exe = Get-ChildItem "$env:LOCALAPPDATA","$env:ProgramFiles" -Recurse -Filter 'handy.exe' -ErrorAction SilentlyContinue |
+          $exe = Get-ChildItem "$env:LOCALAPPDATA","$env:ProgramFiles" -Recurse -Filter 'lowyap.exe' -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -notmatch '\\target\\' } | Select-Object -First 1
-          if (-not $exe) { throw "installed handy.exe not found" }
+          if (-not $exe) { throw "installed lowyap.exe not found" }
           Write-Host "installed: $($exe.FullName)"
           Get-ChildItem $exe.DirectoryName | Select-Object Name, Length | Format-Table | Out-String | Write-Host
           $out = "$env:RUNNER_TEMP\smoke.json"; $err = "$env:RUNNER_TEMP\smoke.err"
