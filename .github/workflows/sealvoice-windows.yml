@@ -33,6 +33,7 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
           key: win-x64-tests
+          cache-on-failure: true
       - name: Install Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
@@ -67,6 +68,7 @@ jobs:
           workspaces: "./src-tauri -> target"
           key: win-x64-release
           cache-bin: false
+          cache-on-failure: true
       - name: Install Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
@@ -101,12 +103,13 @@ jobs:
           bun src/components/flow/toneRules.test.ts
           bun src/stores/flowStore.test.ts
 
-      # Unsigned test build. The updater feed is pointed at this fork so a
+      # Unsigned test build: drop upstream's Azure signCommand (CJ's account).
+      # The updater feed is pointed at this fork so a
       # tester is never offered an upstream Handy release.
       - name: Build unsigned NSIS installer
         shell: pwsh
         run: |
-          $cfg = '{"bundle":{"createUpdaterArtifacts":false},"plugins":{"updater":{"endpoints":["https://github.com/mohdashraf010897/Handy/releases/latest/download/latest.json"]}}}'
+          $cfg = '{"bundle":{"createUpdaterArtifacts":false,"windows":{"signCommand":null}},"plugins":{"updater":{"endpoints":["https://github.com/mohdashraf010897/Handy/releases/latest/download/latest.json"]}}}'
           $cfg | Set-Content -Encoding ascii "$env:RUNNER_TEMP\ci-conf.json"
           bun tauri build --bundles nsis -c "$env:RUNNER_TEMP\ci-conf.json"
           if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
