@@ -206,33 +206,13 @@ pub(crate) async fn post_process_transcription(
         return None;
     }
 
-    let selected_prompt_id = match &settings.post_process_selected_prompt_id {
-        Some(id) => id.clone(),
-        None => {
-            debug!("Post-processing skipped because no prompt is selected");
-            return None;
-        }
-    };
-
-    let prompt = match settings
-        .post_process_prompts
-        .iter()
-        .find(|prompt| prompt.id == selected_prompt_id)
-    {
-        Some(prompt) => prompt.prompt.clone(),
-        None => {
-            debug!(
-                "Post-processing skipped because prompt '{}' was not found",
-                selected_prompt_id
-            );
-            return None;
-        }
-    };
-
-    if prompt.trim().is_empty() {
-        debug!("Post-processing skipped because the selected prompt is empty");
+    let Some(prompt) = settings
+        .active_post_process_prompt()
+        .map(|p| p.prompt.clone())
+    else {
+        debug!("Post-processing skipped because no non-empty prompt exists");
         return None;
-    }
+    };
 
     debug!(
         "Starting LLM post-processing with provider '{}' (model: {})",
@@ -430,15 +410,9 @@ pub(crate) async fn process_transcription_output(
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
-            if let Some(prompt_id) = &settings.post_process_selected_prompt_id {
-                if let Some(prompt) = settings
-                    .post_process_prompts
-                    .iter()
-                    .find(|prompt| &prompt.id == prompt_id)
-                {
-                    post_process_prompt = Some(prompt.prompt.clone());
-                }
-            }
+            post_process_prompt = settings
+                .active_post_process_prompt()
+                .map(|p| p.prompt.clone());
         }
     }
 

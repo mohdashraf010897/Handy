@@ -70,13 +70,13 @@ fn tone_settings(settings: &AppSettings, tone: Tone) -> Cow<'_, AppSettings> {
     if tone == Tone::Default {
         return Cow::Borrowed(settings);
     }
-    let Some(selected) = settings.post_process_selected_prompt_id.as_deref() else {
+    let Some(active_id) = settings.active_post_process_prompt().map(|p| p.id.clone()) else {
         return Cow::Borrowed(settings);
     };
     let Some(index) = settings
         .post_process_prompts
         .iter()
-        .position(|p| p.id == selected && !p.prompt.trim().is_empty())
+        .position(|p| p.id == active_id)
     else {
         return Cow::Borrowed(settings);
     };
@@ -158,13 +158,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_empty_selected_prompt_is_left_alone() {
-        let mut none_selected = settings_with_prompt("x");
+    fn unselected_prompt_falls_back_to_first_and_empty_is_left_alone() {
+        let mut none_selected = settings_with_prompt("x ${output}");
         none_selected.post_process_selected_prompt_id = None;
-        assert!(matches!(
-            tone_settings(&none_selected, Tone::Casual),
-            Cow::Borrowed(_)
-        ));
+        let toned = tone_settings(&none_selected, Tone::Casual);
+        assert!(matches!(toned, Cow::Owned(_)));
+        assert_ne!(toned.post_process_prompts[0].prompt, "x ${output}");
         let empty = settings_with_prompt("   ");
         assert!(matches!(
             tone_settings(&empty, Tone::Casual),
