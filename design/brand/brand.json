@@ -1,0 +1,23 @@
+{
+  "name": "lowyap",
+  "trademark": "lowyap\u2122",
+  "tagline": "lowkey yap. it types.",
+  "license": "MIT",
+  "identifier": "com.lowyap.desktop",
+  "homepage": "https://github.com/mohdashraf010897/lowyap",
+  "upstream": "https://github.com/cjpais/Handy",
+  "colors": {
+    "violet": "#7C5CFF",
+    "violetUi": "#6946E5",
+    "violetUiHover": "#5B38D6",
+    "violetLight": "#B9A8FF",
+    "violetDark": "#A08CFF",
+    "ink": "#121117",
+    "inkTop": "#24222E",
+    "paper": "#FFFFFF",
+    "live": "#FF3B4E",
+    "liveDeep": "#E5203A",
+    "warn": "#FFB020",
+    "warnDeep": "#E08600"
+  }
+}

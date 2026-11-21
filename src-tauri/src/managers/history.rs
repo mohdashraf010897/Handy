@@ -432,6 +432,58 @@ impl HistoryManager {
         Ok(entry)
     }
 
+    /// Update an entry's user-corrected transcript in place, syncing `post_processed_text`
+    /// when present and emitting `HistoryUpdatePayload::Updated`.
+    pub fn update_entry_transcription(
+        &self,
+        id: i64,
+        updated_text: String,
+    ) -> Result<HistoryEntry> {
+        let conn = self.get_connection()?;
+        let entry = Self::update_entry_transcription_with_conn(&conn, id, &updated_text)?;
+
+        debug!("Corrected transcription text for history entry {}", id);
+
+        if let Err(e) = (HistoryUpdatePayload::Updated {
+            entry: entry.clone(),
+        })
+        .emit(&self.app_handle)
+        {
+            error!("Failed to emit history-updated event: {}", e);
+        }
+
+        Ok(entry)
+    }
+
+    fn update_entry_transcription_with_conn(
+        conn: &Connection,
+        id: i64,
+        updated_text: &str,
+    ) -> Result<HistoryEntry> {
+        let updated = conn.execute(
+            "UPDATE transcription_history
+             SET transcription_text = ?1,
+                 post_processed_text = CASE
+                     WHEN post_processed_text IS NOT NULL THEN ?1
+                     ELSE NULL
+                 END
+             WHERE id = ?2",
+            params![updated_text, id],
+        )?;
+
+        if updated == 0 {
+            return Err(anyhow!("History entry {} not found", id));
+        }
+
+        let entry = conn.query_row(
+            &format!("SELECT {ENTRY_COLUMNS} FROM transcription_history WHERE id = ?1"),
+            params![id],
+            Self::map_history_entry,
+        )?;
+
+        Ok(entry)
+    }
+
     pub fn cleanup_old_entries(&self) -> Result<()> {
         let retention_period = crate::settings::get_recording_retention_period(&self.app_handle);
 
@@ -894,5 +946,34 @@ mod tests {
             .expect("completed entry exists");
 
         assert_eq!(entry.transcription_text, "dictated");
+    }
+
+    #[test]
+    fn update_entry_transcription_updates_text_and_preserves_post_processed_presence() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "Check github.com/low app", None);
+        insert_entry(&conn, 200, "Visit low app", Some("Visit low app."));
+
+        let raw_updated = HistoryManager::update_entry_transcription_with_conn(
+            &conn,
+            1,
+            "Check github.com/lowyap",
+        )
+        .expect("update raw entry");
+        assert_eq!(raw_updated.transcription_text, "Check github.com/lowyap");
+        assert_eq!(raw_updated.post_processed_text, None);
+
+        let post_updated =
+            HistoryManager::update_entry_transcription_with_conn(&conn, 2, "Visit lowyap.")
+                .expect("update post-processed entry");
+        assert_eq!(post_updated.transcription_text, "Visit lowyap.");
+        assert_eq!(
+            post_updated.post_processed_text.as_deref(),
+            Some("Visit lowyap.")
+        );
+
+        assert!(
+            HistoryManager::update_entry_transcription_with_conn(&conn, 999, "missing").is_err()
+        );
     }
 }

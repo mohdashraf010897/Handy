@@ -8,6 +8,7 @@ import React, {
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import {
+  BookPlus,
   Check,
   Copy,
   FileAudio,
@@ -27,6 +28,7 @@ import {
   type HistoryUpdatePayload,
 } from "@/bindings";
 import { useOsType } from "@/hooks/useOsType";
+import { useSettingsStore } from "@/stores/settingsStore";
 import {
   useTranscriptionJobsStore,
   type ActiveJobStatus,
@@ -34,19 +36,70 @@ import {
 import { formatDateTime } from "@/utils/dateFormat";
 import { AudioPlayer, AudioPlayerGroup } from "../../ui/AudioPlayer";
 import { Button } from "../../ui/Button";
+import { Input } from "../../ui/Input";
 import { copyToClipboard } from "./clipboard";
 import { pickAndTranscribeFiles } from "./transcribeFiles";
 
+function normalizeDictionaryCandidate(raw: string): string {
+  return raw
+    .replace(/[<>"']/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 50);
+}
+
+function extractDiffTokens(text: string): string[] {
+  return text.match(/[\p{L}\p{N}]+(?:[-'&][\p{L}\p{N}]+)*/gu) ?? [];
+}
+
+function suggestDictionaryWord(
+  originalText: string,
+  editedText: string,
+): string {
+  const orig = extractDiffTokens(originalText);
+  const next = extractDiffTokens(editedText);
+
+  let prefixLen = 0;
+  while (
+    prefixLen < orig.length &&
+    prefixLen < next.length &&
+    orig[prefixLen] === next[prefixLen]
+  ) {
+    prefixLen += 1;
+  }
+
+  let suffixLen = 0;
+  while (
+    suffixLen < orig.length - prefixLen &&
+    suffixLen < next.length - prefixLen &&
+    orig[orig.length - 1 - suffixLen] === next[next.length - 1 - suffixLen]
+  ) {
+    suffixLen += 1;
+  }
+
+  const added = next.slice(prefixLen, next.length - suffixLen);
+  if (added.length === 0 || added.length > 3) {
+    return "";
+  }
+
+  const candidate = normalizeDictionaryCandidate(added.join(" "));
+  return candidate.length <= 50 ? candidate : "";
+}
+
 const IconButton: React.FC<{
   onClick: () => void;
+  onMouseDown?: () => void;
   title: string;
   disabled?: boolean;
   active?: boolean;
   children: React.ReactNode;
-}> = ({ onClick, title, disabled, active, children }) => (
+}> = ({ onClick, onMouseDown, title, disabled, active, children }) => (
   <button
+    type="button"
+    onMouseDown={onMouseDown}
     onClick={onClick}
     disabled={disabled}
+    aria-label={title}
     className={`p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer disabled:cursor-not-allowed disabled:text-text/20 ${
       active
         ? "text-logo-primary hover:text-logo-primary"
@@ -264,6 +317,47 @@ export const HistorySettings: React.FC = () => {
     }
   };
 
+  const correctEntryAndSaveWord = useCallback(
+    async (
+      id: number,
+      updatedText: string,
+      dictionaryWord: string | null,
+    ): Promise<boolean> => {
+      try {
+        const existingWords =
+          useSettingsStore.getState().settings?.custom_words ?? [];
+        const alreadyExactMatch =
+          dictionaryWord !== null && existingWords.includes(dictionaryWord);
+        const result = await commands.correctHistoryEntryAndSaveWord(
+          id,
+          updatedText,
+          dictionaryWord,
+        );
+        if (result.status !== "ok") {
+          toast.error(t("settings.history.correctionSaveError"));
+          return false;
+        }
+        setEntries((prev) => prev.map((e) => (e.id === id ? result.data : e)));
+        if (dictionaryWord && !alreadyExactMatch) {
+          await useSettingsStore.getState().refreshSettings();
+          toast.success(
+            t("settings.history.correctionAndWordSaved", {
+              word: dictionaryWord,
+            }),
+          );
+        } else {
+          toast.success(t("settings.history.correctionSaved"));
+        }
+        return true;
+      } catch (error) {
+        console.error("Failed to save corrected history entry:", error);
+        toast.error(t("settings.history.correctionSaveError"));
+        return false;
+      }
+    },
+    [t],
+  );
+
   let content: React.ReactNode;
 
   if (loading) {
@@ -289,11 +383,16 @@ export const HistorySettings: React.FC = () => {
                 entry={entry}
                 job={jobs[entry.id]}
                 onToggleSaved={() => toggleSaved(entry.id)}
-                onCopyText={() => copyToClipboard(entry.transcription_text)}
+                onCopyText={() =>
+                  copyToClipboard(
+                    entry.post_processed_text ?? entry.transcription_text,
+                  )
+                }
                 getAudioUrl={getAudioUrl}
                 deleteAudio={deleteAudioEntry}
                 retryTranscription={commands.retryHistoryEntryTranscription}
                 cancelTranscription={commands.cancelHistoryEntryTranscription}
+                onCorrectAndSave={correctEntryAndSaveWord}
               />
             ))}
           </div>
@@ -343,6 +442,11 @@ interface HistoryEntryProps {
   deleteAudio: (id: number) => Promise<void>;
   retryTranscription: (id: number) => Promise<void>;
   cancelTranscription: (id: number) => Promise<void>;
+  onCorrectAndSave: (
+    id: number,
+    updatedText: string,
+    dictionaryWord: string | null,
+  ) => Promise<boolean>;
 }
 
 const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
@@ -354,22 +458,136 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   deleteAudio,
   retryTranscription,
   cancelTranscription,
+  onCorrectAndSave,
 }) => {
   const { t, i18n } = useTranslation();
   const [showCopied, setShowCopied] = useState(false);
   // Pressed cancel: a running job stops after its current chunk.
   const [cancelling, setCancelling] = useState(false);
+  const displayedText = entry.post_processed_text ?? entry.transcription_text;
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftText, setDraftText] = useState(displayedText);
+  const [dictionaryWord, setDictionaryWord] = useState("");
+  const [dictionaryWordTouched, setDictionaryWordTouched] = useState(false);
+  const [savingCorrection, setSavingCorrection] = useState(false);
   const textRef = useRef<HTMLParagraphElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingSelectionRef = useRef("");
 
   // Queued or being transcribed in the background.
   const retrying = job !== undefined;
   useEffect(() => {
     if (!retrying) setCancelling(false);
   }, [retrying]);
-  const hasTranscription = entry.transcription_text.trim().length > 0;
+  useEffect(() => {
+    if (retrying && isEditing) {
+      setIsEditing(false);
+    }
+  }, [retrying, isEditing]);
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftText(displayedText);
+    }
+  }, [displayedText, isEditing]);
+
+  const hasTranscription = displayedText.trim().length > 0;
   const folded = hasTranscription && !retrying && !expanded;
+
+  const readSelectedEntryText = useCallback((): string => {
+    const selection = window.getSelection();
+    const container = textRef.current;
+    if (!selection || !container || selection.isCollapsed) {
+      return "";
+    }
+    const anchor = selection.anchorNode;
+    const focus = selection.focusNode;
+    if (
+      (anchor && container.contains(anchor)) ||
+      (focus && container.contains(focus))
+    ) {
+      return normalizeDictionaryCandidate(selection.toString());
+    }
+    return "";
+  }, []);
+
+  const handleOpenOrToggleEditor = () => {
+    if (!hasTranscription || retrying) return;
+    if (isEditing) {
+      handleCancelEdit();
+      return;
+    }
+    const selectedWord = pendingSelectionRef.current || readSelectedEntryText();
+    pendingSelectionRef.current = "";
+    setDraftText(displayedText);
+    setDictionaryWord(selectedWord);
+    setDictionaryWordTouched(selectedWord.length > 0);
+    setIsEditing(true);
+    requestAnimationFrame(() => {
+      const textarea = editTextareaRef.current;
+      if (textarea) {
+        textarea.focus();
+        const len = textarea.value.length;
+        textarea.setSelectionRange(len, len);
+      }
+    });
+  };
+
+  const handleCancelEdit = () => {
+    if (savingCorrection) return;
+    setIsEditing(false);
+    setDraftText(displayedText);
+    setDictionaryWord("");
+    setDictionaryWordTouched(false);
+  };
+
+  const handleDraftChange = (nextValue: string) => {
+    setDraftText(nextValue);
+    if (!dictionaryWordTouched) {
+      setDictionaryWord(suggestDictionaryWord(displayedText, nextValue));
+    }
+  };
+
+  const normalizedDictionaryWord = normalizeDictionaryCandidate(dictionaryWord);
+
+  const handleSaveCorrection = async () => {
+    if (savingCorrection) return;
+    const trimmedDraft = draftText.trim();
+    if (!trimmedDraft) {
+      toast.error(t("settings.history.correctionEmptyError"));
+      return;
+    }
+    setSavingCorrection(true);
+    try {
+      const ok = await onCorrectAndSave(
+        entry.id,
+        trimmedDraft,
+        normalizedDictionaryWord.length > 0 ? normalizedDictionaryWord : null,
+      );
+      if (ok) {
+        setIsEditing(false);
+        setDictionaryWord("");
+        setDictionaryWordTouched(false);
+      }
+    } finally {
+      setSavingCorrection(false);
+    }
+  };
+
+  const handleEditorKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing) {
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      handleCancelEdit();
+    } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void handleSaveCorrection();
+    }
+  };
 
   // Offer "Show more" only when the folded text is actually cut off.
   useLayoutEffect(() => {
@@ -380,7 +598,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [folded, entry.transcription_text]);
+  }, [folded, displayedText]);
 
   const handleLoadAudio = useCallback(
     () => getAudioUrl(entry.file_name),
@@ -438,6 +656,17 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
           )}
         </div>
         <div className="flex items-center shrink-0">
+          <IconButton
+            onMouseDown={() => {
+              pendingSelectionRef.current = readSelectedEntryText();
+            }}
+            onClick={handleOpenOrToggleEditor}
+            disabled={!hasTranscription || retrying}
+            active={isEditing}
+            title={t("settings.history.correctAndSave")}
+          >
+            <BookPlus width={16} height={16} />
+          </IconButton>
           <IconButton
             onClick={handleCopyText}
             disabled={!hasTranscription || retrying}
@@ -526,7 +755,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
           {retrying
             ? progressText
             : hasTranscription
-              ? entry.transcription_text
+              ? displayedText
               : entry.source_name
                 ? // Cancelled, interrupted by a quit, or failed.
                   t("settings.history.notTranscribed")
@@ -542,6 +771,80 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
               ? t("settings.history.showLess")
               : t("settings.history.showMore")}
           </button>
+        )}
+        {isEditing && !retrying && (
+          <div
+            data-testid={`history-inline-editor-${entry.id}`}
+            onKeyDown={handleEditorKeyDown}
+            className="w-full mt-2 p-3 rounded-md border border-line bg-glass-bg/60 flex flex-col gap-2.5"
+          >
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor={`history-transcript-${entry.id}`}
+                className="text-xs font-medium text-ink-3"
+              >
+                {t("settings.history.correctedTranscriptLabel")}
+              </label>
+              <textarea
+                id={`history-transcript-${entry.id}`}
+                ref={editTextareaRef}
+                rows={2}
+                value={draftText}
+                disabled={savingCorrection}
+                placeholder={t(
+                  "settings.history.correctedTranscriptPlaceholder",
+                )}
+                onChange={(e) => handleDraftChange(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-sm rounded-[5px] border border-mid-gray/60 bg-glass-bg text-text focus:outline-none focus:border-logo-primary transition-colors resize-y"
+              />
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <label
+                htmlFor={`history-dict-word-${entry.id}`}
+                className="text-xs font-medium text-ink-3 shrink-0"
+              >
+                {t("settings.history.dictionaryWordLabel")}
+              </label>
+              <Input
+                id={`history-dict-word-${entry.id}`}
+                type="text"
+                variant="compact"
+                maxLength={50}
+                value={dictionaryWord}
+                disabled={savingCorrection}
+                placeholder={t("settings.history.dictionaryWordPlaceholder")}
+                onChange={(e) => {
+                  setDictionaryWordTouched(true);
+                  setDictionaryWord(e.target.value);
+                }}
+                className="flex-1"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={savingCorrection}
+                onClick={handleCancelEdit}
+              >
+                {t("settings.history.cancelEdit")}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={savingCorrection || draftText.trim().length === 0}
+                onClick={() => void handleSaveCorrection()}
+              >
+                {savingCorrection
+                  ? t("settings.history.savingCorrection")
+                  : normalizedDictionaryWord.length > 0
+                    ? t("settings.history.saveAndAddWord")
+                    : t("settings.history.saveCorrection")}
+              </Button>
+            </div>
+          </div>
         )}
       </div>
 

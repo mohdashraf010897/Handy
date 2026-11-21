@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Regenerates lowyap raster assets from the vector masters in this folder.
+// Regenerates lowyap raster assets from brand.json + the vector masters in this folder.
 //   node design/brand/build.mjs            -> tray/overlay PNGs + app-icon-1024.png
+//   node design/brand/build.mjs --check    -> verifies brand.json parity across app/site files
 // Then: ./node_modules/.bin/tauri icon design/brand/app-icon-1024.png
 // Requires rsvg-convert (brew install librsvg).
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,17 +13,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..");
 const resources = join(repo, "src-tauri", "resources");
 const trayDir = join(here, "tray");
-mkdirSync(trayDir, { recursive: true });
 
-export const COLORS = {
-  violet: "#7C5CFF",
-  ink: "#121117",
-  paper: "#FFFFFF",
-  live: "#FF3B4E",
-  liveDeep: "#E5203A",
-  warn: "#FFB020",
-  warnDeep: "#E08600",
-};
+export const BRAND = JSON.parse(readFileSync(join(here, "brand.json"), "utf8"));
+export const COLORS = BRAND.colors;
 
 // 64-unit grid. One outline: rounded body whose bottom-left corner drops into a low tail.
 export const BUBBLE =
@@ -32,8 +25,9 @@ export const CURSOR = "M23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z";
 const circle = (cx, cy, r) =>
   `M${cx - r} ${cy}A${r} ${r} 0 1 0 ${cx + r} ${cy}A${r} ${r} 0 1 0 ${cx - r} ${cy}Z`;
 export const DOTS = [19.5, 32, 44.5].map((x) => circle(x, 26, 4.75)).join("");
-export const REC_RING = circle(32, 26, 12.5);
-export const REC_DOT = circle(32, 26, 8);
+// Generous 5.75-unit cutout moat around the 7.5-unit live dot so 18pt macOS menu bars stay crisp.
+export const REC_RING = circle(32, 26, 13.25);
+export const REC_DOT = circle(32, 26, 7.5);
 // Warning badge (top-right), with a gap cut from the bubble.
 const BADGE = { cx: 51, cy: 13, r: 11, gap: 3.5 };
 const BANG = "M49 6.5H53L52.4 15.5H49.6Z" + circle(51, 19, 2.1);
@@ -43,8 +37,8 @@ const svg = (body, size = 64) =>
 
 /**
  * A tray glyph. `fg` paints the bubble; marks are cut out (template-safe alpha).
- * `accent` (optional) paints the live dot / badge in color for Windows/Linux;
- * macOS renders these as template images, so only alpha matters there.
+ * `accent` (optional) paints the live dot / badge in color (used on Windows, Linux,
+ * and non-template macOS active/warning states).
  */
 function trayGlyph({ state, fg, accent, warning, badge, markFill }) {
   const parts = [];
@@ -115,6 +109,37 @@ const TRAY = {
   },
 };
 
+function verifyParity() {
+  const checks = [
+    ["src/lib/brand.ts", BRAND.name],
+    ["src/lib/brand.ts", BRAND.tagline],
+    ["src/lib/brand.ts", BRAND.homepage],
+    ["src-tauri/src/brand.rs", BRAND.name],
+    ["src-tauri/src/brand.rs", BRAND.tagline],
+    ["src-tauri/src/brand.rs", BRAND.homepage],
+    ["src-tauri/tauri.conf.json", BRAND.identifier],
+    ["index.html", `<title>${BRAND.name}</title>`],
+    ["site/index.html", BRAND.tagline],
+    ["site/index.html", COLORS.violetUi.toLowerCase()],
+  ];
+  for (const [rel, needle] of checks) {
+    const text = readFileSync(join(repo, rel), "utf8");
+    if (!text.includes(needle)) {
+      throw new Error(`Brand parity check failed: ${rel} missing "${needle}"`);
+    }
+  }
+  console.log(
+    `${BRAND.name}: brand parity check passed (${checks.length} assertions)`,
+  );
+}
+
+if (process.argv.includes("--check")) {
+  verifyParity();
+  process.exit(0);
+}
+
+mkdirSync(trayDir, { recursive: true });
+
 const render = (svgFile, pngFile, size) =>
   execFileSync("rsvg-convert", [
     "-w",
@@ -133,4 +158,4 @@ for (const [png, spec] of Object.entries(TRAY)) {
 }
 
 render(join(here, "app-icon.svg"), join(here, "app-icon-1024.png"), 1024);
-console.log("lowyap: wrote 12 tray PNGs and app-icon-1024.png");
+console.log(`${BRAND.name}: wrote 12 tray PNGs and app-icon-1024.png`);

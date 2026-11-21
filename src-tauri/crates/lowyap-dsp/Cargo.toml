@@ -1,0 +1,11 @@
+[package]
+name = "lowyap-dsp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Pure-Rust plug-and-play acoustic echo cancellation (WebRTC AEC3) and neural utterance VAD adapters for lowyap"
+
+[dependencies]
+lowyap-ports = { path = "../lowyap-ports" }
+aec3 = "0.4.0"
+earshot = "1.2.2"

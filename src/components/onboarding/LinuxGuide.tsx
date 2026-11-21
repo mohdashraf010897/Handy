@@ -3,9 +3,9 @@ import { Trans } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink } from "lucide-react";
 import { TextLink } from "../ui/TextLink";
+import { BRAND_LINUX_SETUP_DOCS } from "@/lib/brand";
 
-const LINUX_SETUP_URL =
-  "https://github.com/mohdashraf010897/lowyap/blob/main/BUILD.md#linux-install-from-source";
+const LINUX_SETUP_URL = BRAND_LINUX_SETUP_DOCS;
 
 /** Linux footer hint linking the setup guide; shortcuts and pasting vary by desktop. */
 export const LinuxGuide: React.FC<{

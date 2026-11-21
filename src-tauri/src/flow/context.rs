@@ -318,6 +318,7 @@ mod tests {
                 rule("com.tinyspeck.slackmacgap", Tone::Formal),
                 rule("com.apple.*", Tone::Casual),
             ],
+            ..FlowSettings::default()
         };
         assert_eq!(
             tone_for(Some(&ctx("com.tinyspeck.slackmacgap")), &settings),
@@ -331,6 +332,7 @@ mod tests {
         let reset = FlowSettings {
             tone_enabled: true,
             app_tones: vec![rule("slack.exe", Tone::Default)],
+            ..FlowSettings::default()
         };
         assert_eq!(tone_for(Some(&ctx("slack.exe")), &reset), Tone::Default);
     }
@@ -340,6 +342,7 @@ mod tests {
         let disabled = FlowSettings {
             tone_enabled: false,
             app_tones: Vec::new(),
+            ..FlowSettings::default()
         };
         assert_eq!(
             tone_for(Some(&ctx("com.tinyspeck.slackmacgap")), &disabled),
@@ -359,6 +362,7 @@ mod tests {
         let settings = FlowSettings {
             tone_enabled: true,
             app_tones: builtin_app_tones(),
+            ..FlowSettings::default()
         };
         assert!(settings.validated().is_ok());
     }
@@ -383,6 +387,7 @@ mod tests {
         let settings = FlowSettings {
             tone_enabled: false,
             app_tones: vec![rule("com.apple.*", Tone::Code)],
+            ..FlowSettings::default()
         };
         assert_eq!(
             matching_rule("com.apple.mail", &settings),

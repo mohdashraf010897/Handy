@@ -90,10 +90,12 @@ pub struct VadTailReport {
     pub hangover_counter: usize,
 }
 
+pub mod agc;
 mod earshot;
 mod silero;
 mod smoothed;
 
+pub use agc::{AgcVad, NoiseGatedAgc};
 pub use earshot::EarshotVad;
 pub use silero::SileroVad;
 pub use smoothed::SmoothedVad;

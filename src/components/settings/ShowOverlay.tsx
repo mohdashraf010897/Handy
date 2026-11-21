@@ -4,6 +4,7 @@ import { Dropdown } from "../ui/Dropdown";
 import { SettingContainer } from "../ui/SettingContainer";
 import { useSettings } from "../../hooks/useSettings";
 import type { OverlayPosition, OverlayStyle } from "@/bindings";
+import { OverlayNoticePreview } from "./OverlayNoticePreview";
 
 interface ShowOverlayProps {
   descriptionMode?: "inline" | "tooltip";
@@ -67,21 +68,28 @@ export const ShowOverlay: React.FC<ShowOverlayProps> = React.memo(
         </SettingContainer>
 
         {selectedStyle !== "none" && (
-          <SettingContainer
-            title={t("settings.advanced.overlay.position.title")}
-            description={t("settings.advanced.overlay.position.description")}
-            descriptionMode={descriptionMode}
-            grouped={grouped}
-          >
-            <Dropdown
-              options={positionOptions}
-              selectedValue={selectedPosition}
-              onSelect={(value) =>
-                updateSetting("overlay_position", value as OverlayPosition)
-              }
-              disabled={isUpdating("overlay_position")}
+          <>
+            <SettingContainer
+              title={t("settings.advanced.overlay.position.title")}
+              description={t("settings.advanced.overlay.position.description")}
+              descriptionMode={descriptionMode}
+              grouped={grouped}
+            >
+              <Dropdown
+                options={positionOptions}
+                selectedValue={selectedPosition}
+                onSelect={(value) =>
+                  updateSetting("overlay_position", value as OverlayPosition)
+                }
+                disabled={isUpdating("overlay_position")}
+              />
+            </SettingContainer>
+
+            <OverlayNoticePreview
+              descriptionMode={descriptionMode}
+              grouped={grouped}
             />
-          </SettingContainer>
+          </>
         )}
       </>
     );

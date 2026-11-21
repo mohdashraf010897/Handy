@@ -4,10 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink, TriangleAlert, X } from "lucide-react";
 import { commands, type SecureInputStatus } from "@/bindings";
+import { BRAND_SECURE_INPUT_DOCS } from "@/lib/brand";
 
 // Detailed remediation steps live in the docs rather than in the banner
-export const SECURE_INPUT_HELP_URL =
-  "https://github.com/mohdashraf010897/lowyap/blob/main/docs/troubleshooting/macos-secure-input.md";
+export const SECURE_INPUT_HELP_URL = BRAND_SECURE_INPUT_DOCS;
 
 /**
  * Compact warning banner shown while macOS Secure Input is stuck on.

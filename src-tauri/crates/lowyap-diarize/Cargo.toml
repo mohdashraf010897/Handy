@@ -1,0 +1,11 @@
+[package]
+name = "lowyap-diarize"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Pure-Rust multi-speaker diarizer, ME_ONLY local voiceprint enrollment, acoustic Mel/MFCC/pitch embeddings, and conversational name-cue resolver for lowyap"
+
+[dependencies]
+lowyap-ports = { path = "../lowyap-ports" }
+rustfft = "6.4"
+serde = { version = "1.0", features = ["derive"] }

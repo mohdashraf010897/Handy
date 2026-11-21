@@ -4,6 +4,12 @@ import type { AppToneRule, FlowSettings, Tone } from "@/bindings";
 export const DEFAULT_FLOW_SETTINGS: FlowSettings = {
   tone_enabled: false,
   app_tones: [],
+  fast_path_enabled: true,
+  snippets: [],
+  hindustani_script: "auto",
+  auto_boost_mic_volume: true,
+  mic_boost_target_percent: 85,
+  quiet_speech_agc_enabled: true,
 };
 
 /** Display order of the tone presets. */
@@ -68,15 +74,45 @@ export const overridingRule = (
   );
 };
 
+export type SnippetError = "emptyTrigger" | "emptyExpansion" | "duplicate";
+
+export const normalizeSnippetTrigger = (raw: string): string =>
+  raw.trim().replace(/\s+/g, " ");
+
+export const validateSnippet = (
+  trigger: string,
+  expansion: string,
+  snippets: { trigger: string }[],
+  ignoreIndex?: number,
+): SnippetError | null => {
+  const normalized = normalizeSnippetTrigger(trigger);
+  if (!normalized) return "emptyTrigger";
+  if (!expansion.trim()) return "emptyExpansion";
+  const key = normalized.toLowerCase();
+  const duplicate = snippets.some(
+    (snippet, index) =>
+      index !== ignoreIndex &&
+      normalizeSnippetTrigger(snippet.trigger).toLowerCase() === key,
+  );
+  return duplicate ? "duplicate" : null;
+};
+
 /** Whether settings differ from the defaults, i.e. Reset would change something. */
 export const isFlowCustomized = (
   settings: FlowSettings,
   defaults: FlowSettings = DEFAULT_FLOW_SETTINGS,
 ): boolean =>
   settings.tone_enabled !== defaults.tone_enabled ||
+  settings.fast_path_enabled !== defaults.fast_path_enabled ||
   settings.app_tones.length !== defaults.app_tones.length ||
   settings.app_tones.some(
     (rule, index) =>
       rule.app_id !== defaults.app_tones[index].app_id ||
       rule.tone !== defaults.app_tones[index].tone,
+  ) ||
+  settings.snippets.length !== defaults.snippets.length ||
+  settings.snippets.some(
+    (snippet, index) =>
+      snippet.trigger !== defaults.snippets[index].trigger ||
+      snippet.expansion !== defaults.snippets[index].expansion,
   );

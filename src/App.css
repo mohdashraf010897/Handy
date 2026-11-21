@@ -9,7 +9,9 @@
   --color-text: var(--color-text);
   --color-background: var(--color-background);
   --color-background-ui: var(--color-background-ui);
+  --color-background-ui-hover: var(--color-background-ui-hover);
   --color-logo-primary: var(--color-logo-primary);
+  --color-overlay-accent: var(--color-overlay-accent);
   --color-warning: var(--color-warning);
   --color-error: var(--color-error);
   --color-moss: var(--color-moss);

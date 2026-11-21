@@ -17,11 +17,13 @@ mod input;
 mod language_detection;
 mod llm_client;
 mod managers;
+pub mod meeting;
 mod memory;
 mod overlay;
 mod paste_tx;
 pub mod portable;
 mod secure_input;
+mod session_bus;
 mod settings;
 mod shortcut;
 mod signal_handle;
@@ -212,13 +214,55 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
 
+    let job_manager = TranscriptionJobManager::new(app_handle);
+
     // Add managers to Tauri's managed state
     app_handle.manage(recording_manager.clone());
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
     app_handle.manage(tray::TrayState::new());
-    app_handle.manage(TranscriptionJobManager::new(app_handle));
+    app_handle.manage(job_manager.clone());
+
+    match meeting::session::MeetingSessionManager::new_with_defaults(
+        app_handle.clone(),
+        transcription_manager.clone(),
+        Some(recording_manager.clone()),
+    ) {
+        Ok(meeting_manager) => {
+            app_handle.manage(Arc::new(meeting_manager));
+        }
+        Err(err) => {
+            log::error!("Failed to initialize meeting session manager: {err}");
+        }
+    }
+
+    // Wave 2 startup crash recovery: restore any orphaned macOS mic volume
+    // boost and stitch + transcribe any uncommitted 10s WAL segments left behind
+    // by a prior crash or power loss.
+    if let Ok(app_data) = portable::app_data_dir(app_handle) {
+        if flow::mic_gain::recover_orphaned_boost(&app_data) {
+            log::info!("Restored macOS mic input volume from orphaned boost session");
+        }
+        let recordings_dir = app_data.join("recordings");
+        let jobs_for_recovery = job_manager;
+        std::thread::spawn(move || {
+            for session in flow::session_wal::recover_orphaned_sessions(&recordings_dir) {
+                log::info!(
+                    "Recovered crashed recording session {} ({} ms) -> {:?}",
+                    session.session_id,
+                    session.duration_ms,
+                    session.wav_path
+                );
+                if let Err(err) = jobs_for_recovery.transcribe_file(session.wav_path) {
+                    log::warn!(
+                        "Failed to queue recovered recording {}: {err}",
+                        session.session_id
+                    );
+                }
+            }
+        });
+    }
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
@@ -253,7 +297,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
             .unwrap(),
         )
         .tooltip(tray::tray_tooltip())
-        .icon_as_template(true);
+        .icon_as_template(tray::is_template_icon(tray::TrayIconState::Idle, false));
 
     // Windows notification-area convention: left click opens the app, right click
     // shows the menu. Elsewhere (macOS menu bar, Linux) the menu stays on left click.
@@ -286,6 +330,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
 
     let tray = tray_builder
         .on_menu_event(|app, event| match event.id.as_ref() {
+            id if tray::on_meeting_menu_event(app, id) => {}
             "settings" => {
                 show_main_window(app);
             }
@@ -664,6 +709,34 @@ pub fn run(cli_args: CliArgs) {
             flow::commands::set_flow_settings,
             flow::commands::get_flow_builtin_app_tones,
             flow::commands::get_flow_last_app,
+            flow::commands::paste_raw_now,
+            flow::commands::get_last_dictation,
+            flow::commands::copy_last_dictation,
+            flow::commands::preview_overlay_notice,
+            flow::commands::get_system_mic_volume,
+            flow::commands::pause_recording,
+            flow::commands::resume_recording,
+            flow::commands::finish_recording,
+            session_bus::get_session_bus_state_json,
+            session_bus::undo_cancel_recording,
+            session_bus::confirm_cancel_recording,
+            session_bus::set_meeting_pill_dismissed,
+            session_bus::open_meetings_workspace,
+            meeting::commands::get_meeting_live_state,
+            meeting::commands::start_meeting_notes,
+            meeting::commands::pause_meeting_notes,
+            meeting::commands::resume_meeting_notes,
+            meeting::commands::stop_meeting_notes,
+            meeting::commands::update_live_rough_notes,
+            meeting::commands::set_meeting_auto_detect,
+            meeting::commands::dismiss_detected_call,
+            meeting::commands::list_meetings,
+            meeting::commands::get_meeting_detail,
+            meeting::commands::update_meeting_meta,
+            meeting::commands::regenerate_meeting_notes,
+            meeting::commands::export_meeting_markdown,
+            meeting::commands::copy_meeting_markdown,
+            meeting::commands::delete_meeting,
             shortcut::change_binding,
             shortcut::reset_binding,
             shortcut::change_shortcut_activation_setting,
@@ -792,6 +865,7 @@ pub fn run(cli_args: CliArgs) {
             commands::history::transcribe_file,
             commands::history::update_history_limit,
             commands::history::update_recording_retention_period,
+            commands::history::correct_history_entry_and_save_word,
             helpers::clamshell::is_laptop,
         ])
         .events(collect_events![
@@ -1164,6 +1238,11 @@ pub fn run(cli_args: CliArgs) {
                 tray::recreate_tray_icon(app);
             }
             show_main_window(app);
+        }
+        tauri::RunEvent::Exit => {
+            if let Some(rm) = app.try_state::<Arc<AudioRecordingManager>>() {
+                rm.restore_mic_boost();
+            }
         }
         // No transcription teardown on exit: transcribe.cpp runs only in the
         // worker process, which exits by itself as soon as this process's end

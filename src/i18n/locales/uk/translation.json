@@ -83,7 +83,8 @@
       "hintBoth": "Дозвольте обидва, щоб продовжити",
       "hintMicrophone": "Дозвольте мікрофон, щоб продовжити",
       "welcomeBack": "З поверненням. Продовжуємо з того місця, де ви зупинилися.",
-      "relaunch": "Комбінація клавіш після цього не реагує? <relaunch>Перезапустіть lowyap</relaunch>, і ви повернетеся просто сюди."
+      "relaunch": "Комбінація клавіш після цього не реагує? <relaunch>Перезапустіть lowyap</relaunch>, і ви повернетеся просто сюди.",
+      "localPrivacyNote": "Аудіо та вставлений текст залишаються на вашому Mac — ніколи не завантажуються на сервери lowyap."
     },
     "shell": {
       "back": "Назад",
@@ -146,7 +147,16 @@
       "downloadInstead": "Натомість завантажити {{size}}",
       "pauses": "{{name}} призупиняється на {{percent}}%",
       "resumeLater": "Оберіть її знову, щоб продовжити з місця зупинки",
-      "hint": "Завантажується, поки ви завершуєте налаштування"
+      "hint": "Завантажується, поки ви завершуєте налаштування",
+      "goals": {
+        "heading": "Швидкий вибір під ваше мовлення",
+        "englishTitle": "Миттєва англійська",
+        "englishDesc": "Найшвидше на Mac (вставка за ~0,3 с). Найкраще для чатів, документів і коду англійською.",
+        "multilingualTitle": "Багатомовний · урду, хінгліш і 99+ мов",
+        "multilingualDesc": "Вільно перемикайтеся між урду, гінді/хінглішем, арабською та англійською просто на пристрої.",
+        "advancedToggleShow": "Порівняти окремі моделі ({{count}})",
+        "advancedToggleHide": "Сховати порівняння моделей"
+      }
     },
     "demo": {
       "title": "Говоріть у будь-якій програмі за допомогою однієї комбінації клавіш",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "Мови"
+      "title": "Мови",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "Звук",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "Гучність",
         "description": "Налаштуйте гучність звукових сповіщень"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "Внизу",
             "top": "Вгорі"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "Традиційні (Тайвань)",
           "traditionalHk": "Традиційні (Гонконг)"
         }
+      },
+      "previewNotices": {
+        "callDetected": "Виявлено дзвінок"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "Показати більше",
       "showLess": "Показати менше",
       "dropTitle": "Відпустіть, щоб розшифрувати",
-      "dropDescription": "Він з'явиться в історії."
+      "dropDescription": "Він з'явиться в історії.",
+      "correctAndSave": "Виправити та зберегти до словника",
+      "correctedTranscriptLabel": "Виправлена транскрипція",
+      "correctedTranscriptPlaceholder": "Редагувати транскрипцію...",
+      "dictionaryWordLabel": "Слово для словника",
+      "dictionaryWordPlaceholder": "Необов'язкове слово або фраза для запам'ятовування",
+      "saveAndAddWord": "Зберегти та додати до словника",
+      "saveCorrection": "Зберегти виправлення",
+      "cancelEdit": "Скасувати",
+      "savingCorrection": "Збереження...",
+      "correctionAndWordSaved": "Виправлення збережено, а «{{word}}» додано до словника.",
+      "correctionSaved": "Виправлення транскрипції збережено.",
+      "correctionSaveError": "Не вдалося зберегти виправлення. Спробуйте ще раз.",
+      "correctionEmptyError": "Транскрипція не може бути порожньою."
     },
     "debug": {
       "title": "Дебаг",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "невідома модель",
     "pasteFailedTitle": "Не вдалося вставити текст",
     "pasteFailed": "Не вдалося вставити текст до активної програми.",
+    "copyLastDictation": "Копіювати текст",
+    "copiedLastDictation": "Останнє диктування скопійовано до буфера обміну",
     "transcriptionFailedTitle": "Помилка транскрипції"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "Обробка...",
     "processing": "Постобробка...",
-    "loadingModel": "Завантаження моделі..."
+    "loadingModel": "Завантаження моделі...",
+    "pasteRaw": "Без правки",
+    "pasteRawTitle": "Пропустити обробку ШІ та одразу вставити необроблений текст",
+    "noticeRestartRequired": "App updated — restart lowyap",
+    "noticeTranscriptionFailed": "Model not ready — open lowyap",
+    "noticeMicMuted": "Mic is muted — check input",
+    "noticeNoSpeech": "No voice heard — raise mic volume",
+    "noticeMicPermission": "Mic permission needed — open lowyap",
+    "noticeNoMic": "No microphone found — check input",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "Виявлено дзвінок"
+    },
+    "callStartNotes": "Почати нотатки",
+    "callDismiss": "Не зараз",
+    "transcriptCancelled": "Транскрипцію скасовано",
+    "undoCancel": "Скасувати",
+    "dismissCancel": "Закрити",
+    "meetingRecording": "Запис",
+    "meetingPaused": "Призупинено",
+    "meetingSavingNotes": "Збереження нотаток…",
+    "pauseMeeting": "Пауза",
+    "resumeMeeting": "Продовжити",
+    "stopMeeting": "Стоп",
+    "openMeetingNotes": "Відкрити нотатки зустрічі",
+    "minimizeMeetingPill": "Згорнути в рядок меню"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} може блокувати 1 комбінацію клавіш",
@@ -975,5 +1064,121 @@
     "learnMore": "Як це виправити",
     "recorderBlocked": "Зараз неможливо записати комбінацію — Secure Input у macOS блокує події клавіш. Спершу усуньте попередження про Secure Input.",
     "dismiss": "Приховати"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "Миттєвий швидкий шлях",
+      "description": "Пропускає очікування ШІ на коротких чітких фразах, щоб прості відповіді вставлялися менш ніж за 0,4 с."
+    },
+    "snippets": {
+      "title": "Голосові фрагменти",
+      "description": "Вимовте коротку ключову фразу, щоб дослівно вставити посилання, email або блок тексту.",
+      "triggerPlaceholder": "Вимовлена фраза (напр., посилання на мій календар)",
+      "expansionPlaceholder": "Текст для вставки (напр., https://cal.com/you)",
+      "add": "Додати фрагмент",
+      "empty": "Голосових фрагментів ще немає.",
+      "removeLabel": "Видалити фрагмент {{trigger}}",
+      "errors": {
+        "emptyTrigger": "Введіть ключову фразу для озвучення.",
+        "emptyExpansion": "Введіть текст, який має вставляти ця фраза.",
+        "duplicate": "Фрагмент для цієї фрази вже існує."
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "Зустрічі",
+    "title": "Нотатки зустрічей",
+    "subtitle": "Bot-free local capture + hybrid rough bullets & transcript summaries",
+    "privacyConsentBar": "100% локально та без ботів · Не забудьте повідомити учасників, що ви робите нотатки.",
+    "autoDetect": {
+      "label": "Auto-detect active calls",
+      "description": "Show a subtle non-intrusive prompt when Zoom, Meet, Teams, FaceTime, or Slack Huddles activate your mic."
+    },
+    "detectedBanner": {
+      "title": "Active call detected in {{app}}",
+      "subtitle": "Capture bot-free notes locally without joining as a participant.",
+      "startButton": "Start Note Taking",
+      "dismissButton": "Не зараз"
+    },
+    "idle": {
+      "titlePlaceholder": "Optional meeting title (e.g. Weekly Product Sync)",
+      "titleAriaLabel": "Meeting title",
+      "templateLabel": "Template",
+      "templateAriaLabel": "Meeting note template",
+      "startButton": "Start Note Taking"
+    },
+    "templates": {
+      "general": "General",
+      "one_on_one": "1:1",
+      "standup": "Standup",
+      "language_lesson": "Language Lesson",
+      "client_call": "Client Call"
+    },
+    "status": {
+      "idle": "Idle",
+      "recording": "Recording",
+      "paused": "Paused",
+      "summarizing": "Summarizing..."
+    },
+    "badges": {
+      "systemAndMic": "System + Mic",
+      "micOnly": "Mic-only",
+      "headphones": "Headphones",
+      "speakerEchoGuard": "Speaker Echo Guard",
+      "rollups": "{{count}} 5-min rollups"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "finishAndSummarize": "Finish & Summarize"
+    },
+    "live": {
+      "roughBulletsTitle": "Your Rough Bullets",
+      "roughBulletsPlaceholder": "Jot quick bullets, decisions, or timestamps...",
+      "roughBulletsHint": "Jot quick bullets or timestamps — lowyap expands them with the transcript when you finish.",
+      "saving": "Saving...",
+      "saved": "Auto-saved",
+      "transcriptTitle": "Live Transcript Feed",
+      "transcriptEmpty": "Listening for speech... Segments appear here as you and others speak."
+    },
+    "speaker": {
+      "me": "Me",
+      "others": "Others"
+    },
+    "archive": {
+      "title": "Past Meetings",
+      "searchPlaceholder": "Search titles, notes, or transcripts...",
+      "searchAriaLabel": "Search past meetings",
+      "empty": "No meetings recorded yet. Start note taking above when your next call begins.",
+      "noSearchMatch": "No meetings match your search.",
+      "segmentsCount": "{{count}} segments"
+    },
+    "detail": {
+      "selectPrompt": "Select a meeting on the left to read or edit its notes.",
+      "titleAriaLabel": "Edit meeting title",
+      "templateAriaLabel": "Change meeting template",
+      "regenerate": "Regenerate Notes",
+      "regenerating": "Regenerating...",
+      "copyMarkdown": "Copy Markdown",
+      "copied": "Copied!",
+      "delete": "Delete",
+      "confirmDelete": "Confirm Delete",
+      "cancelDelete": "Cancel",
+      "notesEmpty": "No summary notes generated yet. Click Regenerate Notes above.",
+      "bulletsPlaceholder": "Add your own bullets or action items...",
+      "saveAndReexpand": "Save & Re-expand",
+      "transcriptEmpty": "No transcript segments were recorded for this meeting.",
+      "rollupsTitle": "Rolling 5-Minute Checkpoints",
+      "source": {
+        "llm": "AI Summary",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "Offline Local Summary"
+      },
+      "tabs": {
+        "notes": "Notes",
+        "bullets": "Your Bullets",
+        "transcript": "Transcript"
+      }
+    }
   }
 }

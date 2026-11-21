@@ -1,16 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- lowyap app icon. macOS grid: 824px plate at 100px inset, ~185px corners. -->
+  <!-- lowyap macOS app icon. Apple HIG grid: 824px squircle plate at 100px inset, 185px corners. -->
   <defs>
+    <linearGradient id="plate" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#24222E"/>
+      <stop offset="100%" stop-color="#121117"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.02"/>
+    </linearGradient>
+    <linearGradient id="bubbleFill" x1="32" y1="6" x2="32" y2="57" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8B6EFF"/>
+      <stop offset="100%" stop-color="#7C5CFF"/>
+    </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
       <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
       <feOffset dy="10"/>
       <feComponentTransfer><feFuncA type="linear" slope="0.28"/></feComponentTransfer>
       <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
+    <filter id="markDepth" x="-12%" y="-10%" width="124%" height="128%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.4"/>
+      <feOffset dy="1.2"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.34"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="#121117" filter="url(#shadow)"/>
-  <g transform="translate(176 166) scale(10.5)">
-    <path fill="#7C5CFF" d="M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6Z"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#plate)" filter="url(#shadow)"/>
+  <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="url(#rim)" stroke-width="2"/>
+  <g transform="translate(176 176) scale(10.5)" filter="url(#markDepth)">
+    <path fill="url(#bubbleFill)" d="M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6Z"/>
     <path fill="#FFFFFF" d="M23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z"/>
   </g>
 </svg>

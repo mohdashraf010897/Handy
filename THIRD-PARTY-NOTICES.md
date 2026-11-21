@@ -128,6 +128,7 @@ Licence texts are available at each source link.
 |---|---|---|---|
 | Inflector | 0.11.4 | BSD-2-Clause | https://github.com/whatisinternet/inflector |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | https://github.com/oyvindln/adler2 |
+| aec3 | 0.4.0 | MIT OR BSD-3-Clause | https://github.com/RubyBit/aec3-rs |
 | ahash | 0.7.8 | MIT OR Apache-2.0 | https://github.com/tkaitchuck/ahash |
 | ahash | 0.8.12 | MIT OR Apache-2.0 | https://github.com/tkaitchuck/ahash |
 | aho-corasick | 1.1.4 | Unlicense OR MIT | https://github.com/BurntSushi/aho-corasick |

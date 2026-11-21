@@ -83,7 +83,8 @@
       "hintBoth": "請允許兩項權限以繼續",
       "hintMicrophone": "請允許麥克風以繼續",
       "welcomeBack": "歡迎回來，我們從上次中斷的地方繼續。",
-      "relaunch": "之後快捷鍵沒有反應嗎？<relaunch>重新啟動 lowyap</relaunch>，就會直接回到這裡。"
+      "relaunch": "之後快捷鍵沒有反應嗎？<relaunch>重新啟動 lowyap</relaunch>，就會直接回到這裡。",
+      "localPrivacyNote": "音訊與貼上的文字皆保留在你的 Mac 上 — 絕不會上傳至 lowyap 伺服器。"
     },
     "shell": {
       "back": "返回",
@@ -146,7 +147,16 @@
       "downloadInstead": "改為下載 {{size}}",
       "pauses": "{{name}} 會在 {{percent}}% 暫停",
       "resumeLater": "再次選擇它即可從中斷處繼續",
-      "hint": "會在您完成設定的同時下載"
+      "hint": "會在您完成設定的同時下載",
+      "goals": {
+        "heading": "依說話習慣快速選擇",
+        "englishTitle": "極速英語",
+        "englishDesc": "Mac 上最快（約 0.3 秒貼上）。最適合英語聊天、文件與寫程式。",
+        "multilingualTitle": "多語言 · 烏爾都語、印式英語及 99+ 種語言",
+        "multilingualDesc": "在裝置本機自由切換烏爾都語、印地語／印式英語、阿拉伯語與英語。",
+        "advancedToggleShow": "比較個別模型 ({{count}})",
+        "advancedToggleHide": "隱藏模型比較"
+      }
     },
     "demo": {
       "title": "一個快捷鍵，在任何應用程式中開口說話",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "語言"
+      "title": "語言",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "聲音",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "音量",
         "description": "調整聲音回饋的音量"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "底部",
             "top": "頂部"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "繁體（臺灣）",
           "traditionalHk": "繁體（香港）"
         }
+      },
+      "previewNotices": {
+        "callDetected": "偵測到通話"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "顯示更多",
       "showLess": "收合",
       "dropTitle": "拖放到此處進行轉錄",
-      "dropDescription": "它會出現在歷史記錄中。"
+      "dropDescription": "它會出現在歷史記錄中。",
+      "correctAndSave": "更正並儲存至字典",
+      "correctedTranscriptLabel": "更正後的轉錄內容",
+      "correctedTranscriptPlaceholder": "編輯轉錄內容...",
+      "dictionaryWordLabel": "字典詞彙",
+      "dictionaryWordPlaceholder": "要記住的選填詞語或片語",
+      "saveAndAddWord": "儲存並新增至字典",
+      "saveCorrection": "儲存更正",
+      "cancelEdit": "取消",
+      "savingCorrection": "儲存中...",
+      "correctionAndWordSaved": "已儲存更正並將「{{word}}」新增至字典。",
+      "correctionSaved": "已儲存轉錄更正。",
+      "correctionSaveError": "無法儲存更正，請再試一次。",
+      "correctionEmptyError": "轉錄內容不得為空。"
     },
     "debug": {
       "title": "偵錯",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "未知模型",
     "pasteFailedTitle": "貼上文字失敗",
     "pasteFailed": "無法將文字貼上至目前作用中的應用程式。",
+    "copyLastDictation": "複製文字",
+    "copiedLastDictation": "已將上次聽寫內容複製到剪貼簿",
     "transcriptionFailedTitle": "轉錄失敗"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "正在轉錄...",
     "processing": "處理中...",
-    "loadingModel": "正在載入模型..."
+    "loadingModel": "正在載入模型...",
+    "pasteRaw": "貼上原文",
+    "pasteRawTitle": "略過 AI 潤飾並立即貼上原始轉錄文字",
+    "noticeRestartRequired": "App updated — restart lowyap",
+    "noticeTranscriptionFailed": "Model not ready — open lowyap",
+    "noticeMicMuted": "Mic is muted — check input",
+    "noticeNoSpeech": "No voice heard — raise mic volume",
+    "noticeMicPermission": "Mic permission needed — open lowyap",
+    "noticeNoMic": "No microphone found — check input",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "偵測到通話"
+    },
+    "callStartNotes": "開始筆記",
+    "callDismiss": "稍後",
+    "transcriptCancelled": "已取消轉寫",
+    "undoCancel": "復原",
+    "dismissCancel": "關閉",
+    "meetingRecording": "錄音中",
+    "meetingPaused": "已暫停",
+    "meetingSavingNotes": "正在儲存筆記…",
+    "pauseMeeting": "暫停",
+    "resumeMeeting": "繼續",
+    "stopMeeting": "停止",
+    "openMeetingNotes": "開啟會議筆記",
+    "minimizeMeetingPill": "最小化至選單列"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} 可能正在阻擋 1 個快捷鍵",
@@ -975,5 +1064,121 @@
     "learnMore": "如何解決",
     "recorderBlocked": "目前無法錄製快捷鍵——macOS 的 Secure Input 正在阻擋按鍵事件。請先解決 Secure Input 警告。",
     "dismiss": "關閉"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "極速直通",
+      "description": "對簡短清晰的語句略過 AI 等待，讓簡單回覆在 0.4 秒內貼上。"
+    },
+    "snippets": {
+      "title": "語音片段",
+      "description": "說出簡短觸發詞，即可原封不動插入連結、電子郵件或常用文字區塊。",
+      "triggerPlaceholder": "口述詞語（例如：我的行事曆連結）",
+      "expansionPlaceholder": "要插入的文字（例如：https://cal.com/you）",
+      "add": "新增片段",
+      "empty": "尚無語音片段。",
+      "removeLabel": "移除片段 {{trigger}}",
+      "errors": {
+        "emptyTrigger": "請輸入口述觸發詞語。",
+        "emptyExpansion": "請輸入此詞語要插入的文字。",
+        "duplicate": "此詞語的語音片段已存在。"
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "會議",
+    "title": "會議筆記",
+    "subtitle": "Bot-free local capture + hybrid rough bullets & transcript summaries",
+    "privacyConsentBar": "100% 本機且無機器人 · 請記得告知與會者您正在記錄筆記。",
+    "autoDetect": {
+      "label": "Auto-detect active calls",
+      "description": "Show a subtle non-intrusive prompt when Zoom, Meet, Teams, FaceTime, or Slack Huddles activate your mic."
+    },
+    "detectedBanner": {
+      "title": "Active call detected in {{app}}",
+      "subtitle": "Capture bot-free notes locally without joining as a participant.",
+      "startButton": "Start Note Taking",
+      "dismissButton": "稍後"
+    },
+    "idle": {
+      "titlePlaceholder": "Optional meeting title (e.g. Weekly Product Sync)",
+      "titleAriaLabel": "Meeting title",
+      "templateLabel": "Template",
+      "templateAriaLabel": "Meeting note template",
+      "startButton": "Start Note Taking"
+    },
+    "templates": {
+      "general": "General",
+      "one_on_one": "1:1",
+      "standup": "Standup",
+      "language_lesson": "Language Lesson",
+      "client_call": "Client Call"
+    },
+    "status": {
+      "idle": "Idle",
+      "recording": "Recording",
+      "paused": "Paused",
+      "summarizing": "Summarizing..."
+    },
+    "badges": {
+      "systemAndMic": "System + Mic",
+      "micOnly": "Mic-only",
+      "headphones": "Headphones",
+      "speakerEchoGuard": "Speaker Echo Guard",
+      "rollups": "{{count}} 5-min rollups"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "finishAndSummarize": "Finish & Summarize"
+    },
+    "live": {
+      "roughBulletsTitle": "Your Rough Bullets",
+      "roughBulletsPlaceholder": "Jot quick bullets, decisions, or timestamps...",
+      "roughBulletsHint": "Jot quick bullets or timestamps — lowyap expands them with the transcript when you finish.",
+      "saving": "Saving...",
+      "saved": "Auto-saved",
+      "transcriptTitle": "Live Transcript Feed",
+      "transcriptEmpty": "Listening for speech... Segments appear here as you and others speak."
+    },
+    "speaker": {
+      "me": "Me",
+      "others": "Others"
+    },
+    "archive": {
+      "title": "Past Meetings",
+      "searchPlaceholder": "Search titles, notes, or transcripts...",
+      "searchAriaLabel": "Search past meetings",
+      "empty": "No meetings recorded yet. Start note taking above when your next call begins.",
+      "noSearchMatch": "No meetings match your search.",
+      "segmentsCount": "{{count}} segments"
+    },
+    "detail": {
+      "selectPrompt": "Select a meeting on the left to read or edit its notes.",
+      "titleAriaLabel": "Edit meeting title",
+      "templateAriaLabel": "Change meeting template",
+      "regenerate": "Regenerate Notes",
+      "regenerating": "Regenerating...",
+      "copyMarkdown": "Copy Markdown",
+      "copied": "Copied!",
+      "delete": "Delete",
+      "confirmDelete": "Confirm Delete",
+      "cancelDelete": "Cancel",
+      "notesEmpty": "No summary notes generated yet. Click Regenerate Notes above.",
+      "bulletsPlaceholder": "Add your own bullets or action items...",
+      "saveAndReexpand": "Save & Re-expand",
+      "transcriptEmpty": "No transcript segments were recorded for this meeting.",
+      "rollupsTitle": "Rolling 5-Minute Checkpoints",
+      "source": {
+        "llm": "AI Summary",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "Offline Local Summary"
+      },
+      "tabs": {
+        "notes": "Notes",
+        "bullets": "Your Bullets",
+        "transcript": "Transcript"
+      }
+    }
   }
 }

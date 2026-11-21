@@ -497,6 +497,14 @@ pub struct AudioRecordingManager {
     cached_device: Arc<Mutex<Option<(String, String)>>>,
     /// The last recording was all-zero samples, not just audio without speech.
     last_input_silent: Arc<AtomicBool>,
+    /// Temporary macOS system microphone input volume boost session.
+    mic_gain: Arc<crate::flow::mic_gain::MicGainSession>,
+    /// Lock-free Pause ⇄ Resume controller shared with `CaptureSink`.
+    pause_controller: Arc<crate::flow::session_wal::PauseController>,
+    /// Monotonic counter used to give each WAL directory a unique safe session id.
+    wal_sequence: Arc<AtomicU64>,
+    /// Active `<recordings_dir>/active/<session_id>` directory for crash-safe soft-cancel marking.
+    active_wal_dir: Arc<Mutex<Option<std::path::PathBuf>>>,
 }
 
 impl AudioRecordingManager {
@@ -538,6 +546,10 @@ impl AudioRecordingManager {
             capture_generation: Arc::new(AtomicU64::new(0)),
             cached_device: Arc::new(Mutex::new(None)),
             last_input_silent: Arc::new(AtomicBool::new(false)),
+            mic_gain: Arc::new(crate::flow::mic_gain::MicGainSession::new()),
+            pause_controller: Arc::new(crate::flow::session_wal::PauseController::new()),
+            wal_sequence: Arc::new(AtomicU64::new(0)),
+            active_wal_dir: Arc::new(Mutex::new(None)),
         };
 
         // Always-on?  Open immediately.
@@ -780,6 +792,84 @@ impl AudioRecordingManager {
         }
     }
 
+    /// Raises low macOS system microphone input volume while recording when
+    /// `auto_boost_mic_volume` is enabled in Flow settings, returning the
+    /// confirmed effective OS input volume percentage (`None` on fixed-gain mics).
+    pub fn apply_mic_boost(&self) -> Option<u8> {
+        let flow = crate::flow::settings::get(&self.app_handle);
+        let app_data = crate::portable::app_data_dir(&self.app_handle).ok();
+        let (_, effective_pct) = self.mic_gain.apply_and_effective_volume(
+            flow.auto_boost_mic_volume,
+            flow.mic_boost_target_percent,
+            app_data.as_deref(),
+        );
+        effective_pct
+    }
+
+    /// Restores the user's initial macOS system microphone input volume after
+    /// recording finishes, is cancelled, or the app exits.
+    pub fn restore_mic_boost(&self) {
+        let app_data = crate::portable::app_data_dir(&self.app_handle).ok();
+        let _ = self.mic_gain.restore(app_data.as_deref());
+    }
+
+    /// Pauses active audio capture (`< 1 µs` atomic gate) while keeping the
+    /// hardware microphone stream warm for instant resume.
+    pub fn pause_recording(&self) -> bool {
+        if !self.is_recording() {
+            return false;
+        }
+        let paused = self.pause_controller.pause();
+        if paused {
+            let _ = self
+                .app_handle
+                .emit_to("recording_overlay", "recording-paused", ());
+        }
+        paused
+    }
+
+    /// Resumes a paused recording session and notifies the overlay.
+    pub fn resume_recording(&self) -> bool {
+        if !self.is_recording()
+            || self
+                .recorder
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_none_or(OpenMicrophone::needs_reopen)
+        {
+            return false;
+        }
+        let resumed = self.pause_controller.resume();
+        if resumed {
+            let _ = self
+                .app_handle
+                .emit_to("recording_overlay", "recording-resumed", ());
+        }
+        resumed
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.pause_controller.is_paused()
+    }
+
+    /// Marks or clears the `.soft_cancelled` sentinel inside the active crash WAL
+    /// directory so a power loss during the 5-second Escape grace window never
+    /// recovers cancelled speech on next startup.
+    pub fn set_wal_soft_cancelled(&self, soft_cancelled: bool) {
+        if let Some(dir) = self
+            .active_wal_dir
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_deref()
+        {
+            if let Err(err) = crate::flow::session_wal::set_wal_soft_cancelled(dir, soft_cancelled)
+            {
+                warn!("Failed to update soft-cancel WAL sentinel: {err}");
+            }
+        }
+    }
+
     pub fn start_microphone_stream(&self) -> Result<(), anyhow::Error> {
         let mut open_flag = self.is_open.lock().unwrap();
         if *open_flag {
@@ -907,6 +997,8 @@ impl AudioRecordingManager {
             }
             mute_guard.did_mute = false;
         }
+        self.restore_mic_boost();
+        let _ = self.pause_controller.finish_session();
 
         let microphone = self.recorder.lock().unwrap().take();
         if let Some(microphone) = microphone {
@@ -952,6 +1044,15 @@ impl AudioRecordingManager {
                     );
                 }
                 let captured = stopped.sink.finish();
+                *self
+                    .active_wal_dir
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                if let Some(wal) = captured.wal {
+                    if let Err(err) = wal.commit_and_remove() {
+                        warn!("Failed to clean up committed recording WAL: {err}");
+                    }
+                }
                 self.return_vad(captured.vad);
                 self.last_input_silent
                     .store(captured.input_silent, Ordering::Release);
@@ -960,6 +1061,10 @@ impl AudioRecordingManager {
             Err(e) => {
                 // The recording and its detector are lost with the sink.
                 error!("Failed to stop recording: {e}");
+                *self
+                    .active_wal_dir
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
                 self.last_input_silent.store(false, Ordering::Release);
                 if e.kind() != ErrorKind::NotRecording {
                     microphone.failed.store(true, Ordering::Release);
@@ -1023,6 +1128,15 @@ impl AudioRecordingManager {
         // Cancel any pending lazy close (no-op in always-on mode, where
         // closes are never scheduled).
         self.close_generation.fetch_add(1, Ordering::SeqCst);
+        let effective_hw_mic_pct = self.apply_mic_boost();
+        self.pause_controller.start_session();
+        let flow = crate::flow::settings::get(&self.app_handle);
+        // Skip software AGC when OS hardware mic input volume is already confirmed
+        // >= 65% (e.g. 85% auto-boosted MacBook mic), preventing double-gain
+        // amplification of laptop room air; keep software AGC for fixed-gain
+        // Bluetooth/AirPods (`None`) or low unboosted sliders (`< 65%`).
+        let needs_software_agc =
+            flow.quiet_speech_agc_enabled && !effective_hw_mic_pct.is_some_and(|pct| pct >= 65);
 
         // A recorder can fail just before this start, ahead of its failure
         // handler; the start then reports it. Reopen and try once more.
@@ -1034,21 +1148,65 @@ impl AudioRecordingManager {
             // stream instead of leaving every subsequent start wedged.
             if let Err(e) = self.start_microphone_stream() {
                 error!("Failed to open microphone stream: {e}");
+                self.restore_mic_boost();
+                let _ = self.pause_controller.finish_session();
                 return Err(e);
             }
 
+            let vad = match self.lend_vad() {
+                Ok(vad) => vad,
+                Err(e) => {
+                    self.restore_mic_boost();
+                    let _ = self.pause_controller.finish_session();
+                    return Err(e);
+                }
+            };
+
+            let agc = needs_software_agc.then(crate::audio_toolkit::vad::NoiseGatedAgc::new);
+            let wal = crate::portable::app_data_dir(&self.app_handle)
+                .ok()
+                .and_then(|dir| {
+                    let seq = self.wal_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis())
+                        .unwrap_or(0);
+                    let session_id = format!("s-{ts}-{seq}");
+                    match crate::flow::session_wal::RecordingWal::create(
+                        &dir.join("recordings"),
+                        &session_id,
+                        crate::audio_toolkit::constants::WHISPER_SAMPLE_RATE as u32,
+                    ) {
+                        Ok(wal) => {
+                            *self
+                                .active_wal_dir
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                                Some(wal.session_dir().to_path_buf());
+                            Some(wal)
+                        }
+                        Err(err) => {
+                            warn!("Could not initialize recording crash WAL: {err}");
+                            None
+                        }
+                    }
+                });
+
             let (ready_tx, receiver) = mpsc::channel();
             let sink = CaptureSink::new(
-                self.lend_vad()?,
+                vad,
                 vad_policy,
                 Arc::clone(&self.on_levels),
                 Arc::clone(&self.on_audio),
                 ready_tx,
-            );
+            )
+            .with_controls(Some(Arc::clone(&self.pause_controller)), agc, wal);
 
             let recorder = self.recorder.lock().unwrap();
             let Some(microphone) = recorder.as_ref() else {
                 self.return_vad(sink.into_vad());
+                self.restore_mic_boost();
+                let _ = self.pause_controller.finish_session();
                 return Err(anyhow::anyhow!("Recorder not available"));
             };
             match microphone.recorder.start(sink) {
@@ -1070,6 +1228,8 @@ impl AudioRecordingManager {
                 Err(StartError { error, sink }) => {
                     self.return_vad(sink.into_vad());
                     if reopened || error.kind() == ErrorKind::AlreadyRecording {
+                        self.restore_mic_boost();
+                        let _ = self.pause_controller.finish_session();
                         return Err(anyhow::Error::new(error).context("Failed to start recorder"));
                     }
                     warn!("Microphone failed before this recording ({error}); reopening");
@@ -1235,6 +1395,8 @@ impl AudioRecordingManager {
                 };
 
                 *self.is_recording.lock().unwrap() = false;
+                let _ = self.pause_controller.finish_session();
+                self.restore_mic_boost();
                 self.set_state(&mut self.state.lock().unwrap(), RecordingState::Idle);
 
                 // In on-demand mode, close the mic (lazily if the setting is enabled)
@@ -1285,11 +1447,24 @@ impl AudioRecordingManager {
                 self.set_state(&mut state, RecordingState::Idle);
                 drop(state);
 
+                let stale_wal_dir = self
+                    .active_wal_dir
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
                 if let Some(microphone) = self.recorder.lock().unwrap().as_ref() {
-                    let _ = self.collect_recording(microphone); // Discard the result
+                    let mut discarded = self.collect_recording(microphone);
+                    discarded.fill(0.0);
+                }
+                if let Some(dir) = stale_wal_dir {
+                    if dir.exists() {
+                        let _ = std::fs::remove_dir_all(&dir);
+                    }
                 }
 
                 *self.is_recording.lock().unwrap() = false;
+                let _ = self.pause_controller.finish_session();
+                self.restore_mic_boost();
 
                 // In on-demand mode, close the mic (lazily if the setting is enabled)
                 if matches!(*self.mode.lock().unwrap(), MicrophoneMode::OnDemand) {

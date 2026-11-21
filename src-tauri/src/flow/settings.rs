@@ -3,6 +3,7 @@
 //! Kept out of `AppSettings` on purpose: upstream's settings store drops keys
 //! it does not know, and new fields there would conflict with upstream merges.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -39,7 +40,14 @@ pub struct AppToneRule {
     pub tone: Tone,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+/// Spoken trigger phrase that expands deterministically during dictation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct VoiceSnippet {
+    pub trigger: String,
+    pub expansion: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(default)]
 pub struct FlowSettings {
     /// Adjust the cleanup prompt to the frontmost app. Off by default (opt-in,
@@ -49,6 +57,39 @@ pub struct FlowSettings {
     /// User rules; they take precedence over the built-in app list.
     #[serde(deserialize_with = "lenient_rules")]
     pub app_tones: Vec<AppToneRule>,
+    /// Bypass LLM cleanup for short, clean utterances so they paste in <350ms.
+    pub fast_path_enabled: bool,
+    /// User-defined deterministic voice snippets.
+    #[serde(deserialize_with = "lenient_snippets")]
+    pub snippets: Vec<VoiceSnippet>,
+    /// Preferred Hindustani writing script (Urdu Perso-Arabic, Roman Hinglish, Devanagari, or Auto).
+    pub hindustani_script: crate::flow::multilingual::HindustaniScript,
+    /// Temporarily lift low macOS system microphone volume while recording, then restore it.
+    pub auto_boost_mic_volume: bool,
+    /// Target macOS system microphone volume percentage (`60..=100`) when auto-boost is active.
+    pub mic_boost_target_percent: u8,
+    /// Apply noise-gated automatic gain control (AGC) to soft/distant speech frames.
+    pub quiet_speech_agc_enabled: bool,
+}
+
+impl Default for FlowSettings {
+    fn default() -> Self {
+        Self {
+            tone_enabled: false,
+            app_tones: Vec::new(),
+            fast_path_enabled: true,
+            snippets: Vec::new(),
+            hindustani_script: crate::flow::multilingual::HindustaniScript::Auto,
+            auto_boost_mic_volume: true,
+            mic_boost_target_percent: crate::flow::mic_gain::DEFAULT_TARGET_PERCENT,
+            quiet_speech_agc_enabled: true,
+        }
+    }
+}
+
+/// Trims and collapses internal whitespace runs in a snippet trigger to single spaces.
+pub(crate) fn normalize_trigger(trigger: &str) -> String {
+    trigger.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Parses rules one by one so a single bad rule cannot discard the others
@@ -77,8 +118,42 @@ fn lenient_rules<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<AppTo
     Ok(rules)
 }
 
+/// Parses snippets one by one so a single malformed, empty, or duplicate entry
+/// is skipped with a warning instead of discarding `flow_settings.json`.
+fn lenient_snippets<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<VoiceSnippet>, D::Error> {
+    let raw = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    let mut snippets = Vec::with_capacity(raw.len());
+    let mut seen = HashSet::with_capacity(raw.len());
+    for value in raw {
+        let (Some(raw_trigger), Some(raw_expansion)) = (
+            value.get("trigger").and_then(|v| v.as_str()),
+            value.get("expansion").and_then(|v| v.as_str()),
+        ) else {
+            warn!("flow: skipping a voice snippet without trigger and expansion strings");
+            continue;
+        };
+        let trigger = normalize_trigger(raw_trigger);
+        let expansion = raw_expansion.trim();
+        if trigger.is_empty() || expansion.is_empty() {
+            warn!("flow: skipping a voice snippet with an empty trigger or expansion");
+            continue;
+        }
+        if !seen.insert(trigger.to_lowercase()) {
+            warn!("flow: skipping a voice snippet with a duplicate trigger");
+            continue;
+        }
+        snippets.push(VoiceSnippet {
+            trigger,
+            expansion: expansion.to_string(),
+        });
+    }
+    Ok(snippets)
+}
+
 impl FlowSettings {
-    /// Trims rule ids and rejects empty ones.
+    /// Trims rule ids, normalizes snippets, and rejects empty or duplicate entries.
     pub fn validated(mut self) -> Result<Self, String> {
         for rule in &mut self.app_tones {
             let trimmed = rule.app_id.trim();
@@ -87,6 +162,28 @@ impl FlowSettings {
             }
             rule.app_id = trimmed.to_string();
         }
+
+        let mut seen_triggers = HashSet::with_capacity(self.snippets.len());
+        for snippet in &mut self.snippets {
+            let trigger = normalize_trigger(&snippet.trigger);
+            if trigger.is_empty() {
+                return Err("Snippet trigger cannot be empty".to_string());
+            }
+            let expansion = snippet.expansion.trim();
+            if expansion.is_empty() {
+                return Err("Snippet expansion cannot be empty".to_string());
+            }
+            if !seen_triggers.insert(trigger.to_lowercase()) {
+                return Err(format!("Duplicate snippet trigger: {trigger}"));
+            }
+            snippet.trigger = trigger;
+            snippet.expansion = expansion.to_string();
+        }
+
+        if !(60..=100).contains(&self.mic_boost_target_percent) {
+            return Err("Mic boost target must be between 60% and 100%".to_string());
+        }
+
         Ok(self)
     }
 }
@@ -203,6 +300,12 @@ mod tests {
                 app_id: "com.example.app".into(),
                 tone: Tone::Formal,
             }],
+            fast_path_enabled: true,
+            snippets: vec![VoiceSnippet {
+                trigger: "my link".into(),
+                expansion: "https://example.com".into(),
+            }],
+            ..FlowSettings::default()
         }
     }
 
@@ -374,5 +477,109 @@ mod tests {
         let mut empty = sample();
         empty.app_tones[0].app_id = " ".into();
         assert!(empty.validated().is_err());
+    }
+
+    #[test]
+    fn fast_path_defaults_to_true_when_missing_from_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(FILE_NAME);
+        fs::write(&path, r#"{"tone_enabled":false,"app_tones":[]}"#).expect("write");
+        let loaded = load_from(&path).expect("load");
+        assert!(loaded.fast_path_enabled);
+        assert!(loaded.snippets.is_empty());
+
+        fs::write(&path, r#"{"fast_path_enabled":false}"#).expect("write");
+        let disabled = load_from(&path).expect("load");
+        assert!(!disabled.fast_path_enabled);
+    }
+
+    #[test]
+    fn lenient_snippets_skips_invalid_empty_and_duplicate_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(FILE_NAME);
+        fs::write(
+            &path,
+            r#"{"snippets":[
+                {"trigger":"  My   Zoom  ","expansion":"  https://zoom.us/j/1  "},
+                {"trigger":"   ","expansion":"ignored"},
+                {"trigger":"valid","expansion":"   "},
+                {"trigger":"my zoom","expansion":"https://zoom.us/j/duplicate"},
+                {"trigger":123,"expansion":"bad"},
+                {"trigger":"sig","expansion":"  Best,\nAlex  "}
+            ]}"#,
+        )
+        .expect("write");
+        let loaded = load_from(&path).expect("load");
+        assert_eq!(
+            loaded.snippets,
+            vec![
+                VoiceSnippet {
+                    trigger: "My Zoom".into(),
+                    expansion: "https://zoom.us/j/1".into(),
+                },
+                VoiceSnippet {
+                    trigger: "sig".into(),
+                    expansion: "Best,\nAlex".into(),
+                },
+            ]
+        );
+        assert!(path.exists(), "lenient recovery preserves settings file");
+    }
+
+    #[test]
+    fn snippet_validation_normalizes_and_rejects_empty_or_duplicates() {
+        let valid = FlowSettings {
+            snippets: vec![VoiceSnippet {
+                trigger: "  my   cal   link ".into(),
+                expansion: "  Line 1\n  Line 2  ".into(),
+            }],
+            ..FlowSettings::default()
+        }
+        .validated()
+        .expect("valid");
+        assert_eq!(valid.snippets[0].trigger, "my cal link");
+        assert_eq!(valid.snippets[0].expansion, "Line 1\n  Line 2");
+
+        let empty_trigger = FlowSettings {
+            snippets: vec![VoiceSnippet {
+                trigger: "   ".into(),
+                expansion: "ok".into(),
+            }],
+            ..FlowSettings::default()
+        }
+        .validated();
+        assert_eq!(
+            empty_trigger.unwrap_err(),
+            "Snippet trigger cannot be empty"
+        );
+
+        let empty_expansion = FlowSettings {
+            snippets: vec![VoiceSnippet {
+                trigger: "sig".into(),
+                expansion: " \n\t ".into(),
+            }],
+            ..FlowSettings::default()
+        }
+        .validated();
+        assert_eq!(
+            empty_expansion.unwrap_err(),
+            "Snippet expansion cannot be empty"
+        );
+
+        let dup = FlowSettings {
+            snippets: vec![
+                VoiceSnippet {
+                    trigger: "My Zoom".into(),
+                    expansion: "https://zoom.us/1".into(),
+                },
+                VoiceSnippet {
+                    trigger: "  my   zoom ".into(),
+                    expansion: "https://zoom.us/2".into(),
+                },
+            ],
+            ..FlowSettings::default()
+        }
+        .validated();
+        assert_eq!(dup.unwrap_err(), "Duplicate snippet trigger: my zoom");
     }
 }

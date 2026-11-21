@@ -83,7 +83,8 @@
       "hintBoth": "Devam etmek için ikisine de izin verin",
       "hintMicrophone": "Devam etmek için mikrofona izin verin",
       "welcomeBack": "Tekrar hoş geldiniz. Kaldığınız yerden devam ediyoruz.",
-      "relaunch": "Bundan sonra kısayol yanıt vermiyor mu? <relaunch>lowyap'ı yeniden başlatın</relaunch>, doğrudan buraya döneceksiniz."
+      "relaunch": "Bundan sonra kısayol yanıt vermiyor mu? <relaunch>lowyap'ı yeniden başlatın</relaunch>, doğrudan buraya döneceksiniz.",
+      "localPrivacyNote": "Ses ve yapıştırılan metin Mac'inizde kalır — asla lowyap sunucularına yüklenmez."
     },
     "shell": {
       "back": "Geri",
@@ -146,7 +147,16 @@
       "downloadInstead": "Bunun yerine {{size}} indir",
       "pauses": "{{name}} %{{percent}} noktasında duraklıyor",
       "resumeLater": "Tekrar seçtiğinizde kaldığı yerden devam eder",
-      "hint": "Kurulumu bitirirken iner"
+      "hint": "Kurulumu bitirirken iner",
+      "goals": {
+        "heading": "Konuşma tarzınıza göre hızlı seçim",
+        "englishTitle": "Anında İngilizce",
+        "englishDesc": "Mac'te en hızlısı (~0,3 sn yapıştırma). İngilizce sohbet, belge ve kodlama için ideal.",
+        "multilingualTitle": "Çok dilli · Urduca, Hinglish ve 99+ dil",
+        "multilingualDesc": "Cihaz üzerinde Urduca, Hintçe/Hinglish, Arapça ve İngilizce arasında özgürce geçiş yapın.",
+        "advancedToggleShow": "Modelleri tek tek karşılaştır ({{count}})",
+        "advancedToggleHide": "Model karşılaştırmasını gizle"
+      }
     },
     "demo": {
       "title": "Tek kısayolla her uygulamada konuşun",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "Diller"
+      "title": "Diller",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "Ses",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "Ses Seviyesi",
         "description": "Sesli geri bildirimlerin ses seviyesini ayarlayın"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "Alt",
             "top": "Üst"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "Geleneksel (Tayvan)",
           "traditionalHk": "Geleneksel (Hong Kong)"
         }
+      },
+      "previewNotices": {
+        "callDetected": "Arama algılandı"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "Daha fazla göster",
       "showLess": "Daha az göster",
       "dropTitle": "Yazıya dökmek için bırakın",
-      "dropDescription": "Geçmiş'te görünecek."
+      "dropDescription": "Geçmiş'te görünecek.",
+      "correctAndSave": "Düzelt ve sözlüğe kaydet",
+      "correctedTranscriptLabel": "Düzeltilmiş transkripsiyon",
+      "correctedTranscriptPlaceholder": "Transkripsiyonu düzenle...",
+      "dictionaryWordLabel": "Sözlük kelimesi",
+      "dictionaryWordPlaceholder": "Hatırlanacak isteğe bağlı kelime veya ifade",
+      "saveAndAddWord": "Kaydet ve Sözlüğe Ekle",
+      "saveCorrection": "Düzeltmeyi Kaydet",
+      "cancelEdit": "İptal",
+      "savingCorrection": "Kaydediliyor...",
+      "correctionAndWordSaved": "Düzeltme kaydedildi ve \"{{word}}\" sözlüğe eklendi.",
+      "correctionSaved": "Transkripsiyon düzeltmesi kaydedildi.",
+      "correctionSaveError": "Düzeltme kaydedilemedi. Lütfen tekrar deneyin.",
+      "correctionEmptyError": "Transkripsiyon boş olamaz."
     },
     "debug": {
       "title": "Hata Ayıklama",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "bilinmeyen model",
     "pasteFailedTitle": "Metin yapıştırılamadı",
     "pasteFailed": "Metin etkin uygulamaya yapıştırılamadı.",
+    "copyLastDictation": "Metni kopyala",
+    "copiedLastDictation": "Son dikte panoya kopyalandı",
     "transcriptionFailedTitle": "Transkripsiyon başarısız oldu"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "Transkribe ediliyor...",
     "processing": "İşleniyor...",
-    "loadingModel": "Model yükleniyor..."
+    "loadingModel": "Model yükleniyor...",
+    "pasteRaw": "Ham yapıştır",
+    "pasteRawTitle": "YZ düzeltmesini atla ve ham metni hemen yapıştır",
+    "noticeRestartRequired": "App updated — restart lowyap",
+    "noticeTranscriptionFailed": "Model not ready — open lowyap",
+    "noticeMicMuted": "Mic is muted — check input",
+    "noticeNoSpeech": "No voice heard — raise mic volume",
+    "noticeMicPermission": "Mic permission needed — open lowyap",
+    "noticeNoMic": "No microphone found — check input",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "Arama algılandı"
+    },
+    "callStartNotes": "Notları Başlat",
+    "callDismiss": "Şimdi değil",
+    "transcriptCancelled": "Transkript iptal edildi",
+    "undoCancel": "Geri Al",
+    "dismissCancel": "Kapat",
+    "meetingRecording": "Kaydediliyor",
+    "meetingPaused": "Duraklatıldı",
+    "meetingSavingNotes": "Notlar kaydediliyor…",
+    "pauseMeeting": "Duraklat",
+    "resumeMeeting": "Sürdür",
+    "stopMeeting": "Durdur",
+    "openMeetingNotes": "Toplantı notlarını aç",
+    "minimizeMeetingPill": "Menü çubuğuna küçült"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} 1 kısayolu engelliyor olabilir",
@@ -975,5 +1064,121 @@
     "learnMore": "Bu nasıl düzeltilir",
     "recorderBlocked": "Şu anda kısayol kaydedilemiyor — macOS Secure Input tuş olaylarını engelliyor. Önce Secure Input uyarısını giderin.",
     "dismiss": "Kapat"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "Anında hızlı geçiş",
+      "description": "Kısa ve net ifadelerde YZ beklemesini atlayarak basit yanıtları 0,4 sn altında yapıştırır."
+    },
+    "snippets": {
+      "title": "Sesli parçacıklar",
+      "description": "Bir bağlantıyı, e-postayı veya metin bloğunu olduğu gibi eklemek için kısa bir tetikleyici ifade söyleyin.",
+      "triggerPlaceholder": "Söylenecek ifade (ör. takvim bağlantım)",
+      "expansionPlaceholder": "Eklenecek metin (ör. https://cal.com/you)",
+      "add": "Parçacık ekle",
+      "empty": "Henüz sesli parçacık yok.",
+      "removeLabel": "{{trigger}} parçacığını kaldır",
+      "errors": {
+        "emptyTrigger": "Söylenecek tetikleyici ifadeyi girin.",
+        "emptyExpansion": "Bu ifadenin ekleyeceği metni girin.",
+        "duplicate": "Bu ifade için zaten bir parçacık var."
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "Toplantılar",
+    "title": "Toplantı Notları",
+    "subtitle": "Bot-free local capture + hybrid rough bullets & transcript summaries",
+    "privacyConsentBar": "%100 yerel ve botsuz · Katılımcılara not aldığınızı bildirmeyi unutmayın.",
+    "autoDetect": {
+      "label": "Auto-detect active calls",
+      "description": "Show a subtle non-intrusive prompt when Zoom, Meet, Teams, FaceTime, or Slack Huddles activate your mic."
+    },
+    "detectedBanner": {
+      "title": "Active call detected in {{app}}",
+      "subtitle": "Capture bot-free notes locally without joining as a participant.",
+      "startButton": "Start Note Taking",
+      "dismissButton": "Şimdi değil"
+    },
+    "idle": {
+      "titlePlaceholder": "Optional meeting title (e.g. Weekly Product Sync)",
+      "titleAriaLabel": "Meeting title",
+      "templateLabel": "Template",
+      "templateAriaLabel": "Meeting note template",
+      "startButton": "Start Note Taking"
+    },
+    "templates": {
+      "general": "General",
+      "one_on_one": "1:1",
+      "standup": "Standup",
+      "language_lesson": "Language Lesson",
+      "client_call": "Client Call"
+    },
+    "status": {
+      "idle": "Idle",
+      "recording": "Recording",
+      "paused": "Paused",
+      "summarizing": "Summarizing..."
+    },
+    "badges": {
+      "systemAndMic": "System + Mic",
+      "micOnly": "Mic-only",
+      "headphones": "Headphones",
+      "speakerEchoGuard": "Speaker Echo Guard",
+      "rollups": "{{count}} 5-min rollups"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "finishAndSummarize": "Finish & Summarize"
+    },
+    "live": {
+      "roughBulletsTitle": "Your Rough Bullets",
+      "roughBulletsPlaceholder": "Jot quick bullets, decisions, or timestamps...",
+      "roughBulletsHint": "Jot quick bullets or timestamps — lowyap expands them with the transcript when you finish.",
+      "saving": "Saving...",
+      "saved": "Auto-saved",
+      "transcriptTitle": "Live Transcript Feed",
+      "transcriptEmpty": "Listening for speech... Segments appear here as you and others speak."
+    },
+    "speaker": {
+      "me": "Me",
+      "others": "Others"
+    },
+    "archive": {
+      "title": "Past Meetings",
+      "searchPlaceholder": "Search titles, notes, or transcripts...",
+      "searchAriaLabel": "Search past meetings",
+      "empty": "No meetings recorded yet. Start note taking above when your next call begins.",
+      "noSearchMatch": "No meetings match your search.",
+      "segmentsCount": "{{count}} segments"
+    },
+    "detail": {
+      "selectPrompt": "Select a meeting on the left to read or edit its notes.",
+      "titleAriaLabel": "Edit meeting title",
+      "templateAriaLabel": "Change meeting template",
+      "regenerate": "Regenerate Notes",
+      "regenerating": "Regenerating...",
+      "copyMarkdown": "Copy Markdown",
+      "copied": "Copied!",
+      "delete": "Delete",
+      "confirmDelete": "Confirm Delete",
+      "cancelDelete": "Cancel",
+      "notesEmpty": "No summary notes generated yet. Click Regenerate Notes above.",
+      "bulletsPlaceholder": "Add your own bullets or action items...",
+      "saveAndReexpand": "Save & Re-expand",
+      "transcriptEmpty": "No transcript segments were recorded for this meeting.",
+      "rollupsTitle": "Rolling 5-Minute Checkpoints",
+      "source": {
+        "llm": "AI Summary",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "Offline Local Summary"
+      },
+      "tabs": {
+        "notes": "Notes",
+        "bullets": "Your Bullets",
+        "transcript": "Transcript"
+      }
+    }
   }
 }

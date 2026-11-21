@@ -49,6 +49,100 @@ pub fn get_flow_last_app(app: AppHandle) -> Option<LastFlowApp> {
     last_flow_app(last_app()?, &settings::get(&app))
 }
 
+/// Requests immediate raw paste while LLM polishing is in flight.
+#[tauri::command]
+#[specta::specta]
+pub fn paste_raw_now() -> Result<bool, String> {
+    Ok(crate::flow::paste_guard::request_paste_raw_now())
+}
+
+/// Returns the latest non-empty dictation text held in memory for paste rescue.
+#[tauri::command]
+#[specta::specta]
+pub fn get_last_dictation() -> Option<String> {
+    crate::flow::paste_guard::get_last_dictation()
+}
+
+/// Copies a remembered dictation (`dictation_id` if provided, else the latest)
+/// to the system clipboard.
+#[tauri::command]
+#[specta::specta]
+pub fn copy_last_dictation(app: AppHandle, dictation_id: Option<u32>) -> Result<bool, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let Some(text) = crate::flow::paste_guard::get_dictation(dictation_id) else {
+        return Ok(false);
+    };
+    app.clipboard()
+        .write_text(text)
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+const VALID_PREVIEW_NOTICES: &[&str] = &[
+    "mic_muted",
+    "no_speech",
+    "mic_permission",
+    "no_mic",
+    "restart_required",
+    "transcription_failed",
+    "call_detected",
+];
+
+/// Triggers an on-demand preview of a floating menu-bar status notice pill.
+#[tauri::command]
+#[specta::specta]
+pub fn preview_overlay_notice(app: AppHandle, kind: String) -> Result<(), String> {
+    if !VALID_PREVIEW_NOTICES.contains(&kind.as_str()) {
+        return Err(format!("Unsupported overlay notice preview kind: {kind}"));
+    }
+    crate::overlay::show_overlay_notice_preview(&app, &kind);
+    Ok(())
+}
+
+/// Reads the current system microphone input volume percentage (`0..=100`) on
+/// supported platforms (macOS CoreAudio / osascript).
+#[tauri::command]
+#[specta::specta]
+pub fn get_system_mic_volume() -> Option<u8> {
+    crate::flow::mic_gain::current_input_volume_percent()
+}
+
+/// Pauses active recording capture while keeping the mic stream warm, and locks
+/// any held shortcut so releasing the key will not prematurely stop the session.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn pause_recording(app: AppHandle) -> bool {
+    use tauri::Manager;
+    app.try_state::<crate::TranscriptionCoordinator>()
+        .is_some_and(|coordinator| coordinator.pause_recording(true))
+}
+
+/// Resumes a paused recording capture session.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn resume_recording(app: AppHandle) -> bool {
+    use tauri::Manager;
+    app.try_state::<crate::TranscriptionCoordinator>()
+        .is_some_and(|coordinator| coordinator.pause_recording(false))
+}
+
+/// Completes and transcribes the active recording session from the floating
+/// overlay pill's "Done" button.
+#[tauri::command]
+#[specta::specta]
+pub fn finish_recording(app: AppHandle) -> bool {
+    use tauri::Manager;
+    if !matches!(
+        crate::session_bus::bus().snapshot().dictation,
+        lowyap_ports::DictationPhase::Recording { .. }
+    ) {
+        return false;
+    }
+    app.try_state::<crate::transcription_coordinator::TranscriptionCoordinator>()
+        .is_some_and(|coord| coord.finish_active())
+}
+
 fn last_flow_app(context: AppContext, settings: &FlowSettings) -> Option<LastFlowApp> {
     let app_id = context.app_id?;
     let matched = matching_rule(&app_id, settings);
@@ -112,6 +206,7 @@ mod tests {
                 app_id: "com.tinyspeck.*".into(),
                 tone: Tone::Formal,
             }],
+            ..FlowSettings::default()
         };
         let result = command_result(&user).expect("remembered");
         assert_eq!(result.tone, Tone::Formal);

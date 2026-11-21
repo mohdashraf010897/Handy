@@ -1,7 +1,9 @@
-//! Product identity used at runtime. Renaming the app starts here; bundle
-//! names and icons live in `tauri.conf.json`.
+//! Product identity used at runtime. Canonical source lives in
+//! `design/brand/brand.json`; unit tests below enforce parity across Rust,
+//! TypeScript, `tauri.conf.json`, `index.html`, and `site/index.html`.
 
 pub const NAME: &str = "lowyap";
+pub const TAGLINE: &str = "lowkey yap. it types.";
 pub const HOMEPAGE: &str = "https://github.com/mohdashraf010897/lowyap";
 pub const USER_AGENT: &str = concat!(
     "lowyap/",
@@ -21,25 +23,72 @@ mod tests {
     }
 
     #[test]
-    fn bundle_config_does_not_use_upstream_updater_or_signing() {
-        let conf = include_str!("../tauri.conf.json");
+    fn brand_json_stays_in_sync_across_stack() {
+        let brand: serde_json::Value =
+            serde_json::from_str(include_str!("../../design/brand/brand.json")).unwrap();
+        assert_eq!(brand["name"], NAME);
+        assert_eq!(brand["tagline"], TAGLINE);
+        assert_eq!(brand["homepage"], HOMEPAGE);
+
+        let html = include_str!("../../index.html");
         assert!(
-            !conf.contains("cjpais"),
+            html.contains(&format!("<title>{NAME}</title>")),
+            "index.html title does not match brand name"
+        );
+
+        let site = include_str!("../../site/index.html");
+        assert!(site.contains(TAGLINE), "site/index.html missing tagline");
+        let violet_ui = brand["colors"]["violetUi"]
+            .as_str()
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(
+            site.contains(&violet_ui),
+            "site/index.html primary palette drifted from brand.json"
+        );
+    }
+
+    #[test]
+    fn bundle_config_does_not_use_upstream_updater_or_signing() {
+        let conf_raw = include_str!("../tauri.conf.json");
+        assert!(
+            !conf_raw.contains("cjpais"),
             "tauri.conf.json references upstream"
         );
         assert!(
-            !conf.contains("signCommand"),
+            !conf_raw.contains("signCommand"),
             "signing is per-build, not default"
         );
-        assert!(conf.contains(&format!("{HOMEPAGE}/releases/latest/download/latest.json")));
+        assert!(conf_raw.contains(&format!("{HOMEPAGE}/releases/latest/download/latest.json")));
+
+        let conf: serde_json::Value = serde_json::from_str(conf_raw).unwrap();
+        let csp = conf["app"]["security"]["csp"].as_str().unwrap_or_default();
+        assert!(
+            csp.contains("default-src 'self'") && csp.contains("object-src 'none'"),
+            "tauri.conf.json must enforce a non-null CSP"
+        );
+        let allow = conf["app"]["security"]["assetProtocol"]["scope"]["allow"]
+            .as_array()
+            .expect("assetProtocol.scope.allow must be an array");
+        assert!(
+            !allow.iter().any(|entry| entry.as_str() == Some("**")),
+            "assetProtocol.scope.allow must not expose wildcard '**'"
+        );
+        assert_eq!(
+            conf["app"]["security"]["assetProtocol"]["scope"]["requireLiteralLeadingDot"], true,
+            "assetProtocol must block hidden dotfile traversal"
+        );
     }
 
     #[test]
     fn bundle_name_and_binary_match_brand() {
+        let brand: serde_json::Value =
+            serde_json::from_str(include_str!("../../design/brand/brand.json")).unwrap();
         let conf: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(conf["productName"], NAME);
         assert_eq!(conf["mainBinaryName"], NAME);
+        assert_eq!(conf["identifier"], brand["identifier"]);
         assert!(!conf["identifier"]
             .as_str()
             .unwrap()
@@ -51,6 +100,7 @@ mod tests {
     fn frontend_brand_mirrors_runtime_brand() {
         let ts = include_str!("../../src/lib/brand.ts");
         assert!(ts.contains(&format!("BRAND_NAME = \"{NAME}\"")));
+        assert!(ts.contains(&format!("BRAND_TAGLINE = \"{TAGLINE}\"")));
         assert!(ts.contains(&format!("BRAND_HOMEPAGE = \"{HOMEPAGE}\"")));
     }
 

@@ -83,7 +83,8 @@
       "hintBoth": "Izinkan keduanya untuk melanjutkan",
       "hintMicrophone": "Izinkan mikrofon untuk melanjutkan",
       "welcomeBack": "Selamat datang kembali. Kita lanjutkan dari tadi.",
-      "relaunch": "Pintasan tidak merespons setelah ini? <relaunch>Luncurkan ulang lowyap</relaunch> dan Anda akan kembali tepat ke sini."
+      "relaunch": "Pintasan tidak merespons setelah ini? <relaunch>Luncurkan ulang lowyap</relaunch> dan Anda akan kembali tepat ke sini.",
+      "localPrivacyNote": "Audio dan teks yang ditempel tetap di Mac Anda — tidak pernah diunggah ke server lowyap."
     },
     "shell": {
       "back": "Kembali",
@@ -146,7 +147,16 @@
       "downloadInstead": "Unduh {{size}} saja",
       "pauses": "{{name}} berhenti sejenak di {{percent}}%",
       "resumeLater": "Pilih lagi untuk melanjutkan dari titik terhenti",
-      "hint": "Diunduh selagi Anda menyelesaikan penyiapan"
+      "hint": "Diunduh selagi Anda menyelesaikan penyiapan",
+      "goals": {
+        "heading": "Pilihan cepat sesuai cara Anda berbicara",
+        "englishTitle": "Bahasa Inggris Instan",
+        "englishDesc": "Tercepat di Mac (~0,3 dtk tempel). Terbaik untuk chat, dokumen, dan coding bahasa Inggris.",
+        "multilingualTitle": "Multibahasa · Urdu, Hinglish & 99+ bahasa",
+        "multilingualDesc": "Beralih bebas antara bahasa Urdu, Hindi/Hinglish, Arab, dan Inggris langsung di perangkat.",
+        "advancedToggleShow": "Bandingkan model satu per satu ({{count}})",
+        "advancedToggleHide": "Sembunyikan perbandingan model"
+      }
     },
     "demo": {
       "title": "Bicara di aplikasi apa pun, dengan satu pintasan",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "Bahasa"
+      "title": "Bahasa",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "Suara",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "Volume",
         "description": "Sesuaikan volume suara umpan balik audio"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "Bawah",
             "top": "Atas"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "Tradisional (Taiwan)",
           "traditionalHk": "Tradisional (Hong Kong)"
         }
+      },
+      "previewNotices": {
+        "callDetected": "Panggilan terdeteksi"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "Tampilkan lebih banyak",
       "showLess": "Tampilkan lebih sedikit",
       "dropTitle": "Lepaskan untuk mentranskripsi",
-      "dropDescription": "Akan muncul di Riwayat."
+      "dropDescription": "Akan muncul di Riwayat.",
+      "correctAndSave": "Koreksi & simpan ke kamus",
+      "correctedTranscriptLabel": "Transkripsi yang dikoreksi",
+      "correctedTranscriptPlaceholder": "Edit transkripsi...",
+      "dictionaryWordLabel": "Kata kamus",
+      "dictionaryWordPlaceholder": "Kata atau frasa opsional untuk diingat",
+      "saveAndAddWord": "Simpan & Tambahkan ke Kamus",
+      "saveCorrection": "Simpan Koreksi",
+      "cancelEdit": "Batal",
+      "savingCorrection": "Menyimpan...",
+      "correctionAndWordSaved": "Koreksi disimpan dan \"{{word}}\" ditambahkan ke kamus.",
+      "correctionSaved": "Koreksi transkripsi disimpan.",
+      "correctionSaveError": "Gagal menyimpan koreksi. Silakan coba lagi.",
+      "correctionEmptyError": "Transkripsi tidak boleh kosong."
     },
     "debug": {
       "title": "Debug",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "model tidak dikenal",
     "pasteFailedTitle": "Gagal Menempelkan Teks",
     "pasteFailed": "Teks tidak dapat ditempelkan ke aplikasi aktif.",
+    "copyLastDictation": "Salin teks",
+    "copiedLastDictation": "Dikte terakhir disalin ke papan klip",
     "transcriptionFailedTitle": "Transkripsi Gagal"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "Mentranskripsikan...",
     "processing": "Memproses...",
-    "loadingModel": "Memuat model..."
+    "loadingModel": "Memuat model...",
+    "pasteRaw": "Tempel mentah",
+    "pasteRawTitle": "Lewati polesan AI dan tempel transkrip mentah segera",
+    "noticeRestartRequired": "App updated — restart lowyap",
+    "noticeTranscriptionFailed": "Model not ready — open lowyap",
+    "noticeMicMuted": "Mic is muted — check input",
+    "noticeNoSpeech": "No voice heard — raise mic volume",
+    "noticeMicPermission": "Mic permission needed — open lowyap",
+    "noticeNoMic": "No microphone found — check input",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "Panggilan terdeteksi"
+    },
+    "callStartNotes": "Mulai Catatan",
+    "callDismiss": "Nanti saja",
+    "transcriptCancelled": "Transkrip dibatalkan",
+    "undoCancel": "Urungkan",
+    "dismissCancel": "Tutup",
+    "meetingRecording": "Merekam",
+    "meetingPaused": "Dijeda",
+    "meetingSavingNotes": "Menyimpan catatan…",
+    "pauseMeeting": "Jeda",
+    "resumeMeeting": "Lanjutkan",
+    "stopMeeting": "Berhenti",
+    "openMeetingNotes": "Buka catatan rapat",
+    "minimizeMeetingPill": "Minimalkan ke bilah menu"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} mungkin memblokir 1 pintasan",
@@ -975,5 +1064,121 @@
     "learnMore": "Cara memperbaiki",
     "recorderBlocked": "Pintasan tidak dapat direkam saat ini — macOS Secure Input memblokir peristiwa tombol. Selesaikan peringatan Secure Input terlebih dahulu.",
     "dismiss": "Tutup"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "Jalur cepat instan",
+      "description": "Lewati waktu tunggu AI pada frasa pendek yang jelas agar balasan singkat ditempel dalam <0,4 dtk."
+    },
+    "snippets": {
+      "title": "Cuplikan suara",
+      "description": "Ucapkan frasa pemicu singkat untuk menyisipkan tautan, email, atau blok teks secara persis.",
+      "triggerPlaceholder": "Frasa ucapan (mis. tautan kalender saya)",
+      "expansionPlaceholder": "Teks yang disisipkan (mis. https://cal.com/you)",
+      "add": "Tambah cuplikan",
+      "empty": "Belum ada cuplikan suara.",
+      "removeLabel": "Hapus cuplikan {{trigger}}",
+      "errors": {
+        "emptyTrigger": "Masukkan frasa pemicu yang diucapkan.",
+        "emptyExpansion": "Masukkan teks yang harus disisipkan frasa ini.",
+        "duplicate": "Cuplikan untuk frasa ini sudah ada."
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "Rapat",
+    "title": "Catatan Rapat",
+    "subtitle": "Bot-free local capture + hybrid rough bullets & transcript summaries",
+    "privacyConsentBar": "100% lokal & tanpa bot · Ingat untuk memberi tahu peserta bahwa Anda sedang mencatat.",
+    "autoDetect": {
+      "label": "Auto-detect active calls",
+      "description": "Show a subtle non-intrusive prompt when Zoom, Meet, Teams, FaceTime, or Slack Huddles activate your mic."
+    },
+    "detectedBanner": {
+      "title": "Active call detected in {{app}}",
+      "subtitle": "Capture bot-free notes locally without joining as a participant.",
+      "startButton": "Start Note Taking",
+      "dismissButton": "Nanti saja"
+    },
+    "idle": {
+      "titlePlaceholder": "Optional meeting title (e.g. Weekly Product Sync)",
+      "titleAriaLabel": "Meeting title",
+      "templateLabel": "Template",
+      "templateAriaLabel": "Meeting note template",
+      "startButton": "Start Note Taking"
+    },
+    "templates": {
+      "general": "General",
+      "one_on_one": "1:1",
+      "standup": "Standup",
+      "language_lesson": "Language Lesson",
+      "client_call": "Client Call"
+    },
+    "status": {
+      "idle": "Idle",
+      "recording": "Recording",
+      "paused": "Paused",
+      "summarizing": "Summarizing..."
+    },
+    "badges": {
+      "systemAndMic": "System + Mic",
+      "micOnly": "Mic-only",
+      "headphones": "Headphones",
+      "speakerEchoGuard": "Speaker Echo Guard",
+      "rollups": "{{count}} 5-min rollups"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "finishAndSummarize": "Finish & Summarize"
+    },
+    "live": {
+      "roughBulletsTitle": "Your Rough Bullets",
+      "roughBulletsPlaceholder": "Jot quick bullets, decisions, or timestamps...",
+      "roughBulletsHint": "Jot quick bullets or timestamps — lowyap expands them with the transcript when you finish.",
+      "saving": "Saving...",
+      "saved": "Auto-saved",
+      "transcriptTitle": "Live Transcript Feed",
+      "transcriptEmpty": "Listening for speech... Segments appear here as you and others speak."
+    },
+    "speaker": {
+      "me": "Me",
+      "others": "Others"
+    },
+    "archive": {
+      "title": "Past Meetings",
+      "searchPlaceholder": "Search titles, notes, or transcripts...",
+      "searchAriaLabel": "Search past meetings",
+      "empty": "No meetings recorded yet. Start note taking above when your next call begins.",
+      "noSearchMatch": "No meetings match your search.",
+      "segmentsCount": "{{count}} segments"
+    },
+    "detail": {
+      "selectPrompt": "Select a meeting on the left to read or edit its notes.",
+      "titleAriaLabel": "Edit meeting title",
+      "templateAriaLabel": "Change meeting template",
+      "regenerate": "Regenerate Notes",
+      "regenerating": "Regenerating...",
+      "copyMarkdown": "Copy Markdown",
+      "copied": "Copied!",
+      "delete": "Delete",
+      "confirmDelete": "Confirm Delete",
+      "cancelDelete": "Cancel",
+      "notesEmpty": "No summary notes generated yet. Click Regenerate Notes above.",
+      "bulletsPlaceholder": "Add your own bullets or action items...",
+      "saveAndReexpand": "Save & Re-expand",
+      "transcriptEmpty": "No transcript segments were recorded for this meeting.",
+      "rollupsTitle": "Rolling 5-Minute Checkpoints",
+      "source": {
+        "llm": "AI Summary",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "Offline Local Summary"
+      },
+      "tabs": {
+        "notes": "Notes",
+        "bullets": "Your Bullets",
+        "transcript": "Transcript"
+      }
+    }
   }
 }

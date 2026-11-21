@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { Keyboard, Mic } from "lucide-react";
+import { Keyboard, Mic, ShieldCheck } from "lucide-react";
 import { Button } from "../../ui/Button";
 import { Spinner } from "../../ui/Spinner";
 import { TextLink } from "../../ui/TextLink";
@@ -198,8 +198,12 @@ export const Permissions: React.FC<PermissionsProps> = ({
             />
           )}
         </div>
+        <p className="mt-[12px] mb-0 inline-flex items-center justify-center gap-[6px] text-small text-ink-3">
+          <ShieldCheck size={14} className="shrink-0" aria-hidden="true" />
+          <span>{t("onboarding.permissions.localPrivacyNote")}</span>
+        </p>
         <p
-          className={`mt-[18px] mb-0 text-small text-ink-3 ${
+          className={`mt-[10px] mb-0 text-small text-ink-3 ${
             isMac && permissions.accessibility !== "needed"
               ? "visible"
               : "invisible"

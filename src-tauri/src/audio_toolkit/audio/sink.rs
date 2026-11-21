@@ -5,8 +5,9 @@ use handy_recorder::{AudioChunk, Sink};
 use crate::audio_toolkit::{
     audio::AudioVisualiser,
     constants,
-    vad::{VadFrame, VoiceActivityDetector},
+    vad::{NoiseGatedAgc, VadFrame, VoiceActivityDetector},
 };
+use crate::flow::session_wal::{PauseController, RecordingWal};
 
 /// How 16 kHz mono frames should be filtered for one recording session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +77,8 @@ pub struct CapturedAudio {
     pub input_silent: bool,
     /// The detector the recording borrowed, for the next one.
     pub vad: CaptureVad,
+    /// Crash-recovery write-ahead log to commit and remove once recording finishes.
+    pub wal: Option<RecordingWal>,
 }
 
 /// One recording's consumer of 16 kHz mono audio from handy-recorder. Runs on
@@ -92,11 +95,25 @@ pub struct CaptureSink {
     ready: Option<mpsc::Sender<()>>,
     samples: Vec<f32>,
     heard_sound: bool,
+    emitted_speech: bool,
+    noise_gap_samples: usize,
+    pause_controller: Option<Arc<PauseController>>,
+    agc: Option<NoiseGatedAgc>,
+    agc_scratch: Vec<f32>,
+    wal: Option<RecordingWal>,
 }
 
 /// Spectrum window at 16 kHz: 32 ms, near the overlay's ~30 Hz refresh.
 const VISUALIZER_WINDOW: usize = 512;
 const VISUALIZER_BUCKETS: usize = 16;
+/// Minimum post-hangover VAD-rejected silence (`~192 ms` at 16 kHz) between two
+/// speech bursts before inserting a clean silence separator so downstream
+/// clause/long-form chunkers preserve natural sentence and code-switch pauses.
+const MIN_INTER_CLAUSE_GAP_SAMPLES: usize = (constants::WHISPER_SAMPLE_RATE as usize * 192) / 1000;
+/// Clean digital-zero pause (`384 ms` = `6,144` samples, an exact multiple of
+/// 512-sample Silero frames) inserted lazily only when speech resumes after a
+/// genuine inter-clause pause. Trailing silence at recording end emits nothing.
+const INTER_CLAUSE_SEPARATOR_SAMPLES: usize = 12 * 512;
 
 impl CaptureSink {
     /// A sink for one recording. Resets the detector and applies the policy's
@@ -128,11 +145,40 @@ impl CaptureSink {
             ready: Some(ready),
             samples: Vec::new(),
             heard_sound: false,
+            emitted_speech: false,
+            noise_gap_samples: 0,
+            pause_controller: None,
+            agc: None,
+            agc_scratch: Vec::new(),
+            wal: None,
         }
     }
 
+    /// Attaches Wave 2 session controls (Pause ⇄ Resume gate, noise-gated AGC,
+    /// and 10-second crash-recovery PCM WAL) to this capture session.
+    pub fn with_controls(
+        mut self,
+        pause_controller: Option<Arc<PauseController>>,
+        agc: Option<NoiseGatedAgc>,
+        wal: Option<RecordingWal>,
+    ) -> Self {
+        let scratch_cap = if agc.is_some() {
+            self.vad.frame_samples().max(VISUALIZER_WINDOW)
+        } else {
+            0
+        };
+        self.pause_controller = pause_controller;
+        self.agc = agc;
+        self.agc_scratch = Vec::with_capacity(scratch_cap);
+        self.wal = wal;
+        self
+    }
+
     /// The detector, from a sink that never recorded (its start failed).
-    pub fn into_vad(self) -> CaptureVad {
+    pub fn into_vad(mut self) -> CaptureVad {
+        if let Some(wal) = self.wal.take() {
+            let _ = wal.commit_and_remove();
+        }
         self.vad
     }
 
@@ -160,11 +206,22 @@ impl CaptureSink {
             // `ready` is spent on the first chunk, so `None` means audio came.
             input_silent: self.ready.is_none() && !self.heard_sound,
             vad: self.vad,
+            wal: self.wal,
         }
     }
 
-    fn emit(samples: &mut Vec<f32>, on_audio: &AudioFrameCallback, frame: &[f32]) {
+    fn emit(
+        samples: &mut Vec<f32>,
+        on_audio: &AudioFrameCallback,
+        wal: &mut Option<RecordingWal>,
+        frame: &[f32],
+    ) {
         samples.extend_from_slice(frame);
+        if let Some(wal) = wal.as_mut() {
+            if let Err(err) = wal.push_samples(frame) {
+                log::warn!("Recording WAL segment write failed: {err}");
+            }
+        }
         on_audio(frame);
     }
 }
@@ -174,18 +231,36 @@ impl Sink for CaptureSink {
         if let Some(ready) = self.ready.take() {
             let _ = ready.send(());
         }
+        if self
+            .pause_controller
+            .as_ref()
+            .is_some_and(|ctrl| ctrl.is_paused())
+        {
+            return;
+        }
         if !self.heard_sound && !chunk.is_digital_silence() {
             self.heard_sound = true;
         }
 
+        // Apply optional noise-gated AGC into reusable scratch storage so soft
+        // speech is lifted cleanly ahead of visualizer, VAD, ASR, and WAL.
+        let processed: &[f32] = if let Some(agc) = self.agc.as_mut() {
+            self.agc_scratch.clear();
+            self.agc_scratch.extend_from_slice(chunk.samples);
+            agc.process_in_place(&mut self.agc_scratch);
+            &self.agc_scratch
+        } else {
+            chunk.samples
+        };
+
         // Mono by construction: the recorder mixes down or picks one channel.
-        let real = &chunk.samples[..chunk.valid_frames];
+        let real = &processed[..chunk.valid_frames.min(processed.len())];
         if let Some(levels) = self.visualizer.feed(real) {
             (self.on_levels)(levels);
         }
 
         if self.policy == VadPolicy::Disabled {
-            Self::emit(&mut self.samples, &self.on_audio, real);
+            Self::emit(&mut self.samples, &self.on_audio, &mut self.wal, real);
             return;
         }
 
@@ -194,11 +269,33 @@ impl Sink for CaptureSink {
         match self
             .vad
             .detector
-            .push_frame(chunk.samples)
-            .unwrap_or(VadFrame::Speech(chunk.samples))
+            .push_frame(processed)
+            .unwrap_or(VadFrame::Speech(processed))
         {
-            VadFrame::Speech(frame) => Self::emit(&mut self.samples, &self.on_audio, frame),
-            VadFrame::Noise => {}
+            VadFrame::Speech(frame) => {
+                if self.emitted_speech && self.noise_gap_samples >= MIN_INTER_CLAUSE_GAP_SAMPLES {
+                    const ZERO_FRAME: [f32; 512] = [0.0; 512];
+                    let mut remaining = INTER_CLAUSE_SEPARATOR_SAMPLES;
+                    while remaining > 0 {
+                        let step = remaining.min(ZERO_FRAME.len());
+                        Self::emit(
+                            &mut self.samples,
+                            &self.on_audio,
+                            &mut self.wal,
+                            &ZERO_FRAME[..step],
+                        );
+                        remaining -= step;
+                    }
+                }
+                self.emitted_speech = true;
+                self.noise_gap_samples = 0;
+                Self::emit(&mut self.samples, &self.on_audio, &mut self.wal, frame);
+            }
+            VadFrame::Noise => {
+                if self.emitted_speech {
+                    self.noise_gap_samples = self.noise_gap_samples.saturating_add(processed.len());
+                }
+            }
         }
     }
 }

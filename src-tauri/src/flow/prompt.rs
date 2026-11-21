@@ -54,20 +54,33 @@ pub fn apply_tone(prompt: &str, tone: Tone) -> String {
 }
 
 /// Returns `settings` with the selected cleanup prompt adjusted to the tone of
-/// the app captured at hotkey press. Borrowed unchanged when tone is off, the
-/// tone is `Default`, or no live dictation is being cleaned up (e.g. a retry
-/// from history).
+/// the app captured at hotkey press and any active Hindustani script lock.
+/// Borrowed unchanged when neither tone nor script governance adds instructions.
 pub fn with_tone<'a>(app: &AppHandle, settings: &'a AppSettings) -> Cow<'a, AppSettings> {
     let flow = settings::get(app);
-    if !flow.tone_enabled {
-        return Cow::Borrowed(settings);
-    }
-    let tone = timing::choose_tone(|context| tone_for(context, &flow));
-    tone_settings(settings, tone)
+    let tone = if flow.tone_enabled {
+        timing::choose_tone(|context| tone_for(context, &flow))
+    } else {
+        Tone::Default
+    };
+    let script_instruction = crate::flow::multilingual::llm_script_instruction(
+        flow.hindustani_script,
+        &settings.spoken_languages,
+    );
+    prompt_settings(settings, tone, script_instruction)
 }
 
+#[cfg(test)]
 fn tone_settings(settings: &AppSettings, tone: Tone) -> Cow<'_, AppSettings> {
-    if tone == Tone::Default {
+    prompt_settings(settings, tone, None)
+}
+
+fn prompt_settings<'a>(
+    settings: &'a AppSettings,
+    tone: Tone,
+    script_instruction: Option<&str>,
+) -> Cow<'a, AppSettings> {
+    if tone == Tone::Default && script_instruction.is_none() {
         return Cow::Borrowed(settings);
     }
     let Some(active_id) = settings.active_post_process_prompt().map(|p| p.id.clone()) else {
@@ -80,11 +93,18 @@ fn tone_settings(settings: &AppSettings, tone: Tone) -> Cow<'_, AppSettings> {
     else {
         return Cow::Borrowed(settings);
     };
-    let mut toned = settings.clone();
-    if let Some(prompt) = toned.post_process_prompts.get_mut(index) {
-        prompt.prompt = apply_tone(&prompt.prompt, tone);
+    let mut updated = settings.clone();
+    if let Some(prompt) = updated.post_process_prompts.get_mut(index) {
+        let mut next = apply_tone(&prompt.prompt, tone);
+        if let Some(script_rule) = script_instruction {
+            next = format!(
+                "{}\n\nScript rule: {script_rule} Still return only the cleaned-up transcript.",
+                next.trim_end()
+            );
+        }
+        prompt.prompt = next;
     }
-    Cow::Owned(toned)
+    Cow::Owned(updated)
 }
 
 #[cfg(test)]

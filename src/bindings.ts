@@ -35,6 +35,73 @@ async getFlowBuiltinAppTones() : Promise<AppToneRule[]> {
 async getFlowLastApp() : Promise<LastFlowApp | null> {
     return await TAURI_INVOKE("get_flow_last_app");
 },
+/**
+ * Requests immediate raw paste while LLM polishing is in flight.
+ */
+async pasteRawNow() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("paste_raw_now") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Returns the latest non-empty dictation text held in memory for paste rescue.
+ */
+async getLastDictation() : Promise<string | null> {
+    return await TAURI_INVOKE("get_last_dictation");
+},
+/**
+ * Copies a remembered dictation (`dictation_id` if provided, else the latest)
+ * to the system clipboard.
+ */
+async copyLastDictation(dictationId: number | null) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_last_dictation", { dictationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Triggers an on-demand preview of a floating menu-bar status notice pill.
+ */
+async previewOverlayNotice(kind: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_overlay_notice", { kind }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reads the current system microphone input volume percentage (`0..=100`) on
+ * supported platforms (macOS CoreAudio / osascript).
+ */
+async getSystemMicVolume() : Promise<number | null> {
+    return await TAURI_INVOKE("get_system_mic_volume");
+},
+/**
+ * Pauses active recording capture while keeping the mic stream warm, and locks
+ * any held shortcut so releasing the key will not prematurely stop the session.
+ */
+async pauseRecording() : Promise<boolean> {
+    return await TAURI_INVOKE("pause_recording");
+},
+/**
+ * Resumes a paused recording capture session.
+ */
+async resumeRecording() : Promise<boolean> {
+    return await TAURI_INVOKE("resume_recording");
+},
+/**
+ * Completes and transcribes the active recording session from the floating
+ * overlay pill's "Done" button.
+ */
+async finishRecording() : Promise<boolean> {
+    return await TAURI_INVOKE("finish_recording");
+},
 async changeBinding(id: string, binding: string) : Promise<Result<BindingResponse, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_binding", { id, binding }) };
@@ -1016,6 +1083,14 @@ async retryHistoryEntryTranscription(id: number) : Promise<void> {
 async cancelHistoryEntryTranscription(id: number) : Promise<void> {
     await TAURI_INVOKE("cancel_history_entry_transcription", { id });
 },
+async correctHistoryEntryAndSaveWord(id: number, updatedText: string, dictionaryWord: string | null) : Promise<Result<HistoryEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("correct_history_entry_and_save_word", { id, updatedText, dictionaryWord }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Adds an audio or video file to History and queues its transcription.
  * Fails without adding anything if the file has no audio Handy can read.
@@ -1130,7 +1205,7 @@ selected_channel?: number | null; clamshell_microphone?: string | null; selected
  * Every language the person dictates in (codes, e.g. ["en", "zh"]),
  * picked during onboarding. Empty until then.
  */
-spoken_languages?: string[]; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; theme?: Theme; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; paste_delay_after_ms?: number; 
+spoken_languages?: string[]; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; brand_custom_words_seeded?: boolean; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; theme?: Theme; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; paste_delay_after_ms?: number; 
 /**
  * Debug-gated ("beta") receipt-sequenced paste: restore the clipboard only
  * after the target app actually reads the transcript, instead of after a
@@ -1212,15 +1287,44 @@ export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
 export type FlowSettings = { 
 /**
- * Adjust the cleanup prompt to the frontmost app. Has no effect while
+ * Adjust the cleanup prompt to the frontmost app. Off by default (opt-in,
+ * so upgrading never changes cleanup output); no effect while
  * post-processing is off.
  */
 tone_enabled: boolean; 
 /**
  * User rules; they take precedence over the built-in app list.
  */
-app_tones: AppToneRule[] }
+app_tones: AppToneRule[]; 
+/**
+ * Bypass LLM cleanup for short, clean utterances so they paste in <350ms.
+ */
+fast_path_enabled: boolean; 
+/**
+ * User-defined deterministic voice snippets.
+ */
+snippets: VoiceSnippet[]; 
+/**
+ * Preferred Hindustani writing script (Urdu Perso-Arabic, Roman Hinglish, Devanagari, or Auto).
+ */
+hindustani_script: HindustaniScript; 
+/**
+ * Temporarily lift low macOS system microphone volume while recording, then restore it.
+ */
+auto_boost_mic_volume: boolean; 
+/**
+ * Target macOS system microphone volume percentage (`60..=100`) when auto-boost is active.
+ */
+mic_boost_target_percent: number; 
+/**
+ * Apply noise-gated automatic gain control (AGC) to soft/distant speech frames.
+ */
+quiet_speech_agc_enabled: boolean }
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
+/**
+ * Preferred output script when speaking Hindi/Urdu (Hindustani).
+ */
+export type HindustaniScript = "auto" | "roman_hinglish" | "urdu_perso_arabic" | "devanagari"
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; 
 /**
  * The name of the file this entry was transcribed from; `None` for a
@@ -1559,6 +1663,10 @@ export type TranscriptionOutcome =
 "failed"
 export type TypingTool = "auto" | "wtype" | "kwtype" | "dotool" | "ydotool" | "xdotool"
 export type VadBackend = "silero" | "earshot"
+/**
+ * Spoken trigger phrase that expands deterministically during dictation.
+ */
+export type VoiceSnippet = { trigger: string; expansion: string }
 export type WindowsMicrophonePermissionStatus = { supported: boolean; overall_access: PermissionAccess; device_access: PermissionAccess; app_access: PermissionAccess; desktop_app_access: PermissionAccess }
 
 /** tauri-specta globals **/

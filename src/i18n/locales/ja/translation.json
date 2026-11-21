@@ -83,7 +83,8 @@
       "hintBoth": "続けるには両方を許可してください",
       "hintMicrophone": "続けるにはマイクを許可してください",
       "welcomeBack": "おかえりなさい。前回の続きから始めます。",
-      "relaunch": "このあとショートカットが反応しない場合は、<relaunch>lowyap を再起動</relaunch>してください。この画面にすぐ戻れます。"
+      "relaunch": "このあとショートカットが反応しない場合は、<relaunch>lowyap を再起動</relaunch>してください。この画面にすぐ戻れます。",
+      "localPrivacyNote": "音声と貼り付けたテキストはお使いの Mac 内に留まり、lowyap のサーバーにアップロードされることはありません。"
     },
     "shell": {
       "back": "戻る",
@@ -146,7 +147,16 @@
       "downloadInstead": "代わりに {{size}} をダウンロード",
       "pauses": "{{name}} は {{percent}}% で一時停止中",
       "resumeLater": "もう一度選ぶと、続きからダウンロードします",
-      "hint": "セットアップを進めている間にダウンロードします"
+      "hint": "セットアップを進めている間にダウンロードします",
+      "goals": {
+        "heading": "話し方に合わせてクイック選択",
+        "englishTitle": "瞬時の英語入力",
+        "englishDesc": "Mac で最速（約 0.3 秒で貼り付け）。英語のチャット、ドキュメント、コーディングに最適。",
+        "multilingualTitle": "多言語 · ウルドゥー語、Hinglish ほか 99 以上の言語",
+        "multilingualDesc": "ウルドゥー語、ヒンディー語/Hinglish、アラビア語、英語をデバイス上で自在に切り替え。",
+        "advancedToggleShow": "各モデルを比較 ({{count}})",
+        "advancedToggleHide": "モデル比較を隠す"
+      }
     },
     "demo": {
       "title": "ショートカット1つで、どのアプリでも話して入力",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "言語"
+      "title": "言語",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "サウンド",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "音量",
         "description": "オーディオフィードバックの音量を調整"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "下",
             "top": "上"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "繁体字 (台湾)",
           "traditionalHk": "繁体字 (香港)"
         }
+      },
+      "previewNotices": {
+        "callDetected": "通話を検出"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "もっと見る",
       "showLess": "閉じる",
       "dropTitle": "ドロップして文字起こし",
-      "dropDescription": "履歴に表示されます。"
+      "dropDescription": "履歴に表示されます。",
+      "correctAndSave": "修正して辞書に保存",
+      "correctedTranscriptLabel": "修正後の文字起こし",
+      "correctedTranscriptPlaceholder": "文字起こしを編集...",
+      "dictionaryWordLabel": "登録する単語",
+      "dictionaryWordPlaceholder": "記憶させる単語やフレーズ（任意）",
+      "saveAndAddWord": "保存して辞書に追加",
+      "saveCorrection": "修正を保存",
+      "cancelEdit": "キャンセル",
+      "savingCorrection": "保存中...",
+      "correctionAndWordSaved": "修正を保存し、「{{word}}」を辞書に追加しました。",
+      "correctionSaved": "文字起こしの修正を保存しました。",
+      "correctionSaveError": "修正の保存に失敗しました。もう一度お試しください。",
+      "correctionEmptyError": "文字起こしを空にすることはできません。"
     },
     "debug": {
       "title": "デバッグ",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "不明なモデル",
     "pasteFailedTitle": "テキストの貼り付けに失敗しました",
     "pasteFailed": "アクティブなアプリにテキストを貼り付けられませんでした。",
+    "copyLastDictation": "テキストをコピー",
+    "copiedLastDictation": "直前の音声入力をクリップボードにコピーしました",
     "transcriptionFailedTitle": "文字起こしに失敗しました"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "文字起こし中…",
     "processing": "処理中…",
-    "loadingModel": "モデルを読み込み中…"
+    "loadingModel": "モデルを読み込み中…",
+    "pasteRaw": "そのまま貼付",
+    "pasteRawTitle": "AI 整形をスキップして生の文字起こしをすぐ貼り付け",
+    "noticeRestartRequired": "App updated — restart lowyap",
+    "noticeTranscriptionFailed": "Model not ready — open lowyap",
+    "noticeMicMuted": "Mic is muted — check input",
+    "noticeNoSpeech": "No voice heard — raise mic volume",
+    "noticeMicPermission": "Mic permission needed — open lowyap",
+    "noticeNoMic": "No microphone found — check input",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "通話を検出"
+    },
+    "callStartNotes": "メモを開始",
+    "callDismiss": "今はしない",
+    "transcriptCancelled": "文字起こしをキャンセルしました",
+    "undoCancel": "元に戻す",
+    "dismissCancel": "閉じる",
+    "meetingRecording": "録音中",
+    "meetingPaused": "一時停止中",
+    "meetingSavingNotes": "ノートを保存中…",
+    "pauseMeeting": "一時停止",
+    "resumeMeeting": "再開",
+    "stopMeeting": "停止",
+    "openMeetingNotes": "会議ノートを開く",
+    "minimizeMeetingPill": "メニューバーに最小化"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} が1個のショートカットをブロックしている可能性があります",
@@ -975,5 +1064,121 @@
     "learnMore": "解決方法",
     "recorderBlocked": "現在ショートカットを記録できません。macOS の Secure Input がキーイベントをブロックしています。先に Secure Input の警告を解消してください。",
     "dismiss": "閉じる"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "インスタント高速パス",
+      "description": "短く明瞭なフレーズでは AI 待機をスキップし、簡単な返信を 0.4 秒未満で貼り付けます。"
+    },
+    "snippets": {
+      "title": "音声スニペット",
+      "description": "短いトリガーフレーズを話すだけで、リンクやメールアドレス、定型文をそのまま挿入します。",
+      "triggerPlaceholder": "話すフレーズ（例: カレンダーのリンク）",
+      "expansionPlaceholder": "挿入するテキスト（例: https://cal.com/you）",
+      "add": "スニペットを追加",
+      "empty": "音声スニペットはまだありません。",
+      "removeLabel": "スニペット {{trigger}} を削除",
+      "errors": {
+        "emptyTrigger": "話すトリガーフレーズを入力してください。",
+        "emptyExpansion": "このフレーズで挿入するテキストを入力してください。",
+        "duplicate": "このフレーズのスニペットは既に存在します。"
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "ミーティング",
+    "title": "ミーティングノート",
+    "subtitle": "Bot-free local capture + hybrid rough bullets & transcript summaries",
+    "privacyConsentBar": "100%ローカル＆ボットなし · メモを取っていることを参加者に伝えましょう。",
+    "autoDetect": {
+      "label": "Auto-detect active calls",
+      "description": "Show a subtle non-intrusive prompt when Zoom, Meet, Teams, FaceTime, or Slack Huddles activate your mic."
+    },
+    "detectedBanner": {
+      "title": "Active call detected in {{app}}",
+      "subtitle": "Capture bot-free notes locally without joining as a participant.",
+      "startButton": "Start Note Taking",
+      "dismissButton": "今はしない"
+    },
+    "idle": {
+      "titlePlaceholder": "Optional meeting title (e.g. Weekly Product Sync)",
+      "titleAriaLabel": "Meeting title",
+      "templateLabel": "Template",
+      "templateAriaLabel": "Meeting note template",
+      "startButton": "Start Note Taking"
+    },
+    "templates": {
+      "general": "General",
+      "one_on_one": "1:1",
+      "standup": "Standup",
+      "language_lesson": "Language Lesson",
+      "client_call": "Client Call"
+    },
+    "status": {
+      "idle": "Idle",
+      "recording": "Recording",
+      "paused": "Paused",
+      "summarizing": "Summarizing..."
+    },
+    "badges": {
+      "systemAndMic": "System + Mic",
+      "micOnly": "Mic-only",
+      "headphones": "Headphones",
+      "speakerEchoGuard": "Speaker Echo Guard",
+      "rollups": "{{count}} 5-min rollups"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "finishAndSummarize": "Finish & Summarize"
+    },
+    "live": {
+      "roughBulletsTitle": "Your Rough Bullets",
+      "roughBulletsPlaceholder": "Jot quick bullets, decisions, or timestamps...",
+      "roughBulletsHint": "Jot quick bullets or timestamps — lowyap expands them with the transcript when you finish.",
+      "saving": "Saving...",
+      "saved": "Auto-saved",
+      "transcriptTitle": "Live Transcript Feed",
+      "transcriptEmpty": "Listening for speech... Segments appear here as you and others speak."
+    },
+    "speaker": {
+      "me": "Me",
+      "others": "Others"
+    },
+    "archive": {
+      "title": "Past Meetings",
+      "searchPlaceholder": "Search titles, notes, or transcripts...",
+      "searchAriaLabel": "Search past meetings",
+      "empty": "No meetings recorded yet. Start note taking above when your next call begins.",
+      "noSearchMatch": "No meetings match your search.",
+      "segmentsCount": "{{count}} segments"
+    },
+    "detail": {
+      "selectPrompt": "Select a meeting on the left to read or edit its notes.",
+      "titleAriaLabel": "Edit meeting title",
+      "templateAriaLabel": "Change meeting template",
+      "regenerate": "Regenerate Notes",
+      "regenerating": "Regenerating...",
+      "copyMarkdown": "Copy Markdown",
+      "copied": "Copied!",
+      "delete": "Delete",
+      "confirmDelete": "Confirm Delete",
+      "cancelDelete": "Cancel",
+      "notesEmpty": "No summary notes generated yet. Click Regenerate Notes above.",
+      "bulletsPlaceholder": "Add your own bullets or action items...",
+      "saveAndReexpand": "Save & Re-expand",
+      "transcriptEmpty": "No transcript segments were recorded for this meeting.",
+      "rollupsTitle": "Rolling 5-Minute Checkpoints",
+      "source": {
+        "llm": "AI Summary",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "Offline Local Summary"
+      },
+      "tabs": {
+        "notes": "Notes",
+        "bullets": "Your Bullets",
+        "transcript": "Transcript"
+      }
+    }
   }
 }

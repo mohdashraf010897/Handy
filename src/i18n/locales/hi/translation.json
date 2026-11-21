@@ -83,7 +83,8 @@
       "hintBoth": "आगे बढ़ने के लिए दोनों की अनुमति दें",
       "hintMicrophone": "आगे बढ़ने के लिए माइक्रोफ़ोन की अनुमति दें",
       "welcomeBack": "वापसी पर स्वागत है. जहां छोड़ा था, वहीं से शुरू करते हैं.",
-      "relaunch": "इसके बाद शॉर्टकट जवाब नहीं दे रहा? <relaunch>lowyap को दोबारा शुरू करें</relaunch> और आप सीधे यहीं लौट आएंगे."
+      "relaunch": "इसके बाद शॉर्टकट जवाब नहीं दे रहा? <relaunch>lowyap को दोबारा शुरू करें</relaunch> और आप सीधे यहीं लौट आएंगे.",
+      "localPrivacyNote": "ऑडियो और पेस्ट किया गया टेक्स्ट आपके Mac पर ही रहते हैं — lowyap सर्वर पर कभी अपलोड नहीं होते।"
     },
     "shell": {
       "back": "वापस",
@@ -146,7 +147,16 @@
       "downloadInstead": "इसकी जगह {{size}} डाउनलोड करें",
       "pauses": "{{name}} {{percent}}% पर रुकता है",
       "resumeLater": "इसे दोबारा चुनें, यह वहीं से शुरू होगा जहां रुका था",
-      "hint": "आपके सेटअप पूरा करते समय डाउनलोड होता रहेगा"
+      "hint": "आपके सेटअप पूरा करते समय डाउनलोड होता रहेगा",
+      "goals": {
+        "heading": "आप जैसे बोलते हैं, उसके अनुसार तेज़ चुनाव",
+        "englishTitle": "इंस्टेंट अंग्रेज़ी",
+        "englishDesc": "Mac पर सबसे तेज़ (~0.3s पेस्ट)। अंग्रेज़ी चैट, डॉक्स और कोडिंग के लिए सबसे बढ़िया।",
+        "multilingualTitle": "बहुभाषी · उर्दू, हिंग्लिश और 99+ भाषाएँ",
+        "multilingualDesc": "डिवाइस पर ही उर्दू, हिंदी/हिंग्लिश, अरबी और अंग्रेज़ी के बीच बेझिझक स्विच करें।",
+        "advancedToggleShow": "अलग-अलग मॉडल की तुलना करें ({{count}})",
+        "advancedToggleHide": "मॉडल तुलना छिपाएँ"
+      }
     },
     "demo": {
       "title": "किसी भी ऐप में बोलें, बस एक शॉर्टकट से",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "भाषाएं"
+      "title": "भाषाएं",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "आवाज़",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "वॉल्यूम",
         "description": "ऑडियो फ़ीडबैक साउंड का वॉल्यूम सेट करें"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "नीचे",
             "top": "ऊपर"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "पारंपरिक (ताइवान)",
           "traditionalHk": "पारंपरिक (हांगकांग)"
         }
+      },
+      "previewNotices": {
+        "callDetected": "कॉल का पता चला"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "और दिखाएँ",
       "showLess": "कम दिखाएँ",
       "dropTitle": "ट्रांसक्राइब करने के लिए छोड़ें",
-      "dropDescription": "यह इतिहास में दिखाई देगा।"
+      "dropDescription": "यह इतिहास में दिखाई देगा।",
+      "correctAndSave": "सुधारें और शब्दकोश में सहेजें",
+      "correctedTranscriptLabel": "सुधारा गया ट्रांसक्रिप्शन",
+      "correctedTranscriptPlaceholder": "ट्रांसक्रिप्शन संपादित करें...",
+      "dictionaryWordLabel": "शब्दकोश शब्द",
+      "dictionaryWordPlaceholder": "याद रखने के लिए वैकल्पिक शब्द या वाक्यांश",
+      "saveAndAddWord": "सहेजें और शब्दकोश में जोड़ें",
+      "saveCorrection": "सुधार सहेजें",
+      "cancelEdit": "रद्द करें",
+      "savingCorrection": "सहेजा जा रहा है...",
+      "correctionAndWordSaved": "सुधार सहेजा गया और \"{{word}}\" शब्दकोश में जोड़ा गया।",
+      "correctionSaved": "ट्रांसक्रिप्शन सुधार सहेजा गया।",
+      "correctionSaveError": "सुधार सहेजने में विफल। कृपया पुनः प्रयास करें।",
+      "correctionEmptyError": "ट्रांसक्रिप्शन खाली नहीं हो सकता।"
     },
     "debug": {
       "title": "डिबग",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "अज्ञात मॉडल",
     "pasteFailedTitle": "टेक्स्ट पेस्ट नहीं हो सका",
     "pasteFailed": "खुले हुए ऐप्लिकेशन में टेक्स्ट पेस्ट नहीं किया जा सका.",
+    "copyLastDictation": "टेक्स्ट कॉपी करें",
+    "copiedLastDictation": "पिछला डिक्टेशन क्लिपबोर्ड पर कॉपी किया गया",
     "transcriptionFailedTitle": "ट्रांसक्रिप्शन नहीं हो सका"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "ट्रांसक्राइब हो रहा है...",
     "processing": "प्रोसेस हो रहा है...",
-    "loadingModel": "मॉडल लोड हो रहा है..."
+    "loadingModel": "मॉडल लोड हो रहा है...",
+    "pasteRaw": "सीधे पेस्ट",
+    "pasteRawTitle": "AI सुधार छोड़ें और कच्चा ट्रांसक्रिप्ट तुरंत पेस्ट करें",
+    "noticeRestartRequired": "ऐप अपडेट हुआ — lowyap फिर से शुरू करें",
+    "noticeTranscriptionFailed": "मॉडल तैयार नहीं है — lowyap खोलें",
+    "noticeMicMuted": "माइक म्यूट है — इनपुट जाँचें",
+    "noticeNoSpeech": "आवाज़ नहीं सुनाई दी — माइक वॉल्यूम बढ़ाएँ",
+    "noticeMicPermission": "माइक अनुमति आवश्यक — lowyap खोलें",
+    "noticeNoMic": "माइक्रोफ़ोन नहीं मिला — इनपुट जाँचें",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "कॉल का पता चला"
+    },
+    "callStartNotes": "नोट्स शुरू करें",
+    "callDismiss": "अभी नहीं",
+    "transcriptCancelled": "ट्रांसक्रिप्ट रद्द किया गया",
+    "undoCancel": "पूर्ववत करें",
+    "dismissCancel": "ख़ारिज करें",
+    "meetingRecording": "रिकॉर्ड हो रहा है",
+    "meetingPaused": "रुका हुआ",
+    "meetingSavingNotes": "नोट्स सहेजे जा रहे हैं…",
+    "pauseMeeting": "रोकें",
+    "resumeMeeting": "जारी रखें",
+    "stopMeeting": "बंद करें",
+    "openMeetingNotes": "मीटिंग नोट्स खोलें",
+    "minimizeMeetingPill": "मेनू बार में छोटा करें"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} शायद 1 शॉर्टकट को ब्लॉक कर रहा है",
@@ -975,5 +1064,121 @@
     "learnMore": "इसे कैसे ठीक करें",
     "recorderBlocked": "अभी शॉर्टकट रिकॉर्ड नहीं किए जा सकते — macOS Secure Input कुंजी इवेंट ब्लॉक कर रहा है. पहले Secure Input चेतावनी हल करें.",
     "dismiss": "खारिज करें"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "इंस्टेंट फ़ास्ट-पाथ",
+      "description": "छोटे और साफ़ वाक्यांशों पर AI का इंतज़ार छोड़ें ताकि सरल जवाब 0.4s से कम में पेस्ट हों।"
+    },
+    "snippets": {
+      "title": "वॉइस स्निपेट",
+      "description": "कोई लिंक, ईमेल या टेक्स्ट हूबहू डालने के लिए एक छोटा ट्रिगर वाक्यांश बोलें।",
+      "triggerPlaceholder": "बोला जाने वाला वाक्यांश (जैसे मेरा कैलेंडर लिंक)",
+      "expansionPlaceholder": "डालने के लिए टेक्स्ट (जैसे https://cal.com/you)",
+      "add": "स्निपेट जोड़ें",
+      "empty": "अभी कोई वॉइस स्निपेट नहीं है।",
+      "removeLabel": "स्निपेट {{trigger}} हटाएँ",
+      "errors": {
+        "emptyTrigger": "बोला जाने वाला ट्रिगर वाक्यांश दर्ज करें।",
+        "emptyExpansion": "वह टेक्स्ट दर्ज करें जिसे यह वाक्यांश डालेगा।",
+        "duplicate": "इस वाक्यांश के लिए एक स्निपेट पहले से मौजूद है।"
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "मीटिंग्स",
+    "title": "मीटिंग नोट्स",
+    "subtitle": "बॉट-मुक्त लोकल कैप्चर + हाइब्रिड बुलेट्स और ट्रांसक्रिप्ट सारांश",
+    "privacyConsentBar": "100% लोकल और बॉट-मुक्त · प्रतिभागियों को बताना याद रखें कि आप नोट्स ले रहे हैं।",
+    "autoDetect": {
+      "label": "सक्रिय कॉल स्वचालित रूप से पहचानें",
+      "description": "जब Zoom, Meet, Teams, FaceTime या Slack आपका माइक सक्रिय करें तो एक सूक्ष्म प्रॉम्प्ट दिखाएं।"
+    },
+    "detectedBanner": {
+      "title": "{{app}} में सक्रिय कॉल का पता चला",
+      "subtitle": "प्रतिभागी के रूप में जुड़े बिना लोकल रूप से बॉट-मुक्त नोट्स कैप्चर करें।",
+      "startButton": "नोट्स लेना शुरू करें",
+      "dismissButton": "अभी नहीं"
+    },
+    "idle": {
+      "titlePlaceholder": "वैकल्पिक मीटिंग शीर्षक (उदा. साप्ताहिक प्रोडक्ट सिंक)",
+      "titleAriaLabel": "मीटिंग शीर्षक",
+      "templateLabel": "टेम्पलेट",
+      "templateAriaLabel": "मीटिंग नोट टेम्पलेट",
+      "startButton": "नोट्स लेना शुरू करें"
+    },
+    "templates": {
+      "general": "सामान्य",
+      "one_on_one": "1:1",
+      "standup": "स्टैंडअप",
+      "language_lesson": "भाषा पाठ",
+      "client_call": "क्लाइंट कॉल"
+    },
+    "status": {
+      "idle": "निष्क्रिय",
+      "recording": "रिकॉर्डिंग",
+      "paused": "रुका हुआ",
+      "summarizing": "सारांशित किया जा रहा है..."
+    },
+    "badges": {
+      "systemAndMic": "सिस्टम + माइक",
+      "micOnly": "केवल माइक",
+      "headphones": "हेडफ़ोन",
+      "speakerEchoGuard": "स्पीकर इको गार्ड",
+      "rollups": "{{count}} 5-मिनट रोलअप"
+    },
+    "controls": {
+      "pause": "रोकें",
+      "resume": "जारी रखें",
+      "finishAndSummarize": "समाप्त करें और सारांश बनाएं"
+    },
+    "live": {
+      "roughBulletsTitle": "आपके रफ़ बुलेट्स",
+      "roughBulletsPlaceholder": "त्वरित बुलेट्स, निर्णय या टाइमस्टैम्प लिखें...",
+      "roughBulletsHint": "त्वरित बुलेट्स या टाइमस्टैम्प लिखें — समाप्त होने पर lowyap उन्हें ट्रांसक्रिप्ट के साथ विस्तारित करता है।",
+      "saving": "सहेजा जा रहा है...",
+      "saved": "स्वतः सहेजा गया",
+      "transcriptTitle": "लाइव ट्रांसक्रिप्ट फ़ीड",
+      "transcriptEmpty": "आवाज़ की प्रतीक्षा है... आपके और दूसरों के बोलने पर सेगमेंट यहाँ दिखेंगे।"
+    },
+    "speaker": {
+      "me": "मैं",
+      "others": "अन्य"
+    },
+    "archive": {
+      "title": "पिछली मीटिंग्स",
+      "searchPlaceholder": "शीर्षक, नोट्स या ट्रांसक्रिप्ट खोजें...",
+      "searchAriaLabel": "पिछली मीटिंग्स खोजें",
+      "empty": "अभी तक कोई मीटिंग रिकॉर्ड नहीं हुई है। अगली कॉल शुरू होने पर ऊपर नोट्स लेना शुरू करें।",
+      "noSearchMatch": "आपकी खोज से कोई मीटिंग मेल नहीं खाती।",
+      "segmentsCount": "{{count}} सेगमेंट"
+    },
+    "detail": {
+      "selectPrompt": "नोट्स पढ़ने या संपादित करने के लिए बाईं ओर से एक मीटिंग चुनें।",
+      "titleAriaLabel": "मीटिंग शीर्षक संपादित करें",
+      "templateAriaLabel": "मीटिंग टेम्पलेट बदलें",
+      "regenerate": "नोट्स फिर से बनाएं",
+      "regenerating": "फिर से बनाया जा रहा है...",
+      "copyMarkdown": "Markdown कॉपी करें",
+      "copied": "कॉपी हो गया!",
+      "delete": "हटाएं",
+      "confirmDelete": "हटाने की पुष्टि करें",
+      "cancelDelete": "रद्द करें",
+      "notesEmpty": "अभी तक कोई सारांश नोट्स नहीं बने हैं। ऊपर नोट्स फिर से बनाएं पर क्लिक करें।",
+      "bulletsPlaceholder": "अपने बुलेट्स या कार्य बिंदु जोड़ें...",
+      "saveAndReexpand": "सहेजें और फिर से विस्तारित करें",
+      "transcriptEmpty": "इस मीटिंग के लिए कोई ट्रांसक्रिप्ट सेगमेंट रिकॉर्ड नहीं किया गया।",
+      "rollupsTitle": "5-मिनट रोलिंग चेकपॉइंट",
+      "source": {
+        "llm": "AI सारांश",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "ऑफ़लाइन लोकल सारांश"
+      },
+      "tabs": {
+        "notes": "नोट्स",
+        "bullets": "आपके बुलेट्स",
+        "transcript": "ट्रांसक्रिप्ट"
+      }
+    }
   }
 }

@@ -1,5 +1,7 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronDown, Globe, Zap } from "lucide-react";
+import { modelMatchesLanguage } from "@handy-computer/models";
 import { Button } from "../../ui/Button";
 import { Radio } from "../../ui/Radio";
 import { GradeChip } from "../../shared/GradeChip";
@@ -112,6 +114,33 @@ export const Model: React.FC<ModelProps> = ({
   }, [extraId, extraModelId, set]);
 
   const byId = useMemo(() => new Map(offered.map((m) => [m.id, m])), [offered]);
+  const englishGoalModel =
+    byId.get("parakeet-unified-en-0.6b") ??
+    byId.get("parakeet-tdt-0.6b-v2") ??
+    byId.get("parakeet-tdt-0.6b-v3") ??
+    offered.find((m) => modelMatchesLanguage(m, "en")) ??
+    pick?.model;
+  const isMultilingualCandidate = (m: CatalogModel) =>
+    m.id !== englishGoalModel?.id &&
+    (modelMatchesLanguage(m, "ur") ||
+      m.languages.includes("ur") ||
+      m.languages.length >= 10);
+  const multilingualGoalModel = [
+    byId.get("whisper-large-v3-turbo"),
+    byId.get("whisper-medium"),
+    byId.get("whisper-large-v3"),
+    offered.find(isMultilingualCandidate),
+  ].find((m): m is CatalogModel => !!m && isMultilingualCandidate(m));
+  const isNonGoalSelected =
+    !!selectedId &&
+    !!(englishGoalModel || multilingualGoalModel) &&
+    selectedId !== englishGoalModel?.id &&
+    selectedId !== multilingualGoalModel?.id;
+  const [advancedOpen, setAdvancedOpen] = useState(() => isNonGoalSelected);
+  useEffect(() => {
+    if (isNonGoalSelected) setAdvancedOpen(true);
+  }, [isNonGoalSelected]);
+
   const rowFor = (id: string): ModelRow | undefined =>
     [...groups.picks, ...groups.others, ...groups.partial].find(
       (r) => r.model.id === id,
@@ -529,6 +558,65 @@ export const Model: React.FC<ModelProps> = ({
           ? fullCard(extra, "extra")
           : oneLine(extra, "extra"),
       );
+
+    const goalCard = (
+      goalKey: string,
+      goalModel: CatalogModel | undefined,
+      icon: React.ReactNode,
+      cardTitle: string,
+      cardDesc: string,
+    ) => {
+      if (!goalModel) return null;
+      const active = selectedId === goalModel.id;
+      const line = lineFor(goalModel.id);
+      return (
+        <button
+          key={goalKey}
+          type="button"
+          aria-pressed={active}
+          onClick={() => choose(goalModel.id, false)}
+          className={`relative flex min-w-0 cursor-pointer flex-col items-start gap-[6px] rounded-panel border-[1.5px] bg-background px-[16px] text-start transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary ${
+            active
+              ? "border-plum-pick"
+              : "border-line-strong hover:border-ink-3 hover:bg-wash"
+          } ${line ? "pt-[14px] pb-[18px]" : "py-[14px]"}`}
+        >
+          <span className="flex w-full items-center justify-between gap-[8px]">
+            <span
+              className={`grid size-[32px] shrink-0 place-items-center rounded-[9px] ${
+                active
+                  ? "bg-background-ui/12 text-background-ui"
+                  : "bg-wash text-ink-2"
+              }`}
+            >
+              {icon}
+            </span>
+            <Radio checked={active} />
+          </span>
+          <b className="mt-[2px] font-display text-name font-[650] leading-[1.25] tracking-[-0.01em] text-text">
+            {cardTitle}
+          </b>
+          <span className="text-small leading-[1.4] text-ink-2 text-pretty">
+            {cardDesc}
+          </span>
+          <span className="mt-auto inline-flex max-w-full items-center pt-[4px]">
+            <Tag className="inline-flex max-w-full items-center gap-[5px]">
+              <span className="truncate">{goalModel.name}</span>
+              <span aria-hidden="true" className="text-ink-3">
+                ·
+              </span>
+              <span className="shrink-0 tabular-nums text-ink-3">
+                {sizeOf(goalModel)}
+              </span>
+            </Tag>
+          </span>
+          {line && thinLine("inset-x-4 bottom-[6px]")}
+        </button>
+      );
+    };
+
+    const hasBothGoals = !!(englishGoalModel && multilingualGoalModel);
+
     return (
       <OnboardingShell
         progress={progress}
@@ -539,24 +627,88 @@ export const Model: React.FC<ModelProps> = ({
         <ScreenMain
           ref={rootRef}
           data-model-root=""
+          layout={advancedOpen ? "top" : "center"}
           align="stretch"
           header={<ScreenHeader title={title} sub={sub} />}
         >
           <div
-            role="radiogroup"
-            aria-label={t("onboarding.model.label")}
-            className="flex w-full flex-none flex-col gap-[8px] text-start"
+            data-model-scroll={advancedOpen ? "" : undefined}
+            className={`flex w-full flex-col ${
+              advancedOpen ? "min-h-0 flex-1 overflow-y-auto pb-[4px]" : ""
+            }`}
           >
-            {items}
+            <div className="w-full flex-none text-start">
+              <h2 className="m-0 mb-[8px] text-label font-[650] uppercase tracking-[0.04em] text-ink-3">
+                {t("onboarding.model.goals.heading")}
+              </h2>
+              <div
+                className={`grid gap-[10px] ${
+                  hasBothGoals ? "grid-cols-2" : "grid-cols-1"
+                }`}
+              >
+                {goalCard(
+                  "english",
+                  englishGoalModel,
+                  <Zap size={16} strokeWidth={2.2} aria-hidden="true" />,
+                  t("onboarding.model.goals.englishTitle"),
+                  t("onboarding.model.goals.englishDesc"),
+                )}
+                {goalCard(
+                  "multilingual",
+                  multilingualGoalModel,
+                  <Globe size={16} strokeWidth={2.1} aria-hidden="true" />,
+                  t("onboarding.model.goals.multilingualTitle"),
+                  t("onboarding.model.goals.multilingualDesc"),
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-expanded={advancedOpen}
+              aria-controls="onboarding-model-advanced"
+              onClick={() => setAdvancedOpen((prev) => !prev)}
+              className="mt-[10px] -ms-[8px] inline-flex flex-none cursor-pointer items-center gap-[6px] self-start rounded-lg px-[8px] py-[4px] text-small font-medium text-ink-2 transition-colors hover:bg-wash hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary"
+            >
+              <span>
+                {advancedOpen
+                  ? t("onboarding.model.goals.advancedToggleHide")
+                  : t("onboarding.model.goals.advancedToggleShow", {
+                      count: models.offered.length,
+                    })}
+              </span>
+              <ChevronDown
+                size={14}
+                aria-hidden="true"
+                className={`transition-transform duration-200 ${
+                  advancedOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            {advancedOpen && (
+              <div
+                id="onboarding-model-advanced"
+                className="mt-[8px] flex w-full flex-none flex-col"
+              >
+                <div
+                  role="radiogroup"
+                  aria-label={t("onboarding.model.label")}
+                  className="flex w-full flex-none flex-col gap-[8px] text-start"
+                >
+                  {items}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => open()}
+                  className="mt-[8px] flex h-[38px] flex-none cursor-pointer items-center gap-[8px] self-stretch rounded-card border-[1.5px] border-dashed border-line-strong px-[20px] text-start text-small font-semibold text-ink-2 hover:border-solid hover:bg-wash hover:text-text"
+                >
+                  {t("onboarding.model.showAll", {
+                    count: models.offered.length,
+                  })}
+                  <Chevron />
+                </button>
+              </div>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={() => open()}
-            className="mt-[8px] flex h-[38px] flex-none cursor-pointer items-center gap-[8px] self-stretch rounded-card border-[1.5px] border-dashed border-line-strong px-[20px] text-start text-small font-semibold text-ink-2 hover:border-solid hover:bg-wash hover:text-text"
-          >
-            {t("onboarding.model.showAll", { count: models.offered.length })}
-            <Chevron />
-          </button>
         </ScreenMain>
       </OnboardingShell>
     );

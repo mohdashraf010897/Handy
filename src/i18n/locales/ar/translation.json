@@ -83,7 +83,8 @@
       "hintBoth": "اسمح بالإذنين للمتابعة",
       "hintMicrophone": "اسمح بالوصول إلى الميكروفون للمتابعة",
       "welcomeBack": "أهلًا بعودتك. سنكمل من حيث توقفت.",
-      "relaunch": "الاختصار لا يستجيب بعد هذا؟ <relaunch>أعد تشغيل lowyap</relaunch> وستعود إلى هنا مباشرة."
+      "relaunch": "الاختصار لا يستجيب بعد هذا؟ <relaunch>أعد تشغيل lowyap</relaunch> وستعود إلى هنا مباشرة.",
+      "localPrivacyNote": "يبقى الصوت والنص الملصق على جهاز Mac الخاص بك — ولا يُرفعان أبداً إلى خوادم lowyap."
     },
     "shell": {
       "back": "رجوع",
@@ -146,7 +147,16 @@
       "downloadInstead": "تنزيل {{size}} بدلًا من ذلك",
       "pauses": "يتوقف {{name}} مؤقتًا عند {{percent}}%",
       "resumeLater": "اخترْه مرة أخرى ليكمل من حيث توقف",
-      "hint": "يُنزَّل أثناء إكمالك للإعداد"
+      "hint": "يُنزَّل أثناء إكمالك للإعداد",
+      "goals": {
+        "heading": "اختيار سريع حسب طريقة تحدثك",
+        "englishTitle": "إنجليزية فورية",
+        "englishDesc": "الأسرع على Mac (لصق خلال ~0.3 ثانية). مثالي للدردشة والمستندات والبرمجة بالإنجليزية.",
+        "multilingualTitle": "متعدد اللغات · الأردية والهينغليش و+99 لغة",
+        "multilingualDesc": "بدّل بحرية بين الأردية والهندية/الهينغليش والعربية والإنجليزية على جهازك.",
+        "advancedToggleShow": "مقارنة النماذج الفردية ({{count}})",
+        "advancedToggleHide": "إخفاء مقارنة النماذج"
+      }
     },
     "demo": {
       "title": "تحدّث في أي تطبيق باختصار واحد",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "اللغات"
+      "title": "اللغات",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "الصوت",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "مستوى الصوت",
         "description": "ضبط مستوى صوت تنبيهات الصوت"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "أسفل",
             "top": "أعلى"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "تقليدية (تايوان)",
           "traditionalHk": "تقليدية (هونغ كونغ)"
         }
+      },
+      "previewNotices": {
+        "callDetected": "تم اكتشاف مكالمة"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "عرض المزيد",
       "showLess": "عرض أقل",
       "dropTitle": "أفلت الملف لنسخه",
-      "dropDescription": "سيظهر في السجل."
+      "dropDescription": "سيظهر في السجل.",
+      "correctAndSave": "تصحيح وحفظ في القاموس",
+      "correctedTranscriptLabel": "النص المصحح",
+      "correctedTranscriptPlaceholder": "عدّل النص المفرغ...",
+      "dictionaryWordLabel": "كلمة القاموس",
+      "dictionaryWordPlaceholder": "كلمة أو عبارة اختيارية للتذكر",
+      "saveAndAddWord": "حفظ وإضافة إلى القاموس",
+      "saveCorrection": "حفظ التصحيح",
+      "cancelEdit": "إلغاء",
+      "savingCorrection": "جارٍ الحفظ...",
+      "correctionAndWordSaved": "تم حفظ التصحيح وإضافة \"{{word}}\" إلى القاموس.",
+      "correctionSaved": "تم حفظ تصحيح النص.",
+      "correctionSaveError": "فشل حفظ التصحيح. يرجى المحاولة مرة أخرى.",
+      "correctionEmptyError": "لا يمكن أن يكون النص فارغاً."
     },
     "debug": {
       "title": "تصحيح الأخطاء",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "نموذج غير معروف",
     "pasteFailedTitle": "فشل لصق النص",
     "pasteFailed": "تعذر لصق النص في التطبيق النشط.",
+    "copyLastDictation": "نسخ النص",
+    "copiedLastDictation": "تم نسخ آخر إملاء إلى الحافظة",
     "transcriptionFailedTitle": "فشل التفريغ النصي"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "جاري التفريغ...",
     "processing": "جاري المعالجة...",
-    "loadingModel": "جارٍ تحميل النموذج..."
+    "loadingModel": "جارٍ تحميل النموذج...",
+    "pasteRaw": "لصق خام",
+    "pasteRawTitle": "تخطي تحسين الذكاء الاصطناعي ولصق النص الخام فوراً",
+    "noticeRestartRequired": "App updated — restart lowyap",
+    "noticeTranscriptionFailed": "Model not ready — open lowyap",
+    "noticeMicMuted": "Mic is muted — check input",
+    "noticeNoSpeech": "No voice heard — raise mic volume",
+    "noticeMicPermission": "Mic permission needed — open lowyap",
+    "noticeNoMic": "No microphone found — check input",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "تم اكتشاف مكالمة"
+    },
+    "callStartNotes": "بدء الملاحظات",
+    "callDismiss": "ليس الآن",
+    "transcriptCancelled": "تم إلغاء التفريغ",
+    "undoCancel": "تراجع",
+    "dismissCancel": "إغلاق",
+    "meetingRecording": "قيد التسجيل",
+    "meetingPaused": "متوقف مؤقتًا",
+    "meetingSavingNotes": "جارٍ حفظ الملاحظات…",
+    "pauseMeeting": "إيقاف مؤقت",
+    "resumeMeeting": "استئناف",
+    "stopMeeting": "إيقاف",
+    "openMeetingNotes": "فتح ملاحظات الاجتماع",
+    "minimizeMeetingPill": "تصغير إلى شريط القوائم"
   },
   "secureInput": {
     "blockedWithCulprit_one": "قد يحظر {{name}} اختصارًا واحدًا",
@@ -975,5 +1064,121 @@
     "learnMore": "كيفية الإصلاح",
     "recorderBlocked": "لا يمكن تسجيل الاختصارات الآن — يحجب Secure Input في macOS أحداث المفاتيح. عالج تحذير Secure Input أولاً.",
     "dismiss": "تجاهل"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "المسار السريع الفوري",
+      "description": "تخطَّ انتظار الذكاء الاصطناعي للعبارات القصيرة والواضحة لتُلصق الردود البسيطة في أقل من 0.4 ثانية."
+    },
+    "snippets": {
+      "title": "مقتطفات صوتية",
+      "description": "انطق عبارة تشغيل قصيرة لإدراج رابط أو بريد إلكتروني أو نص حرفياً.",
+      "triggerPlaceholder": "العبارة المنطوقة (مثل: رابط تقويمي)",
+      "expansionPlaceholder": "النص المراد إدراجه (مثل: https://cal.com/you)",
+      "add": "إضافة مقتطف",
+      "empty": "لا توجد مقتطفات صوتية بعد.",
+      "removeLabel": "إزالة المقتطف {{trigger}}",
+      "errors": {
+        "emptyTrigger": "أدخل عبارة التشغيل المنطوقة.",
+        "emptyExpansion": "أدخل النص الذي يجب أن تدرجه هذه العبارة.",
+        "duplicate": "يوجد مقتطف لهذه العبارة بالفعل."
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "الاجتماعات",
+    "title": "ملاحظات الاجتماعات",
+    "subtitle": "التقاط محلي بدون بوت + نقاط سريعة وملخصات النصوص",
+    "privacyConsentBar": "محلي 100% وبدون بوت · تذكر إبلاغ المشاركين بأنك تدون الملاحظات.",
+    "autoDetect": {
+      "label": "اكتشاف المكالمات النشطة تلقائياً",
+      "description": "إظهار تنبيه هادئ عند تفعيل الميكروفون في Zoom أو Meet أو Teams أو FaceTime أو Slack."
+    },
+    "detectedBanner": {
+      "title": "تم اكتشاف مكالمة نشطة في {{app}}",
+      "subtitle": "سجل ملاحظاتك محلياً بدون بوت دون الانضمام كمشارك.",
+      "startButton": "بدء تدوين الملاحظات",
+      "dismissButton": "ليس الآن"
+    },
+    "idle": {
+      "titlePlaceholder": "عنوان اختياري للاجتماع (مثل: اجتماع المنتج الأسبوعي)",
+      "titleAriaLabel": "عنوان الاجتماع",
+      "templateLabel": "القالب",
+      "templateAriaLabel": "قالب ملاحظات الاجتماع",
+      "startButton": "بدء تدوين الملاحظات"
+    },
+    "templates": {
+      "general": "عام",
+      "one_on_one": "ثنائي 1:1",
+      "standup": "اجتماع يومي سريع",
+      "language_lesson": "درس لغة",
+      "client_call": "مكالمة عميل"
+    },
+    "status": {
+      "idle": "خامل",
+      "recording": "قيد التسجيل",
+      "paused": "متوقف مؤقتاً",
+      "summarizing": "جارٍ التلخيص..."
+    },
+    "badges": {
+      "systemAndMic": "النظام + الميكروفون",
+      "micOnly": "الميكروفون فقط",
+      "headphones": "سماعات الرأس",
+      "speakerEchoGuard": "حماية صدى المكبر",
+      "rollups": "{{count}} ملخصات لكل 5 دقائق"
+    },
+    "controls": {
+      "pause": "إيقاف مؤقت",
+      "resume": "استئناف",
+      "finishAndSummarize": "إنهاء وتلخيص"
+    },
+    "live": {
+      "roughBulletsTitle": "نقاطك السريعة",
+      "roughBulletsPlaceholder": "دوّن نقاطاً سريعة أو قرارات أو طوابع زمنية...",
+      "roughBulletsHint": "دوّن نقاطاً سريعة أو طوابع زمنية — سيقوم lowyap بتوسيعها مع النص عند الانتهاء.",
+      "saving": "جارٍ الحفظ...",
+      "saved": "تم الحفظ تلقائياً",
+      "transcriptTitle": "البث المباشر للنص",
+      "transcriptEmpty": "بانتظار الكلام... ستظهر المقاطع هنا أثناء حديثك وحديث الآخرين."
+    },
+    "speaker": {
+      "me": "أنا",
+      "others": "الآخرون"
+    },
+    "archive": {
+      "title": "الاجتماعات السابقة",
+      "searchPlaceholder": "ابحث في العناوين أو الملاحظات أو النصوص...",
+      "searchAriaLabel": "البحث في الاجتماعات السابقة",
+      "empty": "لم يتم تسجيل أي اجتماعات بعد. ابدأ تدوين الملاحظات أعلاه عند بدء مكالمتك التالية.",
+      "noSearchMatch": "لا توجد اجتماعات تطابق بحثك.",
+      "segmentsCount": "{{count}} مقاطع"
+    },
+    "detail": {
+      "selectPrompt": "اختر اجتماعاً من القائمة لقراءة ملاحظاته أو تعديلها.",
+      "titleAriaLabel": "تعديل عنوان الاجتماع",
+      "templateAriaLabel": "تغيير قالب الاجتماع",
+      "regenerate": "إعادة توليد الملاحظات",
+      "regenerating": "جارٍ إعادة التوليد...",
+      "copyMarkdown": "نسخ Markdown",
+      "copied": "تم النسخ!",
+      "delete": "حذف",
+      "confirmDelete": "تأكيد الحذف",
+      "cancelDelete": "إلغاء",
+      "notesEmpty": "لم يتم إنشاء ملاحظات ملخصة بعد. انقر فوق إعادة توليد الملاحظات أعلاه.",
+      "bulletsPlaceholder": "أضف نقاطك الخاصة أو مهام العمل...",
+      "saveAndReexpand": "حفظ وإعادة التوسيع",
+      "transcriptEmpty": "لم يتم تسجيل مقاطع نصية لهذا الاجتماع.",
+      "rollupsTitle": "ملخصات مرحلية كل 5 دقائق",
+      "source": {
+        "llm": "ملخص الذكاء الاصطناعي",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "ملخص محلي دون اتصال"
+      },
+      "tabs": {
+        "notes": "الملاحظات",
+        "bullets": "نقاطك",
+        "transcript": "النص الكامل"
+      }
+    }
   }
 }

@@ -5,18 +5,26 @@
   /* Near-opaque app surface (theme.css --color-background at 98%). Auto-flips
      light/dark with --color-background, so no dark-mode override is needed. */
   --s-surface: color-mix(in srgb, var(--color-background) 98%, transparent);
-  /* Accent = brand colour; flips automatically via --color-logo-primary. */
-  --s-accent: var(--color-logo-primary);
+  /* High-contrast brand accent (>=5.3:1 in both light and dark modes). */
+  --s-accent: var(--color-overlay-accent);
   /* The rest come from theme.css, which already follows the theme setting. */
   --s-accent-soft: color-mix(
     in srgb,
-    var(--color-logo-primary) 20%,
+    var(--color-overlay-accent) 20%,
     transparent
   );
   --s-muted: var(--color-ink-2);
   --s-faint: var(--color-ink-3);
   --s-border: var(--color-line);
   --s-hair: var(--color-wash);
+  --s-paste-raw-border: rgba(15, 15, 15, 0.22);
+  --s-paste-raw-bg: rgba(15, 15, 15, 0.08);
+  --s-paste-raw-bg-hover: rgba(15, 15, 15, 0.15);
+  --s-paste-raw-text: rgba(15, 15, 15, 0.9);
+
+  --s-amber: #f59e0b;
+  --s-amber-soft: rgba(245, 158, 11, 0.16);
+  --s-amber-border: rgba(245, 158, 11, 0.38);
 
   /* Card geometry — single source of truth for the visible overlay sizes. The
      native overlay window (overlay.rs) is sized from these: it must be at least
@@ -31,6 +39,22 @@
   --ov-open-w: 392px; /* Live panel, expanded */
   --ov-base-h: 40px; /* control-row height (.sbase) */
   --ov-cap-max-h: 64px; /* max height of the scrolling live-text region */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --s-paste-raw-border: rgba(255, 255, 255, 0.24);
+    --s-paste-raw-bg: rgba(255, 255, 255, 0.12);
+    --s-paste-raw-bg-hover: rgba(255, 255, 255, 0.22);
+    --s-paste-raw-text: rgba(255, 255, 255, 0.92);
+  }
+}
+
+:root[data-theme="dark"] {
+  --s-paste-raw-border: rgba(255, 255, 255, 0.24);
+  --s-paste-raw-bg: rgba(255, 255, 255, 0.12);
+  --s-paste-raw-bg-hover: rgba(255, 255, 255, 0.22);
+  --s-paste-raw-text: rgba(255, 255, 255, 0.92);
 }
 /* ============================================================
    Unified overlay stage — one fixed, transparent container shared by the compact
@@ -136,8 +160,14 @@
     opacity 240ms ease,
     transform 300ms ease;
 }
+.scard.is-capturing {
+  width: min(260px, calc(100vw - 8px));
+}
+.scard.is-capturing.cpaused {
+  width: min(296px, calc(100vw - 8px));
+}
 .scard.open {
-  width: var(--ov-open-w);
+  width: min(var(--ov-open-w), calc(100vw - 8px));
   border-radius: 16px;
 }
 .scard.working {
@@ -145,17 +175,149 @@
   border-radius: 18px;
 }
 
-/* Compact form: two fixed widths so the recording→working change is an animatable
-   width transition (intrinsic max-content can't be transitioned, and every label
-   is short enough to fit the resting pill, so content-sizing produced no visible
-   grow). The resting pill hugs the waveform; the working pill is roomy enough to
-   center the longest label — the .swork-label ellipsis is only a safety net past it. */
+/* Compact form: fixed widths per state so transitions remain smooth while
+   staying comfortably inside Minimal (280x44 / 256x50) and Live (360-400w). */
 .scard.compact {
   animation: none;
   width: var(--ov-rest-w);
 }
+.scard.compact.is-capturing {
+  width: min(252px, calc(100vw - 6px));
+}
+.scard.compact.is-capturing.cpaused {
+  width: min(272px, calc(100vw - 6px));
+}
 .scard.compact.cworking {
   width: var(--ov-work-w);
+}
+.scard.cpaused {
+  border-color: var(--s-amber-border);
+}
+.scard.working.has-paste-raw,
+.scard.compact.cworking.has-paste-raw {
+  width: min(276px, calc(100vw - 4px));
+}
+.scard.compact.cnotice {
+  width: min(312px, calc(100vw - 8px));
+}
+.scard.compact.cnotice.is-call-detected {
+  width: min(392px, calc(100vw - 8px));
+}
+.sbase.is-notice {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 7px;
+}
+.sdot.notice {
+  background: #e5534b;
+  opacity: 1;
+}
+.sdot.call {
+  width: 6px;
+  height: 6px;
+  background: #34c759;
+  opacity: 1;
+  animation: sdot-pulse 1.9s infinite;
+}
+.scall-app-badge {
+  width: 21px;
+  height: 21px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #ffffff;
+  background: #5b5fc7;
+  flex: none;
+}
+.scall-app-badge.is-teams {
+  background: #5b5fc7;
+}
+.scall-app-badge.is-zoom {
+  background: #0b5cff;
+}
+.scall-app-badge.is-meet {
+  background: #1a8917;
+}
+.scall-app-badge svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.scall-mid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.scall-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--s-muted);
+  white-space: nowrap;
+  flex: none;
+}
+.snotice-label {
+  color: var(--color-text);
+  font-weight: 500;
+  padding: 0 2px;
+  text-align: center;
+}
+.is-call-detected .snotice-label {
+  font-weight: 600;
+  text-align: left;
+}
+.scall-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.scall-btn {
+  height: 22px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+.scall-btn:focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 1px;
+}
+.scall-btn.is-start {
+  background: var(--color-background-ui);
+  color: #ffffff;
+}
+.scall-btn.is-start:hover {
+  background: var(--color-background-ui-hover);
+}
+.scall-btn.is-dismiss {
+  background: var(--s-hair);
+  border-color: var(--s-border);
+  color: var(--color-text);
+}
+.scall-btn.is-dismiss:hover {
+  background: var(--s-accent-soft);
 }
 
 /* text region — auto-height open via grid-rows trick; region fades as a whole */
@@ -233,6 +395,7 @@
 .sbase {
   height: var(--ov-base-h);
   flex: none; /* the control row never squashes; only the text region gives */
+  box-sizing: border-box;
   padding: 0 10px;
   display: grid;
   /* Equal side columns (min 22px to hold the cancel button) keep the center item
@@ -241,17 +404,81 @@
   grid-template-columns: minmax(22px, 1fr) auto minmax(22px, 1fr);
   align-items: center;
 }
+.sbase.is-capturing {
+  padding: 0 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+}
 .sbase-l {
   display: flex;
   padding-left: 5px;
   align-items: center;
   justify-self: start;
 }
+.sbase.is-capturing .sbase-l {
+  padding-left: 3px;
+}
+.sbase-mid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+}
+.sbase.is-capturing .sbase-mid {
+  justify-content: flex-start;
+}
 .sbase-r {
   display: flex;
   align-items: center;
   gap: 10px;
   justify-self: end;
+}
+.sbase.is-capturing .sbase-r {
+  gap: 4px;
+}
+.sbase.has-paste-raw {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.sbase.has-paste-raw .sbase-r {
+  gap: 6px;
+}
+.sbase.has-paste-raw .swork-label {
+  padding: 0 2px;
+  text-align: center;
+}
+.paste-raw-button {
+  height: 20px;
+  box-sizing: border-box;
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--s-paste-raw-border);
+  background: var(--s-paste-raw-bg);
+  color: var(--s-paste-raw-text);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+.paste-raw-button:hover:not(:disabled) {
+  background: var(--s-paste-raw-bg-hover);
+}
+.paste-raw-button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .sdot {
   width: 7px;
@@ -268,6 +495,17 @@
   opacity: 1;
   animation: sdot-pulse 1.9s infinite;
 }
+.scard.cpaused .sdot.ready {
+  background: var(--s-amber);
+  opacity: 1;
+  animation: none;
+  box-shadow: none;
+}
+.scard.cpaused .scaret {
+  background: var(--s-amber);
+  opacity: 0.65;
+  animation: none;
+}
 /* A quiet neutral dot while the host has not delivered its first sample yet. */
 .sdot.arming {
   background: var(--s-muted);
@@ -283,15 +521,26 @@
   }
 }
 .stimer {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--s-faint);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  opacity: 0;
-  transition: opacity 240ms ease 80ms;
-}
-.scard.open .stimer {
+  padding-right: 2px;
   opacity: 1;
+  transition:
+    opacity 200ms ease,
+    color 180ms ease;
+}
+.scard.cpaused .stimer {
+  color: var(--s-amber);
+}
+.spaused-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--s-amber);
+  white-space: nowrap;
 }
 
 /* Waveform — reactive only after the first microphone callback. While arming,
@@ -305,6 +554,10 @@
   height: 18px;
   flex: none;
 }
+.sbase.is-capturing .swave {
+  gap: 2.5px;
+  padding-right: 0;
+}
 .swave i {
   width: 4px;
   min-height: 3px;
@@ -315,6 +568,19 @@
     height 80ms linear,
     background-color 180ms ease,
     opacity 180ms ease;
+}
+.sbase.is-capturing .swave i {
+  width: 3.5px;
+}
+.scard.cpaused .swave i,
+.swave.paused i {
+  height: 3px !important;
+  background: var(--s-muted);
+  opacity: 0.35;
+  animation: none;
+}
+.scard.compact.cpaused .swave i:nth-child(n + 4) {
+  display: none;
 }
 .swave.arming i {
   height: 6px !important;
@@ -381,6 +647,70 @@
 .sx:active {
   transform: scale(0.95);
 }
+.sctrl-btn {
+  height: 22px;
+  min-width: 22px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--s-muted);
+  background: var(--s-hair);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    transform 100ms ease;
+}
+.sctrl-btn svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  display: block;
+}
+.sctrl-btn:hover {
+  background: var(--s-accent-soft);
+  color: var(--color-text);
+  transform: scale(1.05);
+}
+.sctrl-btn:active {
+  transform: scale(0.95);
+}
+.sctrl-btn.is-resume {
+  padding: 0 7px 0 6px;
+  background: var(--s-amber-soft);
+  border: 1px solid var(--s-amber-border);
+  color: var(--s-amber);
+}
+.sctrl-btn.is-resume svg {
+  width: 9px;
+  height: 9px;
+}
+.sctrl-btn.is-resume:hover {
+  background: rgba(245, 158, 11, 0.26);
+  color: var(--color-text);
+}
+.sctrl-btn.is-done {
+  color: var(--color-moss);
+  background: var(--color-moss-wash);
+}
+.sctrl-btn.is-done:hover {
+  background: color-mix(in srgb, var(--color-moss) 24%, transparent);
+  color: var(--color-moss);
+}
 
 /* working state (transcribing / polishing) — spinner + label */
 .sspinner {
@@ -406,4 +736,355 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ============================================================
+   Wave 4A — SV-82 Escape Soft-Cancel 5-Second Undo Pill &
+   SV-86 Unified Active Meeting Pill
+   ============================================================ */
+.scard.compact.is-soft-cancelled {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(340px, calc(100vw - 8px));
+  height: 42px;
+  border-radius: 21px;
+  background: rgba(24, 24, 27, 0.92);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f5f5f7;
+  justify-content: center;
+}
+.ov-stage.top .scard.compact.is-soft-cancelled,
+.ov-stage.top .scard.compact.is-meeting-pill {
+  /* Keep the countdown bar / single-row pill layout consistent regardless of top/bottom stage. */
+  flex-direction: column;
+}
+.sundo-row {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 9px 2px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.sundo-leading {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.sundo-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(245, 245, 247, 0.62);
+}
+.sundo-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.sundo-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: rgba(245, 245, 247, 0.94);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sundo-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+.sundo-btn {
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    opacity 140ms ease;
+}
+.sundo-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.34);
+}
+.sundo-btn:focus-visible,
+.sundo-dismiss:focus-visible,
+.smeeting-btn:focus-visible,
+.smeeting-icon-btn:focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 1px;
+}
+.sundo-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.sundo-dismiss {
+  color: rgba(245, 245, 247, 0.68);
+  background: rgba(255, 255, 255, 0.08);
+}
+.sundo-dismiss:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
+}
+.sundo-progress-track {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 2.5px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  pointer-events: none;
+}
+.sundo-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #a08cff 0%, #6946e5 100%);
+  border-radius: 0 2px 2px 0;
+  will-change: width;
+}
+[dir="rtl"] .sundo-progress-fill {
+  border-radius: 2px 0 0 2px;
+}
+
+.scard.compact.is-meeting-pill {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(392px, calc(100vw - 8px));
+  height: 42px;
+  border-radius: 21px;
+  background: rgba(22, 22, 25, 0.94);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f5f5f7;
+  justify-content: center;
+}
+.scard.compact.is-meeting-pill.is-paused {
+  border-color: rgba(245, 158, 11, 0.42);
+}
+.scard.compact.is-meeting-pill.is-summarizing {
+  width: max-content;
+  min-width: 176px;
+  max-width: min(280px, calc(100vw - 8px));
+}
+.smeeting-row {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 8px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.smeeting-row.is-summarizing {
+  justify-content: center;
+  padding: 0 14px;
+  gap: 8px;
+}
+.smeeting-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.sdot.smeeting-dot {
+  width: 8px;
+  height: 8px;
+}
+.sdot.smeeting-dot.recording {
+  background: #34c759;
+  opacity: 1;
+  animation: smeeting-dot-pulse 1.8s infinite;
+}
+.sdot.smeeting-dot.paused {
+  background: var(--s-amber);
+  opacity: 1;
+  animation: none;
+}
+@keyframes smeeting-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.42);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+.smeeting-timer {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f5f5f7;
+  padding-right: 0;
+}
+.is-meeting-pill.is-paused .smeeting-timer {
+  color: #fbbf24;
+}
+.smeeting-paused-badge {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.38);
+  color: #fbbf24;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.smeeting-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.smeeting-btn {
+  height: 25px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.1);
+  color: #f5f5f7;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+.smeeting-btn svg {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  display: block;
+}
+.smeeting-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+.smeeting-btn.is-resume {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.44);
+  color: #fde68a;
+}
+.smeeting-btn.is-resume:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.3);
+}
+.smeeting-btn.is-stop {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.36);
+  color: #fecaca;
+}
+.smeeting-btn.is-stop:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.28);
+  color: #ffffff;
+}
+.smeeting-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.smeeting-icon-btn {
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 245, 247, 0.78);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.smeeting-icon-btn svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.smeeting-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+.smeeting-spinner {
+  border-color: rgba(255, 255, 255, 0.18);
+  border-top-color: #a08cff;
+}
+.smeeting-saving-label {
+  color: rgba(245, 245, 247, 0.92);
+  padding: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-fade,
+  .scard,
+  .scard.leaving,
+  .stext,
+  .sdot,
+  .swave i,
+  .sx,
+  .sctrl-btn,
+  .scall-btn,
+  .sundo-btn,
+  .smeeting-btn,
+  .smeeting-icon-btn,
+  .paste-raw-button,
+  .stimer {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+  .sdot.ready,
+  .sdot.call,
+  .sdot.smeeting-dot.recording,
+  .swave.arming i,
+  .scaret {
+    animation: none !important;
+  }
 }

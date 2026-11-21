@@ -58,10 +58,14 @@ pub fn handle_shortcut_event(
         return;
     };
 
-    // Cancel binding: only fires when recording and key is pressed
+    // Keep Escape actionable during the undo window and while ASR is running.
     if binding_id == "cancel" {
         let audio_manager = app.state::<Arc<AudioRecordingManager>>();
-        if audio_manager.is_recording() && is_pressed {
+        let session = crate::session_bus::bus().snapshot();
+        if is_pressed
+            && (audio_manager.is_recording()
+                || !matches!(session.dictation, lowyap_ports::DictationPhase::Idle))
+        {
             action.start(app, binding_id, hotkey_string);
         }
         return;

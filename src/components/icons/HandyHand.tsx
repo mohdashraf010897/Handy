@@ -2,17 +2,17 @@
 const HandyHand = ({
   width,
   height,
+  className,
 }: {
   width?: number | string;
   height?: number | string;
-  // The sidebar passes a className for its icons; the mark keeps its own color.
   className?: string;
 }) => (
   <svg
     width={width || 126}
     height={height || 135}
     viewBox="0 0 64 64"
-    className="fill-text stroke-text"
+    className={["fill-text stroke-text", className].filter(Boolean).join(" ")}
     xmlns="http://www.w3.org/2000/svg"
     aria-hidden="true"
   >

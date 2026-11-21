@@ -4,5 +4,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Request microphone access to transcribe audio locally</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>lowyap captures system audio locally on your Mac during meetings so remote participants can be transcribed without a meeting bot.</string>
 </dict>
 </plist>

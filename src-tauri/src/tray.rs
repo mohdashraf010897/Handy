@@ -26,6 +26,7 @@ use crate::managers::transcription::TranscriptionManager;
 use crate::settings;
 use crate::tray_i18n::get_tray_translations;
 use log::{debug, error, info, trace, warn};
+use lowyap_ports::{DictationPhase, TrayMeetingProjection};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -66,12 +67,15 @@ struct MenuInputs {
     downloaded_models: Vec<(String, String)>,
     locale: String,
     update_checks_enabled: bool,
+    meeting: TrayMeetingProjection,
+    meeting_pill_dismissed: bool,
 }
 
 /// Complete description of what the tray should look like.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TrayDesired {
     icon_path: &'static str,
+    as_template: bool,
     menu: MenuInputs,
 }
 
@@ -80,9 +84,9 @@ struct TrayInner {
     icon_state: TrayIconState,
     /// Latest computed snapshot, waiting to be (or just) applied.
     desired: Option<TrayDesired>,
-    /// Icon the native tray currently shows. Only updated when `set_icon`
-    /// succeeds, so a failed update is retried on the next sync.
-    applied_icon: Option<&'static str>,
+    /// Icon and template mode the native tray currently shows. Only updated
+    /// when `set_icon` succeeds, so a failed update is retried on the next sync.
+    applied_icon: Option<(&'static str, bool)>,
     /// Inputs the native menu was last successfully built from. The tooltip
     /// is derived from the same inputs and set best-effort alongside the menu;
     /// it is not tracked separately.
@@ -217,6 +221,18 @@ pub fn get_icon_path(theme: AppTheme, state: TrayIconState, warning: bool) -> &'
     }
 }
 
+/// Whether the macOS menu bar should treat the tray icon as a monochrome
+/// template mask. Idle and Transcribing use alpha-only masks so AppKit adapts
+/// to any wallpaper/appearance; Recording and Secure Input warnings keep their
+/// semantic coral-red / amber accent colors.
+pub const fn is_template_icon(state: TrayIconState, warning: bool) -> bool {
+    match state {
+        TrayIconState::Recording => false,
+        TrayIconState::Idle => !warning,
+        TrayIconState::Transcribing => true,
+    }
+}
+
 /// Sets the recording state shown by the tray (icon + Cancel/model menu).
 pub fn set_tray_state(app: &AppHandle, state: TrayIconState) {
     sync_tray_with(app, |inner| inner.icon_state = state);
@@ -336,10 +352,22 @@ fn compute_desired(app: &AppHandle, icon_state: TrayIconState) -> TrayDesired {
         .collect();
     downloaded_models.sort_by(|a, b| a.1.cmp(&b.1));
 
+    let (session, meeting_pill_dismissed) = crate::session_bus::bus().tray_state();
+    let mut meeting = session.tray_meeting;
+    let displayed_icon = if icon_state == TrayIconState::Idle && meeting.active {
+        TrayIconState::Recording
+    } else {
+        icon_state
+    };
+    // Nothing in the native menu displays elapsed time. Don't rebuild it
+    // just because two snapshots were taken on different milliseconds.
+    meeting.elapsed_ms = 0;
     TrayDesired {
-        icon_path: get_icon_path(theme, icon_state, warning),
+        icon_path: get_icon_path(theme, displayed_icon, warning),
+        as_template: is_template_icon(displayed_icon, warning),
         menu: MenuInputs {
-            busy: icon_state.is_busy(),
+            busy: icon_state.is_busy()
+                || matches!(session.dictation, DictationPhase::SoftCancelled { .. }),
             models_locked,
             warning,
             model_loaded,
@@ -347,6 +375,8 @@ fn compute_desired(app: &AppHandle, icon_state: TrayIconState) -> TrayDesired {
             downloaded_models,
             locale: settings.app_language,
             update_checks_enabled: settings.update_checks_enabled,
+            meeting,
+            meeting_pill_dismissed,
         },
     }
 }
@@ -379,7 +409,7 @@ fn apply_on_main(app: &AppHandle) {
         let Some(desired) = inner.desired.clone() else {
             return;
         };
-        let icon_changed = inner.applied_icon != Some(desired.icon_path);
+        let icon_changed = inner.applied_icon != Some((desired.icon_path, desired.as_template));
         let menu_changed = inner.applied_menu.as_ref() != Some(&desired.menu);
         if !icon_changed && !menu_changed {
             trace!("tray apply: nothing changed");
@@ -395,7 +425,7 @@ fn apply_on_main(app: &AppHandle) {
     let mut icon_ok = false;
     if icon_changed {
         match icon {
-            Some(image) => match tray.set_icon_with_as_template(Some(image), true) {
+            Some(image) => match tray.set_icon_with_as_template(Some(image), desired.as_template) {
                 Ok(()) => icon_ok = true,
                 Err(err) => error!("Failed to update tray icon '{}': {err}", desired.icon_path),
             },
@@ -427,7 +457,7 @@ fn apply_on_main(app: &AppHandle) {
     {
         let mut inner = state.lock();
         if icon_ok {
-            inner.applied_icon = Some(desired.icon_path);
+            inner.applied_icon = Some((desired.icon_path, desired.as_template));
         }
         if menu_ok {
             inner.applied_menu = Some(desired.menu.clone());
@@ -609,7 +639,89 @@ fn build_menu(app: &AppHandle, inputs: &MenuInputs) -> tauri::Result<(Menu<tauri
         tooltip = format!("{} — {}", tooltip, warning_item.text().unwrap_or_default());
     }
 
+    insert_meeting_items(app, &menu, inputs)?;
     Ok((menu, tooltip))
+}
+
+fn insert_meeting_items(
+    app: &AppHandle,
+    menu: &Menu<tauri::Wry>,
+    inputs: &MenuInputs,
+) -> tauri::Result<()> {
+    let meeting = &inputs.meeting;
+    let status = if meeting.summarizing {
+        "Summarizing Meeting Notes…"
+    } else if meeting.paused {
+        "❚❚ Meeting Notes Paused"
+    } else if meeting.active {
+        "● Meeting Notes Recording"
+    } else {
+        return Ok(());
+    };
+    let mut position = 0;
+    let mut insert = |id, label, enabled| -> tauri::Result<()> {
+        let item = MenuItem::with_id(app, id, label, enabled, None::<&str>)?;
+        menu.insert(&item, position)?;
+        position += 1;
+        Ok(())
+    };
+    insert("meeting_status", status, false)?;
+    if meeting.active {
+        if meeting.paused {
+            insert("meeting_resume", "Resume Meeting Notes", true)?;
+        } else {
+            insert("meeting_pause", "Pause Meeting Notes", true)?;
+        }
+        insert("meeting_stop", "Stop & Summarize Meeting", true)?;
+    }
+    insert("meeting_open", "Open Meetings Workspace…", true)?;
+    if meeting.active {
+        let label = if inputs.meeting_pill_dismissed {
+            "Show Floating Meeting Pill"
+        } else {
+            "Hide Floating Meeting Pill"
+        };
+        insert("meeting_toggle_pill", label, true)?;
+    }
+    menu.insert(&PredefinedMenuItem::separator(app)?, position)?;
+    Ok(())
+}
+
+pub(crate) fn on_meeting_menu_event(app: &AppHandle, id: &str) -> bool {
+    use crate::meeting::commands::{pause_meeting_notes, resume_meeting_notes, stop_meeting_notes};
+    match id {
+        "meeting_open" => crate::session_bus::open_meetings_workspace(app.clone()),
+        "meeting_toggle_pill" => {
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::session_bus::bus().set_pill_dismissed(&app, None);
+            });
+        }
+        "meeting_pause" | "meeting_resume" => {
+            let app = app.clone();
+            let pause = id == "meeting_pause";
+            tauri::async_runtime::spawn_blocking(move || {
+                let result = if pause {
+                    pause_meeting_notes(app)
+                } else {
+                    resume_meeting_notes(app)
+                };
+                if let Err(err) = result {
+                    warn!("Meeting tray control failed: {err}");
+                }
+            });
+        }
+        "meeting_stop" => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = stop_meeting_notes(app).await {
+                    warn!("Meeting stop from tray failed: {err}");
+                }
+            });
+        }
+        _ => return false,
+    }
+    true
 }
 
 fn last_transcript_text(entry: &HistoryEntry) -> &str {
@@ -686,7 +798,10 @@ pub fn copy_last_transcript(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{last_transcript_text, load_tray_icon, MenuInputs, TrayDesired, TrayIconState};
+    use super::{
+        is_template_icon, last_transcript_text, load_tray_icon, MenuInputs, TrayDesired,
+        TrayIconState,
+    };
     use crate::managers::history::HistoryEntry;
 
     fn build_entry(transcription: &str, post_processed: Option<&str>) -> HistoryEntry {
@@ -716,6 +831,8 @@ mod tests {
             downloaded_models: vec![("small".to_string(), "Small".to_string())],
             locale: "en".to_string(),
             update_checks_enabled: true,
+            meeting: lowyap_ports::TrayMeetingProjection::default(),
+            meeting_pill_dismissed: false,
         }
     }
 
@@ -749,18 +866,47 @@ mod tests {
         // Recording -> Transcribing transition must not rebuild the menu.
         let recording = TrayDesired {
             icon_path: "resources/tray_recording.png",
+            as_template: is_template_icon(TrayIconState::Recording, false),
             menu: inputs(TrayIconState::Recording.is_busy()),
         };
         let transcribing = TrayDesired {
             icon_path: "resources/tray_transcribing.png",
+            as_template: is_template_icon(TrayIconState::Transcribing, false),
             menu: inputs(TrayIconState::Transcribing.is_busy()),
         };
         assert_ne!(recording.icon_path, transcribing.icon_path);
+        assert!(!recording.as_template);
+        assert!(transcribing.as_template);
         assert_eq!(recording.menu, transcribing.menu);
+    }
+
+    #[test]
+    fn template_mode_preserves_recording_and_warning_colors() {
+        assert!(is_template_icon(TrayIconState::Idle, false));
+        assert!(!is_template_icon(TrayIconState::Idle, true));
+        assert!(!is_template_icon(TrayIconState::Recording, false));
+        assert!(!is_template_icon(TrayIconState::Recording, true));
+        assert!(is_template_icon(TrayIconState::Transcribing, false));
+        assert!(is_template_icon(TrayIconState::Transcribing, true));
     }
 
     #[test]
     fn idle_and_busy_menus_differ() {
         assert_ne!(inputs(false), inputs(true));
+    }
+
+    #[test]
+    fn meeting_status_changes_invalidate_the_cached_menu() {
+        let idle = inputs(false);
+        let mut recording = idle.clone();
+        recording.meeting.active = true;
+        let mut paused = recording.clone();
+        paused.meeting.paused = true;
+        assert_ne!(idle, recording);
+        assert_ne!(recording, paused);
+        assert_ne!(paused, idle);
+        let mut dismissed = paused.clone();
+        dismissed.meeting_pill_dismissed = true;
+        assert_ne!(paused, dismissed);
     }
 }

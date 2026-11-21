@@ -1,0 +1,17 @@
+[package]
+name = "lowyap-eval"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Deterministic audio pipeline evaluation harness and WAV pair inspector for lowyap"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+hound = "3.5.1"
+lowyap-diarize = { path = "../lowyap-diarize" }
+lowyap-dsp = { path = "../lowyap-dsp" }
+lowyap-flow = { path = "../lowyap-flow" }
+lowyap-ports = { path = "../lowyap-ports" }
+lowyap-summarize = { path = "../lowyap-summarize" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

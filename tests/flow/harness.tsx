@@ -46,9 +46,15 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const clone = <T,>(value: T): T => structuredClone(value);
 
+const INITIAL_FLOW_SETTINGS: FlowSettings = {
+  ...DEFAULT_FLOW_SETTINGS,
+  fast_path_enabled: true,
+  snippets: [],
+};
+
 const harness: FlowHarness = {
   saves: [],
-  stored: clone(DEFAULT_FLOW_SETTINGS),
+  stored: clone(INITIAL_FLOW_SETTINGS),
   postProcessEnabled: params.get("postProcess") !== "off",
   unhandled: [],
 };
@@ -112,8 +118,35 @@ mockIPC(
   { shouldMockEvents: true },
 );
 
+const translation = {
+  ...en,
+  flow: {
+    fastPath: {
+      title: "Instant fast-path",
+      description:
+        "Skip AI wait on short, clean phrases so simple replies paste in under 0.4s.",
+    },
+    snippets: {
+      title: "Voice snippets",
+      description:
+        "Speak a short trigger phrase to insert a link, email, or block of text verbatim.",
+      triggerPlaceholder: "Spoken phrase (e.g. my calendar link)",
+      expansionPlaceholder: "Text to insert (e.g. https://cal.com/you)",
+      add: "Add snippet",
+      empty: "No voice snippets yet.",
+      removeLabel: "Remove snippet {{trigger}}",
+      errors: {
+        emptyTrigger: "Enter the spoken trigger phrase.",
+        emptyExpansion: "Enter the text this phrase should insert.",
+        duplicate: "A snippet for this phrase already exists.",
+      },
+    },
+    ...en.flow,
+  },
+};
+
 void i18n.use(initReactI18next).init({
-  resources: { en: { translation: en } },
+  resources: { en: { translation } },
   lng: "en",
   fallbackLng: "en",
   interpolation: { escapeValue: false },

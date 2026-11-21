@@ -176,3 +176,30 @@ fn finish_returns_the_detector_for_the_next_recording() {
     assert_eq!(captured.vad.frame_samples(), FRAME);
     assert_eq!(captured.vad.hangover_for(VadPolicy::Streaming), 20);
 }
+
+#[test]
+fn vad_inserts_zero_silence_separator_only_between_clauses_separated_by_pause() {
+    let mut h = harness(VadPolicy::Offline);
+    // Leading noise before speech must never emit a separator.
+    for _ in 0..800 {
+        h.sink.process_chunk(chunk(&[0.0; FRAME], FRAME));
+    }
+    h.sink.process_chunk(chunk(&[1.0; FRAME], FRAME));
+
+    // >= 3,072 noise samples (800 * 4 = 3,200) between Clause 1 and Clause 2.
+    for _ in 0..800 {
+        h.sink.process_chunk(chunk(&[0.0; FRAME], FRAME));
+    }
+    h.sink.process_chunk(chunk(&[2.0; FRAME], FRAME));
+
+    // Trailing noise at the end of utterance must NOT emit trailing zeros.
+    for _ in 0..900 {
+        h.sink.process_chunk(chunk(&[0.0; FRAME], FRAME));
+    }
+
+    let samples = h.sink.finish().samples;
+    assert_eq!(samples.len(), FRAME + 6_144 + FRAME);
+    assert_eq!(&samples[..FRAME], &[1.0; FRAME]);
+    assert!(samples[FRAME..FRAME + 6_144].iter().all(|&s| s == 0.0));
+    assert_eq!(&samples[FRAME + 6_144..], &[2.0; FRAME]);
+}

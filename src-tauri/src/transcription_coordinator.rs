@@ -199,8 +199,15 @@ enum Effect {
 /// Commands processed sequentially by the coordinator thread.
 enum Command {
     Input(InputEvent),
-    Cancel { recording_was_active: bool },
+    Escape,
+    ExpireSoftCancel { take_id: u64, epoch: u64 },
+    ConfirmSoftCancel(Option<u64>, Sender<bool>),
+    UndoSoftCancel(Option<u64>, Sender<bool>),
+    SessionSnapshot(Sender<lowyap_ports::SessionBusSnapshot>),
+    PauseRecording(bool, Sender<bool>),
     ProcessingFinished,
+    LockActive,
+    FinishActive,
 }
 
 /// Decide whether a key-up should be deferred (so auto-repeat can cancel it)
@@ -557,6 +564,24 @@ impl CoordinatorState {
             hotkey_string,
         }
     }
+
+    fn lock_active(&mut self) {
+        if matches!(self.stage, Stage::Recording(_)) {
+            self.pending_release = None;
+            if let Some(hold) = &mut self.hold {
+                hold.locked = true;
+            }
+        }
+    }
+
+    fn finish_active(&mut self) -> Option<Effect> {
+        let Stage::Recording(binding_id) = &self.stage else {
+            return None;
+        };
+        let id = binding_id.clone();
+        self.pending_release = None;
+        Some(self.begin_processing(id, "overlay_done".to_string()))
+    }
 }
 
 /// Serialises all transcription lifecycle events through a single thread
@@ -575,10 +600,12 @@ pub fn is_transcribe_binding(id: &str) -> bool {
 impl TranscriptionCoordinator {
     pub fn new(app: AppHandle) -> Self {
         let (tx, rx) = mpsc::channel();
+        let timer_tx = tx.clone();
 
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut state = CoordinatorState::new();
+                let mut next_take_id = 0;
 
                 loop {
                     let cmd = if let Some(deadline) = state.grace_deadline() {
@@ -587,9 +614,10 @@ impl TranscriptionCoordinator {
                             Err(mpsc::RecvTimeoutError::Timeout) => {
                                 let was_locked = state.is_recording_locked();
                                 if let Some(effect) = state.on_grace_expired() {
-                                    run_effect(&app, &mut state, effect);
+                                    run_effect(&app, &mut state, effect, &mut next_take_id);
                                 }
                                 if !was_locked && state.is_recording_locked() {
+                                    sync_recording_flags(&app, true);
                                     emit_recording_phase(&app, RecordingPhase::Locked);
                                 }
                                 continue;
@@ -606,28 +634,131 @@ impl TranscriptionCoordinator {
                     let was_locked = state.is_recording_locked();
                     match cmd {
                         Command::Input(input) => {
+                            if matches!(
+                                crate::session_bus::bus().snapshot().dictation,
+                                lowyap_ports::DictationPhase::SoftCancelled { .. }
+                            ) {
+                                if !input.is_pressed {
+                                    continue;
+                                }
+                                if crate::flow::soft_cancel::finalize_hard_cancel_for_take(
+                                    &app, None, None,
+                                ) {
+                                    cancel_state(&app, &mut state, true);
+                                    state.last_press = None;
+                                }
+                            }
                             if let Some(effect) = state.on_input(input, Instant::now()) {
-                                run_effect(&app, &mut state, effect);
+                                run_effect(&app, &mut state, effect, &mut next_take_id);
                             }
                         }
-                        Command::Cancel {
-                            recording_was_active,
-                        } => {
-                            // A cancel while transcribing ends the take too.
-                            let busy =
-                                recording_was_active || matches!(state.stage, Stage::Processing);
-                            state.on_cancel(recording_was_active);
-                            if busy {
-                                emit_recording_phase(&app, RecordingPhase::Cancelled);
+                        Command::Escape => {
+                            use crate::flow::soft_cancel::{escape, Escape};
+                            match escape(&app, || state.lock_active()) {
+                                Escape::Retained { take_id, epoch } => {
+                                    let deadline =
+                                        match crate::session_bus::bus().snapshot().dictation {
+                                            lowyap_ports::DictationPhase::SoftCancelled {
+                                                expires_at_ms,
+                                                ..
+                                            } => expires_at_ms,
+                                            _ => continue,
+                                        };
+                                    let tx = timer_tx.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        let remaining =
+                                            deadline.saturating_sub(crate::session_bus::now_ms());
+                                        tokio::time::sleep(Duration::from_millis(remaining)).await;
+                                        let _ =
+                                            tx.send(Command::ExpireSoftCancel { take_id, epoch });
+                                    });
+                                }
+                                Escape::Discarded {
+                                    recording_was_active,
+                                } => {
+                                    cancel_state(&app, &mut state, recording_was_active);
+                                }
                             }
+                        }
+                        Command::ExpireSoftCancel { take_id, epoch } => {
+                            if crate::flow::soft_cancel::expire_soft_cancel_if_current(
+                                &app, take_id, epoch,
+                            ) {
+                                cancel_state(&app, &mut state, true);
+                            }
+                        }
+                        Command::ConfirmSoftCancel(take_id, reply) => {
+                            let discarded = crate::flow::soft_cancel::finalize_hard_cancel_for_take(
+                                &app, take_id, None,
+                            );
+                            if discarded {
+                                cancel_state(&app, &mut state, true);
+                            }
+                            let _ = reply.send(discarded);
+                        }
+                        Command::UndoSoftCancel(take_id, reply) => {
+                            let retained = matches!(
+                                crate::session_bus::bus().snapshot().dictation,
+                                lowyap_ports::DictationPhase::SoftCancelled { .. }
+                            );
+                            let restored = crate::flow::soft_cancel::undo(&app, take_id);
+                            if retained
+                                && !restored
+                                && matches!(
+                                    crate::session_bus::bus().snapshot().dictation,
+                                    lowyap_ports::DictationPhase::Idle
+                                )
+                            {
+                                cancel_state(&app, &mut state, true);
+                            }
+                            let _ = reply.send(restored);
+                        }
+                        Command::SessionSnapshot(reply) => {
+                            sync_recording_flags(&app, state.is_recording_locked());
+                            let _ = reply.send(crate::session_bus::bus().snapshot());
+                        }
+                        Command::PauseRecording(paused, reply) => {
+                            let recording = matches!(
+                                crate::session_bus::bus().snapshot().dictation,
+                                lowyap_ports::DictationPhase::Recording { .. }
+                            );
+                            let audio = app.state::<Arc<AudioRecordingManager>>();
+                            let changed = recording
+                                && if paused {
+                                    audio.pause_recording()
+                                } else {
+                                    audio.resume_recording()
+                                };
+                            if changed {
+                                if paused {
+                                    state.lock_active();
+                                }
+                                sync_recording_flags(&app, state.is_recording_locked());
+                            }
+                            let _ = reply.send(changed);
                         }
                         Command::ProcessingFinished => {
+                            crate::shortcut::unregister_cancel_shortcut(&app);
                             if let Some(effect) = state.on_processing_finished() {
-                                run_effect(&app, &mut state, effect);
+                                run_effect(&app, &mut state, effect, &mut next_take_id);
+                            }
+                        }
+                        Command::LockActive => {
+                            state.lock_active();
+                        }
+                        Command::FinishActive => {
+                            if matches!(
+                                crate::session_bus::bus().snapshot().dictation,
+                                lowyap_ports::DictationPhase::Recording { .. }
+                            ) {
+                                if let Some(effect) = state.finish_active() {
+                                    run_effect(&app, &mut state, effect, &mut next_take_id);
+                                }
                             }
                         }
                     }
                     if !was_locked && state.is_recording_locked() {
+                        sync_recording_flags(&app, true);
                         emit_recording_phase(&app, RecordingPhase::Locked);
                     }
                 }
@@ -699,16 +830,35 @@ impl TranscriptionCoordinator {
         }
     }
 
-    pub fn notify_cancel(&self, recording_was_active: bool) {
-        if self
-            .tx
-            .send(Command::Cancel {
-                recording_was_active,
-            })
-            .is_err()
-        {
+    pub(crate) fn cancel_current(&self) {
+        if self.tx.send(Command::Escape).is_err() {
             warn!("Transcription coordinator channel closed");
         }
+    }
+
+    fn request<T>(&self, command: impl FnOnce(Sender<T>) -> Command) -> Option<T> {
+        let (reply, result) = mpsc::channel();
+        self.tx.send(command(reply)).ok()?;
+        result.recv().ok()
+    }
+
+    pub(crate) fn confirm_soft_cancel(&self, take_id: Option<u64>) -> bool {
+        self.request(|reply| Command::ConfirmSoftCancel(take_id, reply))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn undo_soft_cancel(&self, take_id: Option<u64>) -> bool {
+        self.request(|reply| Command::UndoSoftCancel(take_id, reply))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn session_snapshot(&self) -> Option<lowyap_ports::SessionBusSnapshot> {
+        self.request(Command::SessionSnapshot)
+    }
+
+    pub(crate) fn pause_recording(&self, paused: bool) -> bool {
+        self.request(|reply| Command::PauseRecording(paused, reply))
+            .unwrap_or(false)
     }
 
     pub fn notify_processing_finished(&self) {
@@ -716,9 +866,58 @@ impl TranscriptionCoordinator {
             warn!("Transcription coordinator channel closed");
         }
     }
+
+    /// Locks the active recording so releasing a held shortcut will not stop a
+    /// session the user paused from the floating overlay pill.
+    pub fn lock_active(&self) {
+        if self.tx.send(Command::LockActive).is_err() {
+            warn!("Transcription coordinator channel closed");
+        }
+    }
+
+    /// Stops and transcribes the active recording from the floating overlay
+    /// pill's "Done" control.
+    pub fn finish_active(&self) -> bool {
+        self.tx.send(Command::FinishActive).is_ok()
+    }
 }
 
-fn run_effect(app: &AppHandle, state: &mut CoordinatorState, effect: Effect) {
+fn cancel_state(app: &AppHandle, state: &mut CoordinatorState, recording_was_active: bool) {
+    let busy = recording_was_active || matches!(state.stage, Stage::Processing);
+    state.on_cancel(recording_was_active);
+    if busy {
+        emit_recording_phase(app, RecordingPhase::Cancelled);
+    }
+}
+
+fn sync_recording_flags(app: &AppHandle, locked: bool) {
+    let audio = app.state::<Arc<AudioRecordingManager>>();
+    crate::session_bus::bus().update(app, |machine, now| {
+        if let lowyap_ports::DictationPhase::Recording {
+            take_id,
+            locked: was_locked,
+            paused: was_paused,
+            ..
+        } = machine.snapshot(now).dictation
+        {
+            if !audio.is_recording() {
+                machine.complete_or_abort_dictation(Some(take_id), now);
+            } else {
+                let paused = audio.is_paused();
+                if (paused, locked) != (was_paused, was_locked) {
+                    machine.set_dictation_paused(take_id, paused, locked, now);
+                }
+            }
+        }
+    });
+}
+
+fn run_effect(
+    app: &AppHandle,
+    state: &mut CoordinatorState,
+    effect: Effect,
+    next_take_id: &mut u64,
+) {
     match effect {
         Effect::Start {
             binding_id,
@@ -727,6 +926,11 @@ fn run_effect(app: &AppHandle, state: &mut CoordinatorState, effect: Effect) {
             let started = start(app, &binding_id, &hotkey_string);
             state.on_start_result(&binding_id, started);
             if started {
+                *next_take_id += 1;
+                crate::session_bus::bus().update(app, |machine, now| {
+                    machine.set_transient_notice(None, now);
+                    machine.start_dictation(*next_take_id, now, state.is_recording_locked());
+                });
                 emit_recording_phase(app, RecordingPhase::Started);
             }
         }
@@ -734,8 +938,18 @@ fn run_effect(app: &AppHandle, state: &mut CoordinatorState, effect: Effect) {
             binding_id,
             hotkey_string,
         } => {
-            stop(app, &binding_id, &hotkey_string);
-            emit_recording_phase(app, RecordingPhase::Stopped);
+            let bus = crate::session_bus::bus();
+            if let lowyap_ports::DictationPhase::Recording { take_id, .. } =
+                bus.snapshot().dictation
+            {
+                bus.update(app, |machine, now| {
+                    machine.finish_dictation_to_transcribing(take_id, now)
+                });
+                stop(app, &binding_id, &hotkey_string);
+                emit_recording_phase(app, RecordingPhase::Stopped);
+            } else {
+                state.on_processing_finished();
+            }
         }
     }
 }

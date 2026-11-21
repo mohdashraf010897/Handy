@@ -1,6 +1,7 @@
 use crate::input;
 use crate::settings;
 use crate::settings::{OverlayPosition, OverlayStyle};
+use lowyap_ports::OverlayProjection;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
@@ -43,10 +44,10 @@ tauri_panel! {
 // On Windows these sizes are additionally multiplied by the accessibility text
 // scale (see windows_text_scale_factor), which WebView2 applies as a zoom.
 //
-// Compact overlay (Minimal / transcribing / processing): the 40h pill animates
-// width from 172 (--ov-rest-w) to 216 (--ov-work-w) and expands from center, so
-// the window must fit the widest state plus a little slack.
-const OVERLAY_WIDTH: f64 = 256.0;
+// Compact overlay (Minimal / transcribing / processing / paused): the 40h pill
+// animates width from 172 (--ov-rest-w) up to 296 (--ov-pause-w) and expands
+// from center, so the window must fit the widest state plus slack.
+const OVERLAY_WIDTH: f64 = 316.0;
 const OVERLAY_HEIGHT: f64 = 50.0;
 
 // Actual is 394x118, just a little extra
@@ -55,10 +56,12 @@ const OVERLAY_STREAM_HEIGHT: f64 = 120.0;
 
 /// Overlay window size (logical) for a given UI state.
 fn overlay_dimensions(state: &str) -> (f64, f64) {
-    if state == "streaming" {
-        (OVERLAY_STREAM_WIDTH, OVERLAY_STREAM_HEIGHT)
-    } else {
-        (OVERLAY_WIDTH, OVERLAY_HEIGHT)
+    match state {
+        "streaming" => (OVERLAY_STREAM_WIDTH, OVERLAY_STREAM_HEIGHT),
+        "notice" | "call_detected" => (OVERLAY_STREAM_WIDTH, OVERLAY_HEIGHT),
+        "meeting_active" | "meeting_summarizing" => (400.0, 50.0),
+        "soft_cancelled" => (340.0, 50.0),
+        _ => (OVERLAY_WIDTH, OVERLAY_HEIGHT),
     }
 }
 
@@ -287,7 +290,17 @@ fn current_overlay_logical_size(window: &tauri::webview::WebviewWindow) -> Optio
 }
 
 #[cfg(target_os = "windows")]
-static WINDOWS_OVERLAY_IS_STREAMING: AtomicBool = AtomicBool::new(false);
+thread_local! {
+    static WINDOWS_OVERLAY_SIZE: std::cell::Cell<(f64, f64)> =
+        const { std::cell::Cell::new((OVERLAY_WIDTH, OVERLAY_HEIGHT)) };
+}
+
+// Tracked on the main thread; a metadata-only bus update must not replay
+// show-overlay and reset controls/countdowns in the existing webview.
+thread_local! {
+    static PRESENTED: std::cell::RefCell<Option<(&'static str, Option<String>)>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 /// Windows accessibility text size (Settings > Accessibility > Text size), a
 /// separate axis from display scaling that WebView2 applies as a document zoom.
@@ -504,7 +517,10 @@ fn show_overlay_state(app_handle: &AppHandle, state: &str) {
     // inline when already on the main thread, so this never deadlocks.
     let handle = app_handle.clone();
     let state = state.to_string();
-    let _ = app_handle.run_on_main_thread(move || show_overlay_state_on_main(&handle, &state));
+    let _ = app_handle.run_on_main_thread(move || {
+        PRESENTED.with(|last| last.replace(None));
+        show_overlay_state_on_main(&handle, &state);
+    });
 }
 
 fn show_overlay_state_on_main(app_handle: &AppHandle, state: &str) {
@@ -538,7 +554,7 @@ fn show_overlay_state_on_main(app_handle: &AppHandle, state: &str) {
             let _ =
                 overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
             #[cfg(target_os = "windows")]
-            WINDOWS_OVERLAY_IS_STREAMING.store(state == "streaming", Ordering::Relaxed);
+            WINDOWS_OVERLAY_SIZE.set((width, height));
             let size_elapsed = size_started.elapsed();
 
             let pos_started = std::time::Instant::now();
@@ -630,6 +646,148 @@ pub fn show_processing_overlay(app_handle: &AppHandle) {
     show_overlay_state(app_handle, "processing");
 }
 
+const OVERLAY_NOTICE_HOLD_MS: u64 = 2800;
+pub(crate) fn sync_overlay_from_session_bus(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || apply_session_overlay(&handle));
+}
+
+pub(crate) fn apply_session_overlay(app: &AppHandle) {
+    let style = settings::get_settings(app).overlay_style;
+    let projection = crate::session_bus::bus().native_overlay(style != OverlayStyle::None);
+    let dictation_state = match &projection {
+        OverlayProjection::DictationTranscribing { .. } => "transcribing",
+        OverlayProjection::DictationPostProcessing { .. } => "processing",
+        _ => "recording",
+    };
+    let presentation = match projection {
+        OverlayProjection::Hidden => Some(("hidden", None)),
+        OverlayProjection::DictationSoftCancelled {
+            take_id,
+            expires_at_ms,
+            ..
+        } => Some(("soft_cancelled", Some(format!("{take_id}:{expires_at_ms}")))),
+        OverlayProjection::MeetingActive { meeting_id, .. } => {
+            Some(("meeting_active", Some(meeting_id)))
+        }
+        OverlayProjection::MeetingSummarizing { meeting_id, .. } => {
+            Some(("meeting_summarizing", Some(meeting_id)))
+        }
+        OverlayProjection::CallDetected { call_id, .. } => Some(("call_detected", Some(call_id))),
+        OverlayProjection::TransientNotice { notice_kind } => Some(("notice", Some(notice_kind))),
+        // The existing dictation path chooses streaming vs compact and sends
+        // readiness before ASR can change geometry. Preserve that presentation.
+        OverlayProjection::DictationRecording { .. }
+        | OverlayProjection::DictationTranscribing { .. }
+        | OverlayProjection::DictationPostProcessing { .. } => None,
+    };
+    let changed = PRESENTED.with(|last| {
+        if *last.borrow() == presentation {
+            false
+        } else {
+            last.replace(presentation.clone());
+            true
+        }
+    });
+    if !changed {
+        return;
+    }
+
+    match presentation {
+        Some(("hidden", _)) => hide_recording_overlay(app),
+        Some(("notice", Some(kind))) => {
+            let _ = app.emit_to("recording_overlay", "overlay-notice", kind);
+            show_overlay_state_on_main(app, "notice");
+        }
+        Some(("call_detected", _)) => {
+            let _ = app.emit_to("recording_overlay", "overlay-notice", "call_detected");
+            show_overlay_state_on_main(app, "notice");
+        }
+        Some((state, _)) => show_overlay_state_on_main(app, state),
+        None => {
+            // Usually actions.rs has already presented the correct dictation
+            // mode. If an overlay setting just reenabled it, recover the view.
+            if let Some(window) = app.get_webview_window("recording_overlay") {
+                if window.is_visible().is_ok_and(|visible| !visible) {
+                    show_overlay_state_on_main(app, dictation_state);
+                    if dictation_state == "recording" {
+                        let _ = window.emit("recording-ready", ());
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn restore_recording_after_undo(app: &AppHandle, take_id: u64) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let snapshot = crate::session_bus::bus().snapshot();
+        if matches!(
+            snapshot.dictation,
+            lowyap_ports::DictationPhase::Recording { take_id: current, locked: true, paused: false, .. } if current == take_id
+        ) && settings::get_settings(&handle).overlay_style != OverlayStyle::None
+        {
+            show_overlay_state_on_main(&handle, "recording");
+            let _ = handle.emit_to("recording_overlay", "recording-ready", ());
+        }
+    });
+}
+
+/// Shows a short transient notice inside the floating overlay pill so menu-bar
+/// dictation failures (updated app on disk, missing model, muted/quiet mic)
+/// never vanish silently when the main settings window is closed.
+pub fn show_overlay_notice(app_handle: &AppHandle, notice_kind: &str) {
+    show_dictation_notice(app_handle, notice_kind, None);
+}
+
+pub(crate) fn show_dictation_notice(
+    app_handle: &AppHandle,
+    notice_kind: &str,
+    take_id: Option<u64>,
+) {
+    let settings = settings::get_settings(app_handle);
+    if settings.overlay_style == OverlayStyle::None {
+        return;
+    }
+    let Some(epoch) = crate::session_bus::bus().show_notice(app_handle, notice_kind, take_id)
+    else {
+        return;
+    };
+    let handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(OVERLAY_NOTICE_HOLD_MS)).await;
+        crate::session_bus::bus().clear_notice(&handle, epoch);
+    });
+}
+
+/// Previews a transient status notice in the floating overlay pill on explicit
+/// user request from Settings, even when `OverlayStyle::None` is selected.
+pub fn show_overlay_notice_preview(app_handle: &AppHandle, notice_kind: &str) {
+    let handle = app_handle.clone();
+    let kind = notice_kind.to_string();
+    let _ = app_handle.run_on_main_thread(move || {
+        let _ = handle.emit_to("recording_overlay", "overlay-notice", kind.as_str());
+        show_overlay_state_on_main(&handle, "notice");
+        let scheduled_at = OVERLAY_SHOW_GENERATION.load(Ordering::SeqCst);
+        let handle_for_hide = handle.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(OVERLAY_NOTICE_HOLD_MS));
+            if OVERLAY_SHOW_GENERATION.load(Ordering::SeqCst) != scheduled_at {
+                return;
+            }
+            let app = handle_for_hide.clone();
+            let _ = handle_for_hide.run_on_main_thread(move || {
+                if OVERLAY_SHOW_GENERATION.load(Ordering::SeqCst) != scheduled_at {
+                    return;
+                }
+                PRESENTED.with(|last| last.replace(None));
+                apply_session_overlay(&app);
+            });
+        });
+    });
+}
+
 /// Updates the overlay window position based on current settings
 pub fn update_overlay_position(app_handle: &AppHandle) {
     // Positioning queries monitors/cursor (GDK/Xlib on Linux) and moves the
@@ -652,12 +810,7 @@ fn update_overlay_position_on_main(app_handle: &AppHandle) {
 
         #[cfg(target_os = "windows")]
         {
-            let state = if WINDOWS_OVERLAY_IS_STREAMING.load(Ordering::Relaxed) {
-                "streaming"
-            } else {
-                "recording"
-            };
-            let (width, height) = overlay_dimensions(state);
+            let (width, height) = WINDOWS_OVERLAY_SIZE.get();
             if let Err(error) = place_windows_overlay(app_handle, &overlay_window, width, height) {
                 log::error!("Failed to update recording overlay position: {error}");
             }
@@ -686,7 +839,7 @@ fn update_overlay_position_on_main(app_handle: &AppHandle) {
 static OVERLAY_SHOW_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Hides the recording overlay window with fade-out animation
-pub fn hide_recording_overlay(app_handle: &AppHandle) {
+fn hide_recording_overlay(app_handle: &AppHandle) {
     // Always hide the overlay regardless of settings - if setting was changed while recording,
     // we still want to hide it properly
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
@@ -697,14 +850,14 @@ pub fn hide_recording_overlay(app_handle: &AppHandle) {
         let _ = overlay_window.emit("hide-overlay", ());
         // Hide the window after a short delay to allow animation to complete,
         // unless a newer session has shown the overlay again by then.
-        let window_clone = overlay_window.clone();
+        let handle = app_handle.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(300));
-            if OVERLAY_SHOW_GENERATION.load(Ordering::SeqCst) != scheduled_at {
-                log::debug!("Skipping stale overlay hide: a newer session is showing the overlay");
-                return;
-            }
-            let _ = window_clone.hide();
+            let _ = handle.run_on_main_thread(move || {
+                if OVERLAY_SHOW_GENERATION.load(Ordering::SeqCst) == scheduled_at {
+                    let _ = overlay_window.hide();
+                }
+            });
         });
     }
 }

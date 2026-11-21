@@ -462,6 +462,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub custom_words: Vec<String>,
     #[serde(default)]
+    pub brand_custom_words_seeded: bool,
+    #[serde(default)]
     pub model_unload_timeout: ModelUnloadTimeout,
     #[serde(default = "default_word_correction_threshold")]
     pub word_correction_threshold: f64,
@@ -591,6 +593,10 @@ fn default_start_hidden() -> bool {
 
 fn default_autostart_enabled() -> bool {
     false
+}
+
+fn default_custom_words() -> Vec<String> {
+    vec!["lowyap".to_string()]
 }
 
 fn default_update_checks_enabled() -> bool {
@@ -1017,7 +1023,8 @@ pub fn get_default_settings() -> AppSettings {
         overlay_position: default_overlay_position(),
         debug_mode: false,
         log_level: default_log_level(),
-        custom_words: Vec::new(),
+        custom_words: default_custom_words(),
+        brand_custom_words_seeded: true,
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
         history_limit: default_history_limit(),
@@ -1345,6 +1352,22 @@ fn apply_settings_migrations(
         } else {
             OverlayStyle::Live
         };
+        updated = true;
+    }
+
+    // One-time brand vocabulary seed: upgrading users who never customized
+    // `custom_words` get "lowyap" automatically, while explicit lists (e.g.
+    // v0.9.0 stores) and later manual removals are preserved untouched.
+    if !settings.brand_custom_words_seeded {
+        if settings_value.get("custom_words").is_none()
+            && !settings
+                .custom_words
+                .iter()
+                .any(|w| w.eq_ignore_ascii_case("lowyap"))
+        {
+            settings.custom_words.push("lowyap".to_string());
+        }
+        settings.brand_custom_words_seeded = true;
         updated = true;
     }
 
@@ -2073,5 +2096,48 @@ mod tests {
         let out = format!("{:?}", map);
         assert!(!out.contains("secret"));
         assert!(out.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn default_settings_seed_lowyap_custom_word_and_migration_is_non_destructive() {
+        let defaults = get_default_settings();
+        assert_eq!(defaults.custom_words, vec!["lowyap".to_string()]);
+        assert!(defaults.brand_custom_words_seeded);
+
+        // Upgrading store without `custom_words` gets "lowyap" once.
+        let uncustomized_raw = serde_json::json!({
+            "onboarding_completed": true,
+            "selected_model": "parakeet-tdt-0.6b-v3"
+        });
+        let mut uncustomized: AppSettings =
+            serde_json::from_value(uncustomized_raw.clone()).unwrap();
+        assert!(apply_settings_migrations(
+            &mut uncustomized,
+            &uncustomized_raw
+        ));
+        assert_eq!(uncustomized.custom_words, vec!["lowyap".to_string()]);
+        assert!(uncustomized.brand_custom_words_seeded);
+
+        // User who explicitly removed "lowyap" after seeding is not re-spammed.
+        uncustomized.custom_words.clear();
+        let after_removal_raw = serde_json::to_value(&uncustomized).unwrap();
+        assert!(!apply_settings_migrations(
+            &mut uncustomized,
+            &after_removal_raw
+        ));
+        assert!(uncustomized.custom_words.is_empty());
+
+        // Existing store with explicit `custom_words` keeps its exact list.
+        let explicit_raw = serde_json::json!({
+            "onboarding_completed": true,
+            "custom_words": ["Handy", "cjpais"]
+        });
+        let mut explicit: AppSettings = serde_json::from_value(explicit_raw.clone()).unwrap();
+        assert!(apply_settings_migrations(&mut explicit, &explicit_raw));
+        assert_eq!(
+            explicit.custom_words,
+            vec!["Handy".to_string(), "cjpais".to_string()]
+        );
+        assert!(explicit.brand_custom_words_seeded);
     }
 }

@@ -3,7 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>lowyap — private dictation for your desktop</title>
+    <title>lowyap — lowkey yap. it types.</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23121117'/%3E%3Cpath fill='%237C5CFF' d='M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6Z'/%3E%3Cpath fill='%23FFFFFF' d='M23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z'/%3E%3C/svg%3E"
+    />
     <meta
       name="description"
       content="Free, open-source dictation. Press a shortcut, speak, and your words appear in any app. Speech recognition runs on your computer."
@@ -25,38 +30,38 @@
     </script>
     <style>
       :root {
-        --artifact-background: #ffffff;
-        --artifact-background-light: #f1f3f6;
-        --artifact-background-mid: #e9ecf1;
-        --artifact-border-light: #e3e6ec;
-        --artifact-border-dark: #cdd2db;
-        --artifact-primary-brand: #3559e6;
-        --artifact-primary-hover: #2442b8;
-        --artifact-text-primary: #11141a;
-        --artifact-text-secondary: #5c6470;
-        --artifact-text-highlight: #e8eefc;
-        --artifact-positive: #159a6a;
+        --artifact-background: #fbfbfb;
+        --artifact-background-light: #f2f1f7;
+        --artifact-background-mid: #e8e6f2;
+        --artifact-border-light: #e2e0ec;
+        --artifact-border-dark: #ccc8dc;
+        --artifact-primary-brand: #6946e5;
+        --artifact-primary-hover: #5b38d6;
+        --artifact-text-primary: #121117;
+        --artifact-text-secondary: #5c596b;
+        --artifact-text-highlight: #f1edff;
+        --artifact-positive: #2f7d5b;
         --artifact-positive-background: #e8f6ee;
-        --artifact-negative: #dc4c4c;
+        --artifact-negative: #dc2626;
         --artifact-warn: #c98a12;
         --artifact-on-brand: #ffffff;
       }
       html[data-theme="dark"] {
-        --artifact-background: #0a0b0e;
-        --artifact-background-light: #121419;
-        --artifact-background-mid: #181b22;
-        --artifact-border-light: #23262e;
-        --artifact-border-dark: #343844;
-        --artifact-primary-brand: #6a92ff;
-        --artifact-primary-hover: #88a8ff;
-        --artifact-text-primary: #eef0f4;
-        --artifact-text-secondary: #9aa0ad;
-        --artifact-text-highlight: #14213d;
-        --artifact-positive: #46d39a;
+        --artifact-background: #121117;
+        --artifact-background-light: #1a1822;
+        --artifact-background-mid: #22202c;
+        --artifact-border-light: #2b2838;
+        --artifact-border-dark: #3b374d;
+        --artifact-primary-brand: #a08cff;
+        --artifact-primary-hover: #b9a8ff;
+        --artifact-text-primary: #f3f2f8;
+        --artifact-text-secondary: #a29eb3;
+        --artifact-text-highlight: #1f1a33;
+        --artifact-positive: #86c9a4;
         --artifact-positive-background: #0e2a1d;
-        --artifact-negative: #ff6b6b;
-        --artifact-warn: #e0a53a;
-        --artifact-on-brand: #0a0b0e;
+        --artifact-negative: #f87171;
+        --artifact-warn: #fbbf24;
+        --artifact-on-brand: #121117;
       }
       * {
         box-sizing: border-box;
@@ -66,12 +71,7 @@
         background: var(--artifact-background);
         color: var(--artifact-text-primary);
         font-family:
-          "Inter",
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          Helvetica,
-          Arial,
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
           sans-serif;
         font-size: 16px;
         line-height: 1.6;
@@ -343,24 +343,26 @@
   <body>
     <main class="wrap">
       <header class="hero reveal" id="hero">
-        <span class="eyebrow">lowyap · free beta · Windows x64</span>
+        <span class="eyebrow">lowyap · lowkey yap. it types. · MIT</span>
         <h1>Speak. It types. On your computer.</h1>
         <p class="lede">
           Press a shortcut, talk, and your words appear in any app. Speech
-          recognition runs on your device. Free and open source (MIT).
+          recognition runs on your device for macOS, Windows, and Linux. Free
+          and open source (MIT).
         </p>
         <div class="actions">
           <a
             class="btn primary"
             href="https://github.com/mohdashraf010897/lowyap/releases/latest"
-            >Download for Windows</a
+            >Browse releases</a
           >
           <a class="btn" href="https://github.com/mohdashraf010897/lowyap"
             >View source</a
           >
         </div>
         <p class="note">
-          Beta. Not code-signed yet, so read the install steps below first.
+          Early beta — build from source on macOS/Linux or verify release
+          checksums below before installing.
         </p>
       </header>
 
@@ -438,10 +440,11 @@
             </tr>
             <tr id="row-tone">
               <td>Per-app tone and AI clean-up</td>
-              <td>Only with a local LLM server</td>
+              <td>Yes, with Apple Intelligence or a local LLM</td>
               <td>
-                A local server such as Ollama, or your own API key. With an API
-                key, the transcript is sent to the provider you pick.
+                Apple Intelligence (macOS Apple silicon), a local server such as
+                Ollama, or your own API key. With an API key, only the
+                transcript text is sent to the provider you pick.
               </td>
             </tr>
             <tr id="row-updates">
@@ -486,8 +489,8 @@
           </p>
         </div>
         <p class="note">
-          Only download lowyap from its GitHub repository. macOS builds are not
-          distributed yet.
+          Only download lowyap from its GitHub repository, or build locally on
+          macOS with <code>bun run tauri build</code>.
         </p>
       </section>
 

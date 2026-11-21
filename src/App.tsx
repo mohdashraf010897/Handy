@@ -151,6 +151,20 @@ function App() {
     };
   }, [settings?.debug_mode, updateSetting]);
 
+  // Navigate to a specific sidebar section (e.g., when clicking "Start" on the
+  // floating "Meeting detected • Now" pill).
+  useEffect(() => {
+    const unlisten = listen<string>("navigate-section", (event) => {
+      const target = event.payload as SidebarSection;
+      if (target && target in SECTIONS_CONFIG) {
+        setCurrentSection(target);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Listen for recording errors from the backend and show a toast
   useEffect(() => {
     const unlisten = listen<RecordingErrorEvent>("recording-error", (event) => {
@@ -183,9 +197,25 @@ function App() {
   // (see actions.rs `error!("Failed to paste transcription: ...")`),
   // so we show a localized, user-friendly message here instead of the raw error.
   useEffect(() => {
-    const unlisten = listen("paste-error", () => {
+    const unlisten = listen<number | null>("paste-error", (event) => {
+      const failedDictationId =
+        typeof event.payload === "number" ? event.payload : null;
       toast.error(t("errors.pasteFailedTitle"), {
         description: t("errors.pasteFailed"),
+        duration: 10000,
+        action: {
+          label: t("errors.copyLastDictation"),
+          onClick: () => {
+            void commands
+              .copyLastDictation(failedDictationId)
+              .then((res) => {
+                if (res.status === "ok" && res.data) {
+                  toast.success(t("errors.copiedLastDictation"));
+                }
+              })
+              .catch(() => {});
+          },
+        },
       });
     });
     return () => {

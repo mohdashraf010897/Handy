@@ -4,7 +4,7 @@ use crate::managers::{
 };
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 #[specta::specta]
@@ -138,4 +138,110 @@ pub async fn update_recording_retention_period(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+fn normalize_dictionary_word(raw: &str) -> Result<String, String> {
+    let stripped: String = raw
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | '"' | '\''))
+        .collect();
+    let normalized = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    let char_len = normalized.chars().count();
+    if !(1..=50).contains(&char_len) {
+        return Err("Dictionary word must be between 1 and 50 characters".to_string());
+    }
+    Ok(normalized)
+}
+
+fn upsert_custom_word(custom_words: &mut Vec<String>, normalized: String) -> bool {
+    let lower = normalized.to_lowercase();
+    if let Some(existing) = custom_words.iter_mut().find(|w| w.to_lowercase() == lower) {
+        if *existing != normalized {
+            *existing = normalized;
+            true
+        } else {
+            false
+        }
+    } else {
+        custom_words.push(normalized);
+        true
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn correct_history_entry_and_save_word(
+    app: AppHandle,
+    history_manager: State<'_, Arc<HistoryManager>>,
+    id: i64,
+    updated_text: String,
+    dictionary_word: Option<String>,
+) -> Result<HistoryEntry, String> {
+    let trimmed_text = updated_text.trim();
+    if trimmed_text.is_empty() {
+        return Err("Updated transcription cannot be empty".to_string());
+    }
+
+    let normalized_word = match dictionary_word {
+        Some(raw) if !raw.trim().is_empty() => Some(normalize_dictionary_word(&raw)?),
+        Some(raw) if !raw.is_empty() => return Err(normalize_dictionary_word(&raw).unwrap_err()),
+        _ => None,
+    };
+
+    let entry = history_manager
+        .update_entry_transcription(id, trimmed_text.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if let Some(word) = normalized_word {
+        let mut settings = crate::settings::get_settings(&app);
+        if upsert_custom_word(&mut settings.custom_words, word) {
+            let updated_words = settings.custom_words.clone();
+            crate::settings::write_settings(&app, settings);
+            let _ = app.emit(
+                "settings-changed",
+                serde_json::json!({
+                    "setting": "custom_words",
+                    "value": updated_words,
+                }),
+            );
+        }
+    }
+
+    Ok(entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_dictionary_word_strips_quotes_angles_and_collapses_whitespace() {
+        assert_eq!(
+            normalize_dictionary_word("  \"low<yap>\"   'desktop'  ").unwrap(),
+            "lowyap desktop"
+        );
+        assert_eq!(
+            normalize_dictionary_word("low\u{0000}\u{0007}yap\u{001b}").unwrap(),
+            "lowyap"
+        );
+        assert!(normalize_dictionary_word("\u{0000}\u{001f}").is_err());
+        assert!(normalize_dictionary_word("   ").is_err());
+        assert!(normalize_dictionary_word("\"<>\"").is_err());
+        assert!(normalize_dictionary_word(&"a".repeat(50)).is_ok());
+        assert!(normalize_dictionary_word(&"a".repeat(51)).is_err());
+    }
+
+    #[test]
+    fn upsert_custom_word_deduplicates_case_insensitively_and_replaces_casing() {
+        let mut words = vec!["Handy".to_string(), "LowYap".to_string()];
+
+        assert!(!upsert_custom_word(&mut words, "LowYap".to_string()));
+        assert_eq!(words, vec!["Handy", "LowYap"]);
+
+        assert!(upsert_custom_word(&mut words, "lowyap".to_string()));
+        assert_eq!(words, vec!["Handy", "lowyap"]);
+
+        assert!(upsert_custom_word(&mut words, "Wispr".to_string()));
+        assert_eq!(words, vec!["Handy", "lowyap", "Wispr"]);
+    }
 }

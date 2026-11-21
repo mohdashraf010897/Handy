@@ -83,7 +83,8 @@
       "hintBoth": "Autorisez les deux pour continuer",
       "hintMicrophone": "Autorisez le microphone pour continuer",
       "welcomeBack": "Content de vous revoir. On reprend là où vous en étiez.",
-      "relaunch": "Le raccourci ne répond pas après ça ? <relaunch>Relancez lowyap</relaunch> et vous reviendrez directement ici."
+      "relaunch": "Le raccourci ne répond pas après ça ? <relaunch>Relancez lowyap</relaunch> et vous reviendrez directement ici.",
+      "localPrivacyNote": "L’audio et le texte collé restent sur votre Mac — jamais envoyés vers des serveurs lowyap."
     },
     "shell": {
       "back": "Retour",
@@ -146,7 +147,16 @@
       "downloadInstead": "Télécharger {{size}} à la place",
       "pauses": "{{name}} se met en pause à {{percent}} %",
       "resumeLater": "Sélectionnez-le à nouveau pour reprendre là où il s'était arrêté",
-      "hint": "Se télécharge pendant que vous terminez la configuration"
+      "hint": "Se télécharge pendant que vous terminez la configuration",
+      "goals": {
+        "heading": "Choix rapide selon votre façon de parler",
+        "englishTitle": "Anglais instantané",
+        "englishDesc": "Le plus rapide sur Mac (~0,3 s pour coller). Idéal pour le chat, les docs et le code en anglais.",
+        "multilingualTitle": "Multilingue · ourdou, hinglish et 99+ langues",
+        "multilingualDesc": "Alternez librement entre l’ourdou, l’hindi/hinglish, l’arabe et l’anglais sur votre appareil.",
+        "advancedToggleShow": "Comparer les modèles individuels ({{count}})",
+        "advancedToggleHide": "Masquer la comparaison des modèles"
+      }
     },
     "demo": {
       "title": "Parlez dans n'importe quelle app, avec un seul raccourci",
@@ -433,7 +443,17 @@
       }
     },
     "languages": {
-      "title": "Langues"
+      "title": "Langues",
+      "hindustaniScript": {
+        "title": "Urdu, Hindi & Hinglish writing script",
+        "description": "Urdu and Hindi sound alike; lock your script to avoid unwanted Devanagari.",
+        "options": {
+          "auto": "Automatic (follow Spoken Languages)",
+          "romanHinglish": "Roman Hinglish (Haan, let's check this)",
+          "urduPersoArabic": "Urdu & Arabic script (اردو · عربي)",
+          "devanagari": "Hindi Devanagari (हिन्दी)"
+        }
+      }
     },
     "sound": {
       "title": "Son",
@@ -462,6 +482,16 @@
       "volume": {
         "title": "Volume",
         "description": "Ajuster le volume du signal sonore"
+      },
+      "micAutoBoost": {
+        "label": "Raise low mic volume automatically",
+        "description": "Lifts low Mac mic volume while speaking, then restores it.",
+        "liveBadgeBoost": "Current mic: {{current}}% → {{target}}% while speaking",
+        "liveBadgeCurrent": "Current mic: {{current}}%"
+      },
+      "quietSpeechAgc": {
+        "label": "Boost quiet voices automatically (AGC)",
+        "description": "Lifts soft speech automatically."
       }
     },
     "advanced": {
@@ -517,6 +547,18 @@
           "options": {
             "bottom": "Bas",
             "top": "Haut"
+          }
+        },
+        "noticePreview": {
+          "title": "Preview status notices",
+          "description": "Test how menu-bar alerts appear on screen when your mic is muted, no speech is heard, or lowyap needs attention.",
+          "showing": "Showing on screen…",
+          "chips": {
+            "micMuted": "Mic muted",
+            "noSpeech": "No speech",
+            "micPermission": "Mic permission",
+            "noMic": "No mic found",
+            "restartRequired": "App updated"
           }
         }
       },
@@ -620,6 +662,9 @@
           "traditionalTw": "Traditionnel (Taïwan)",
           "traditionalHk": "Traditionnel (Hong Kong)"
         }
+      },
+      "previewNotices": {
+        "callDetected": "Appel détecté"
       }
     },
     "postProcessing": {
@@ -711,7 +756,20 @@
       "showMore": "Afficher plus",
       "showLess": "Afficher moins",
       "dropTitle": "Déposez pour transcrire",
-      "dropDescription": "Il apparaîtra dans l'historique."
+      "dropDescription": "Il apparaîtra dans l'historique.",
+      "correctAndSave": "Corriger et enregistrer dans le dictionnaire",
+      "correctedTranscriptLabel": "Transcription corrigée",
+      "correctedTranscriptPlaceholder": "Modifier la transcription...",
+      "dictionaryWordLabel": "Mot du dictionnaire",
+      "dictionaryWordPlaceholder": "Mot ou expression facultatif à mémoriser",
+      "saveAndAddWord": "Enregistrer et ajouter au dictionnaire",
+      "saveCorrection": "Enregistrer la correction",
+      "cancelEdit": "Annuler",
+      "savingCorrection": "Enregistrement...",
+      "correctionAndWordSaved": "Correction enregistrée et « {{word}} » ajouté au dictionnaire.",
+      "correctionSaved": "Correction de la transcription enregistrée.",
+      "correctionSaveError": "Échec de l'enregistrement de la correction. Veuillez réessayer.",
+      "correctionEmptyError": "La transcription ne peut pas être vide."
     },
     "debug": {
       "title": "Débogage",
@@ -945,6 +1003,8 @@
     "modelLoadFailedUnknown": "modèle inconnu",
     "pasteFailedTitle": "Échec du collage du texte",
     "pasteFailed": "Le texte n'a pas pu être collé dans l'application active.",
+    "copyLastDictation": "Copier le texte",
+    "copiedLastDictation": "Dernière dictée copiée dans le presse-papiers",
     "transcriptionFailedTitle": "Échec de la transcription"
   },
   "appLanguage": {
@@ -963,7 +1023,36 @@
   "overlay": {
     "transcribing": "Transcription...",
     "processing": "Traitement...",
-    "loadingModel": "Chargement du modèle..."
+    "loadingModel": "Chargement du modèle...",
+    "pasteRaw": "Coller brut",
+    "pasteRawTitle": "Ignorer la retouche IA et coller immédiatement la transcription brute",
+    "noticeRestartRequired": "App mise à jour — redémarrez lowyap",
+    "noticeTranscriptionFailed": "Modèle non prêt — ouvrez lowyap",
+    "noticeMicMuted": "Micro coupé — vérifiez l'entrée",
+    "noticeNoSpeech": "Aucune voix détectée — montez le volume du micro",
+    "noticeMicPermission": "Autorisation micro requise — ouvrez lowyap",
+    "noticeNoMic": "Aucun microphone détecté — vérifiez l'entrée",
+    "paused": "Paused",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "resumeShort": "Resume",
+    "done": "Finish dictation",
+    "notices": {
+      "callDetected": "Appel détecté"
+    },
+    "callStartNotes": "Prendre des notes",
+    "callDismiss": "Pas maintenant",
+    "transcriptCancelled": "Transcription annulée",
+    "undoCancel": "Annuler",
+    "dismissCancel": "Fermer",
+    "meetingRecording": "Enregistrement",
+    "meetingPaused": "En pause",
+    "meetingSavingNotes": "Enregistrement des notes…",
+    "pauseMeeting": "Pause",
+    "resumeMeeting": "Reprendre",
+    "stopMeeting": "Arrêter",
+    "openMeetingNotes": "Ouvrir les notes de réunion",
+    "minimizeMeetingPill": "Réduire dans la barre des menus"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} bloque peut-être 1 raccourci",
@@ -975,5 +1064,121 @@
     "learnMore": "Comment résoudre ce problème",
     "recorderBlocked": "Impossible d'enregistrer un raccourci pour le moment : Secure Input de macOS bloque les événements clavier. Résolvez d'abord l'avertissement Secure Input.",
     "dismiss": "Ignorer"
+  },
+  "flow": {
+    "fastPath": {
+      "title": "Voie rapide instantanée",
+      "description": "Ignore l’attente IA sur les phrases courtes et nettes pour coller les réponses simples en moins de 0,4 s."
+    },
+    "snippets": {
+      "title": "Extraits vocaux",
+      "description": "Prononcez une courte phrase déclencheur pour insérer un lien, un e-mail ou un bloc de texte tel quel.",
+      "triggerPlaceholder": "Phrase prononcée (ex. mon lien agenda)",
+      "expansionPlaceholder": "Texte à insérer (ex. https://cal.com/you)",
+      "add": "Ajouter un extrait",
+      "empty": "Aucun extrait vocal pour le moment.",
+      "removeLabel": "Supprimer l’extrait {{trigger}}",
+      "errors": {
+        "emptyTrigger": "Saisissez la phrase déclencheur prononcée.",
+        "emptyExpansion": "Saisissez le texte que cette phrase doit insérer.",
+        "duplicate": "Un extrait existe déjà pour cette phrase."
+      }
+    }
+  },
+  "meetings": {
+    "sidebar": "Réunions",
+    "title": "Notes de réunion",
+    "subtitle": "Bot-free local capture + hybrid rough bullets & transcript summaries",
+    "privacyConsentBar": "100 % local et sans bot · Pensez à prévenir les participants que vous prenez des notes.",
+    "autoDetect": {
+      "label": "Auto-detect active calls",
+      "description": "Show a subtle non-intrusive prompt when Zoom, Meet, Teams, FaceTime, or Slack Huddles activate your mic."
+    },
+    "detectedBanner": {
+      "title": "Active call detected in {{app}}",
+      "subtitle": "Capture bot-free notes locally without joining as a participant.",
+      "startButton": "Start Note Taking",
+      "dismissButton": "Pas maintenant"
+    },
+    "idle": {
+      "titlePlaceholder": "Optional meeting title (e.g. Weekly Product Sync)",
+      "titleAriaLabel": "Meeting title",
+      "templateLabel": "Template",
+      "templateAriaLabel": "Meeting note template",
+      "startButton": "Start Note Taking"
+    },
+    "templates": {
+      "general": "General",
+      "one_on_one": "1:1",
+      "standup": "Standup",
+      "language_lesson": "Language Lesson",
+      "client_call": "Client Call"
+    },
+    "status": {
+      "idle": "Idle",
+      "recording": "Recording",
+      "paused": "Paused",
+      "summarizing": "Summarizing..."
+    },
+    "badges": {
+      "systemAndMic": "System + Mic",
+      "micOnly": "Mic-only",
+      "headphones": "Headphones",
+      "speakerEchoGuard": "Speaker Echo Guard",
+      "rollups": "{{count}} 5-min rollups"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "finishAndSummarize": "Finish & Summarize"
+    },
+    "live": {
+      "roughBulletsTitle": "Your Rough Bullets",
+      "roughBulletsPlaceholder": "Jot quick bullets, decisions, or timestamps...",
+      "roughBulletsHint": "Jot quick bullets or timestamps — lowyap expands them with the transcript when you finish.",
+      "saving": "Saving...",
+      "saved": "Auto-saved",
+      "transcriptTitle": "Live Transcript Feed",
+      "transcriptEmpty": "Listening for speech... Segments appear here as you and others speak."
+    },
+    "speaker": {
+      "me": "Me",
+      "others": "Others"
+    },
+    "archive": {
+      "title": "Past Meetings",
+      "searchPlaceholder": "Search titles, notes, or transcripts...",
+      "searchAriaLabel": "Search past meetings",
+      "empty": "No meetings recorded yet. Start note taking above when your next call begins.",
+      "noSearchMatch": "No meetings match your search.",
+      "segmentsCount": "{{count}} segments"
+    },
+    "detail": {
+      "selectPrompt": "Select a meeting on the left to read or edit its notes.",
+      "titleAriaLabel": "Edit meeting title",
+      "templateAriaLabel": "Change meeting template",
+      "regenerate": "Regenerate Notes",
+      "regenerating": "Regenerating...",
+      "copyMarkdown": "Copy Markdown",
+      "copied": "Copied!",
+      "delete": "Delete",
+      "confirmDelete": "Confirm Delete",
+      "cancelDelete": "Cancel",
+      "notesEmpty": "No summary notes generated yet. Click Regenerate Notes above.",
+      "bulletsPlaceholder": "Add your own bullets or action items...",
+      "saveAndReexpand": "Save & Re-expand",
+      "transcriptEmpty": "No transcript segments were recorded for this meeting.",
+      "rollupsTitle": "Rolling 5-Minute Checkpoints",
+      "source": {
+        "llm": "AI Summary",
+        "apple_intelligence": "Apple Intelligence",
+        "local_extractive": "Offline Local Summary"
+      },
+      "tabs": {
+        "notes": "Notes",
+        "bullets": "Your Bullets",
+        "transcript": "Transcript"
+      }
+    }
   }
 }

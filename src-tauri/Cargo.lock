@@ -15,6 +15,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "aec3"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95b94681e57494d8d3933597fbf49c3537be1f2f33647e41317aab3dfc3d6fc8"
+dependencies = [
+ "crossbeam-channel",
+ "log",
+ "num-complex",
+ "rustfft",
+]
+
+[[package]]
 name = "ahash"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2479,6 +2491,11 @@ dependencies = [
  "isolang",
  "libc",
  "log",
+ "lowyap-diarize",
+ "lowyap-dsp",
+ "lowyap-flow",
+ "lowyap-ports",
+ "lowyap-summarize",
  "natural",
  "objc2",
  "objc2-app-kit",
@@ -3399,6 +3416,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 dependencies = [
  "value-bag",
+]
+
+[[package]]
+name = "lowyap-diarize"
+version = "0.1.0"
+dependencies = [
+ "lowyap-ports",
+ "rustfft",
+ "serde",
+]
+
+[[package]]
+name = "lowyap-dsp"
+version = "0.1.0"
+dependencies = [
+ "aec3",
+ "earshot",
+ "lowyap-ports",
+]
+
+[[package]]
+name = "lowyap-eval"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hound",
+ "lowyap-diarize",
+ "lowyap-dsp",
+ "lowyap-flow",
+ "lowyap-ports",
+ "lowyap-summarize",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lowyap-flow"
+version = "0.1.0"
+dependencies = [
+ "lowyap-ports",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lowyap-ports"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lowyap-summarize"
+version = "0.1.0"
+dependencies = [
+ "lowyap-ports",
+ "serde",
+ "serde_json",
+ "ureq",
+ "url",
 ]
 
 [[package]]

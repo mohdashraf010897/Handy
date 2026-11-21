@@ -133,6 +133,141 @@ fn find_best_match<'a>(
     best_match.map(|m| (m, best_score))
 }
 
+struct CandidateFraming<'a> {
+    prefix: &'a str,
+    url_prefix: &'a str,
+    first_stem: &'a str,
+    ngram: String,
+    url_suffix: &'a str,
+    suffix: &'a str,
+}
+
+fn has_domain_like_dot_suffix(s: &str) -> Option<usize> {
+    let dot_idx = s.find('.')?;
+    if s[..dot_idx].is_empty() || s[..dot_idx].contains('/') {
+        return None;
+    }
+    let after_dot = &s[dot_idx + 1..];
+    let label_end = after_dot
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(after_dot.len());
+    (label_end >= 2).then_some(dot_idx)
+}
+
+fn split_url_framed_candidate<'a>(ngram_words: &[&'a str]) -> Option<CandidateFraming<'a>> {
+    let n = ngram_words.len();
+    let (prefix, first_trailing_punct) = extract_punctuation(ngram_words[0]);
+    let (last_leading_punct, suffix) = extract_punctuation(ngram_words[n - 1]);
+
+    if n > 1 && (!first_trailing_punct.is_empty() || !last_leading_punct.is_empty()) {
+        return None;
+    }
+
+    if n == 1 {
+        let word = ngram_words[0];
+        let core_end = word.len().saturating_sub(suffix.len());
+        if prefix.len() >= core_end {
+            return None;
+        }
+        let core = &word[prefix.len()..core_end];
+
+        let proto_len = ["https://", "http://"]
+            .iter()
+            .find(|p| {
+                core.get(..p.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(p))
+            })
+            .map_or(0, |p| p.len());
+        let after_proto = &core[proto_len..];
+
+        if let Some(dot_idx) = has_domain_like_dot_suffix(after_proto) {
+            let url_prefix = &core[..proto_len];
+            let stem = &after_proto[..dot_idx];
+            let url_suffix = &after_proto[dot_idx..];
+            return Some(CandidateFraming {
+                prefix,
+                url_prefix,
+                first_stem: stem,
+                ngram: build_match_key(stem),
+                url_suffix,
+                suffix,
+            });
+        }
+
+        if let Some(slash_idx) = after_proto.rfind('/') {
+            let url_prefix = &core[..proto_len + slash_idx + 1];
+            let rest = &after_proto[slash_idx + 1..];
+            if rest.is_empty() {
+                return None;
+            }
+            let (stem, url_suffix) = if let Some(dot_idx) = has_domain_like_dot_suffix(rest) {
+                (&rest[..dot_idx], &rest[dot_idx..])
+            } else {
+                (rest, "")
+            };
+            return Some(CandidateFraming {
+                prefix,
+                url_prefix,
+                first_stem: stem,
+                ngram: build_match_key(stem),
+                url_suffix,
+                suffix,
+            });
+        }
+
+        return None;
+    }
+
+    for &mid in &ngram_words[1..n - 1] {
+        let (mp, ms) = extract_punctuation(mid);
+        if !mp.is_empty() || !ms.is_empty() || mid.contains('/') || mid.contains('.') {
+            return None;
+        }
+    }
+
+    let first_core = &ngram_words[0][prefix.len()..];
+    let (url_prefix, first_stem) = if let Some(slash_idx) = first_core.rfind('/') {
+        (&first_core[..=slash_idx], &first_core[slash_idx + 1..])
+    } else {
+        ("", first_core)
+    };
+    if first_stem.is_empty() || first_stem.contains('.') || first_stem.contains('/') {
+        return None;
+    }
+
+    let last_word = ngram_words[n - 1];
+    let last_core_end = last_word.len().saturating_sub(suffix.len());
+    if last_core_end == 0 {
+        return None;
+    }
+    let last_core = &last_word[..last_core_end];
+    let (last_stem, url_suffix) = if let Some(dot_idx) = has_domain_like_dot_suffix(last_core) {
+        (&last_core[..dot_idx], &last_core[dot_idx..])
+    } else if let Some(slash_idx) = last_core.find('/') {
+        (&last_core[..slash_idx], &last_core[slash_idx..])
+    } else {
+        (last_core, "")
+    };
+    if last_stem.is_empty() || (url_prefix.is_empty() && url_suffix.is_empty()) {
+        return None;
+    }
+
+    let mut ngram = build_match_key(first_stem);
+    for &mid in &ngram_words[1..n - 1] {
+        ngram.push_str(&build_match_key(mid));
+    }
+    ngram.push_str(&build_match_key(last_stem));
+
+    Some(CandidateFraming {
+        prefix,
+        url_prefix,
+        first_stem,
+        ngram,
+        url_suffix,
+        suffix,
+    })
+}
+
 /// Applies custom word corrections to transcribed text using fuzzy matching
 ///
 /// This function corrects words in the input text by finding the best matches
@@ -165,7 +300,7 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
     let mut i = 0;
 
     while i < words.len() {
-        let mut best_match: Option<(usize, &String, f64)> = None;
+        let mut best_match: Option<(usize, &String, f64, CandidateFraming<'_>)> = None;
 
         // Consider n-grams up to three words and choose the closest match. A
         // longest-first match can consume a following ordinary word when both
@@ -185,30 +320,54 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
             {
                 continue;
             }
-            let ngram = build_ngram(ngram_words);
 
-            if let Some((replacement, score)) =
-                find_best_match(&ngram, custom_words, &custom_word_match_keys, threshold)
-            {
-                let is_better = best_match
-                    .as_ref()
-                    .is_none_or(|(_, _, best_score)| score < *best_score);
-                if is_better {
-                    best_match = Some((n, replacement, score));
+            let (prefix, _) = extract_punctuation(ngram_words[0]);
+            let (_, suffix) = extract_punctuation(ngram_words[n - 1]);
+            let first_end = if n == 1 {
+                ngram_words[0].len().saturating_sub(suffix.len())
+            } else {
+                ngram_words[0].len()
+            };
+            let first_stem = ngram_words[0].get(prefix.len()..first_end).unwrap_or("");
+            let unsplit = CandidateFraming {
+                prefix,
+                url_prefix: "",
+                first_stem,
+                ngram: build_ngram(ngram_words),
+                url_suffix: "",
+                suffix,
+            };
+
+            for framing in std::iter::once(unsplit).chain(split_url_framed_candidate(ngram_words)) {
+                if let Some((replacement, score)) = find_best_match(
+                    &framing.ngram,
+                    custom_words,
+                    &custom_word_match_keys,
+                    threshold,
+                ) {
+                    let is_better = best_match
+                        .as_ref()
+                        .is_none_or(|(_, _, best_score, _)| score < *best_score);
+                    if is_better {
+                        best_match = Some((n, replacement, score, framing));
+                    }
                 }
             }
         }
 
-        if let Some((n, replacement, _)) = best_match {
-            let ngram_words = &words[i..i + n];
-            // Extract punctuation from first and last words of the n-gram.
-            let (prefix, _) = extract_punctuation(ngram_words[0]);
-            let (_, suffix) = extract_punctuation(ngram_words[n - 1]);
+        if let Some((n, replacement, _, framing)) = best_match {
+            // Preserve case from the matched stem rather than leading punctuation/host.
+            let case_source = if framing.first_stem.is_empty() {
+                words[i]
+            } else {
+                framing.first_stem
+            };
+            let corrected = preserve_case_pattern(case_source, replacement);
 
-            // Preserve case from first word.
-            let corrected = preserve_case_pattern(ngram_words[0], replacement);
-
-            result.push(format!("{}{}{}", prefix, corrected, suffix));
+            result.push(format!(
+                "{}{}{}{}{}",
+                framing.prefix, framing.url_prefix, corrected, framing.url_suffix, framing.suffix
+            ));
             i += n;
         } else {
             result.push(words[i].to_string());
@@ -883,5 +1042,44 @@ mod tests {
         let custom_words = vec!["你号".to_string()];
         let result = apply_custom_words(text, &custom_words, 1.0);
         assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_apply_custom_words_lowyap_homophones_and_domains_at_default_threshold() {
+        let custom_words = vec!["lowyap".to_string()];
+        let threshold = 0.18;
+
+        assert_eq!(
+            apply_custom_words("Try low yap today", &custom_words, threshold),
+            "Try lowyap today"
+        );
+        assert_eq!(
+            apply_custom_words("Try low app today", &custom_words, threshold),
+            "Try lowyap today"
+        );
+        assert_eq!(
+            apply_custom_words("Try low-yap today", &custom_words, threshold),
+            "Try lowyap today"
+        );
+        assert_eq!(
+            apply_custom_words("Try lo yap today", &custom_words, threshold),
+            "Try lowyap today"
+        );
+        assert_eq!(
+            apply_custom_words("Visit low yap.com.", &custom_words, threshold),
+            "Visit lowyap.com."
+        );
+        assert_eq!(
+            apply_custom_words("Visit low app.com", &custom_words, threshold),
+            "Visit lowyap.com"
+        );
+        assert_eq!(
+            apply_custom_words("Check github.com/low yap", &custom_words, threshold),
+            "Check github.com/lowyap"
+        );
+        assert_eq!(
+            apply_custom_words("Check github.com/low app.", &custom_words, threshold),
+            "Check github.com/lowyap."
+        );
     }
 }

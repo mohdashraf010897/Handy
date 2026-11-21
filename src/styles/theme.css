@@ -13,10 +13,12 @@
   --light-color-background: #fbfbfb;
   --light-color-logo-primary: #b9a8ff;
   --light-color-logo-stroke: #261c45;
+  --light-color-overlay-accent: #6946e5;
 
   --dark-color-text: #fbfbfb;
   --dark-color-background: #2c2b29;
   --dark-color-logo-primary: #a08cff;
+  --dark-color-overlay-accent: #a08cff;
 
   /* Status colors. Each has a -wash tint below. */
   --light-color-warning: #d97706;
@@ -123,8 +125,9 @@
     var(--dark-color-background)
   );
 
-  /* Tokens that do not change between light and dark */
-  --color-background-ui: #7c5cff;
+  /* Tokens that do not change between light and dark (#6946e5 = 5.56:1 with white, WCAG AA) */
+  --color-background-ui: #6946e5;
+  --color-background-ui-hover: #5b38d6;
   --color-mid-gray: #808080;
 
   /* Active palette — defaults to light, follows the OS via the media query
@@ -132,6 +135,7 @@
   --color-text: var(--light-color-text);
   --color-background: var(--light-color-background);
   --color-logo-primary: var(--light-color-logo-primary);
+  --color-overlay-accent: var(--light-color-overlay-accent);
   --color-warning: var(--light-color-warning);
   --color-error: var(--light-color-error);
   --color-moss: var(--light-color-moss);
@@ -170,6 +174,7 @@
     --color-text: var(--dark-color-text);
     --color-background: var(--dark-color-background);
     --color-logo-primary: var(--dark-color-logo-primary);
+    --color-overlay-accent: var(--dark-color-overlay-accent);
     --color-warning: var(--dark-color-warning);
     --color-error: var(--dark-color-error);
     --color-moss: var(--dark-color-moss);
@@ -203,6 +208,7 @@
   --color-text: var(--light-color-text);
   --color-background: var(--light-color-background);
   --color-logo-primary: var(--light-color-logo-primary);
+  --color-overlay-accent: var(--light-color-overlay-accent);
   --color-warning: var(--light-color-warning);
   --color-error: var(--light-color-error);
   --color-moss: var(--light-color-moss);
@@ -225,6 +231,7 @@
   --color-text: var(--dark-color-text);
   --color-background: var(--dark-color-background);
   --color-logo-primary: var(--dark-color-logo-primary);
+  --color-overlay-accent: var(--dark-color-overlay-accent);
   --color-warning: var(--dark-color-warning);
   --color-error: var(--dark-color-error);
   --color-moss: var(--dark-color-moss);

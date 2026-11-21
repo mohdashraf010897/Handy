@@ -13,6 +13,7 @@ import {
   ModelsSettings,
 } from "./settings";
 import { FLOW_TONE_SECTION } from "./flow";
+import { MEETINGS_SECTION } from "./meetings";
 
 export type SidebarSection = keyof typeof SECTIONS_CONFIG;
 
@@ -39,6 +40,7 @@ export const SECTIONS_CONFIG = {
     component: GeneralSettings,
     enabled: () => true,
   },
+  meetings: MEETINGS_SECTION,
   history: {
     labelKey: "sidebar.history",
     icon: History,
@@ -107,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               key={section.id}
               className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors ${
                 isActive
-                  ? "bg-logo-primary/80"
+                  ? "bg-logo-primary/20 text-text font-semibold ring-1 ring-inset ring-overlay-accent/30"
                   : "hover:bg-line hover:opacity-100 opacity-85"
               }`}
               onClick={() => onSectionChange(section.id)}

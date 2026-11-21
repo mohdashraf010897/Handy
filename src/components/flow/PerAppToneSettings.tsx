@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useId, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw, RotateCcw, Trash2 } from "lucide-react";
-import type { AppToneRule, LastFlowApp, Tone } from "@/bindings";
+import type { AppToneRule, LastFlowApp, Tone, VoiceSnippet } from "@/bindings";
 import { useSettings } from "@/hooks/useSettings";
 import { useFlowStore } from "@/stores/flowStore";
 import { Alert } from "../ui/Alert";
@@ -14,12 +14,15 @@ import { PostProcessingToggle } from "../settings/PostProcessingToggle";
 import { TonePicker } from "./TonePicker";
 import {
   type AppIdError,
+  type SnippetError,
   DEFAULT_FLOW_SETTINGS,
   TONES,
   findRuleIndex,
   isFlowCustomized,
+  normalizeSnippetTrigger,
   overridingRule,
   validateAppId,
+  validateSnippet,
 } from "./toneRules";
 
 const ruleInputId = (index: number) => `flow-rule-app-${index}`;
@@ -39,6 +42,292 @@ const FieldError: React.FC<{ id: string; error: AppIdError | null }> = ({
     <p id={id} role="alert" className="mt-1 text-xs text-error">
       {t(`flow.rules.errors.${error}`)}
     </p>
+  );
+};
+
+const SnippetFieldError: React.FC<{
+  id: string;
+  error: SnippetError | null;
+}> = ({ id, error }) => {
+  const { t } = useTranslation();
+  if (!error) return null;
+  return (
+    <p id={id} role="alert" className="mt-1 text-xs text-error">
+      {t(`flow.snippets.errors.${error}`)}
+    </p>
+  );
+};
+
+interface SnippetRowProps {
+  snippet: VoiceSnippet;
+  index: number;
+  snippets: VoiceSnippet[];
+  disabled: boolean;
+  onChange: (index: number, next: VoiceSnippet) => Promise<boolean>;
+  onRemove: (index: number) => void;
+}
+
+const SnippetRow: React.FC<SnippetRowProps> = ({
+  snippet,
+  index,
+  snippets,
+  disabled,
+  onChange,
+  onRemove,
+}) => {
+  const { t } = useTranslation();
+  const errorId = useId();
+  const [editing, setEditing] = useState(false);
+  const [draftTrigger, setDraftTrigger] = useState(snippet.trigger);
+  const [draftExpansion, setDraftExpansion] = useState(snippet.expansion);
+  const [error, setError] = useState<SnippetError | null>(null);
+  const committingRef = useRef(false);
+
+  useEffect(() => {
+    setDraftTrigger(snippet.trigger);
+    setDraftExpansion(snippet.expansion);
+    setError(null);
+  }, [snippet.trigger, snippet.expansion]);
+
+  const cancel = () => {
+    setDraftTrigger(snippet.trigger);
+    setDraftExpansion(snippet.expansion);
+    setError(null);
+    setEditing(false);
+  };
+
+  const commit = async () => {
+    if (committingRef.current) return;
+    const normalizedTrigger = normalizeSnippetTrigger(draftTrigger);
+    const trimmedExpansion = draftExpansion.trim();
+    if (
+      normalizedTrigger === snippet.trigger &&
+      trimmedExpansion === snippet.expansion
+    ) {
+      setError(null);
+      setEditing(false);
+      return;
+    }
+    const nextError = validateSnippet(
+      draftTrigger,
+      draftExpansion,
+      snippets,
+      index,
+    );
+    setError(nextError);
+    if (nextError) return;
+    committingRef.current = true;
+    try {
+      const saved = await onChange(index, {
+        trigger: normalizedTrigger,
+        expansion: trimmedExpansion,
+      });
+      if (saved) {
+        setEditing(false);
+      } else {
+        setDraftTrigger(snippet.trigger);
+        setDraftExpansion(snippet.expansion);
+        setEditing(false);
+      }
+    } finally {
+      committingRef.current = false;
+    }
+  };
+
+  const removeLabel = t("flow.snippets.removeLabel", {
+    trigger: snippet.trigger,
+  });
+
+  return (
+    <Row>
+      <div className="flex items-center justify-between gap-2">
+        {editing ? (
+          <div
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+            onBlur={(event) => {
+              const related = event.relatedTarget as HTMLElement | null;
+              if (
+                related &&
+                (event.currentTarget.contains(related) ||
+                  related.dataset.snippetRemove !== undefined)
+              ) {
+                return;
+              }
+              void commit();
+            }}
+          >
+            <Input
+              autoFocus
+              variant="compact"
+              className="min-w-[10rem] flex-1 font-mono"
+              value={draftTrigger}
+              disabled={disabled}
+              aria-invalid={
+                error === "emptyTrigger" || error === "duplicate"
+                  ? true
+                  : undefined
+              }
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => {
+                setDraftTrigger(event.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void commit();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancel();
+                }
+              }}
+            />
+            <span aria-hidden="true" className="text-xs text-ink-3">
+              →
+            </span>
+            <Input
+              variant="compact"
+              className="min-w-[12rem] flex-[1.4]"
+              value={draftExpansion}
+              disabled={disabled}
+              aria-invalid={error === "emptyExpansion" ? true : undefined}
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => {
+                setDraftExpansion(event.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void commit();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancel();
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setEditing(true)}
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-0.5 text-start transition-colors hover:bg-wash focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="shrink-0 rounded-md border border-line bg-wash px-2 py-0.5 font-mono text-xs font-medium text-text">
+              {snippet.trigger}
+            </span>
+            <span aria-hidden="true" className="shrink-0 text-xs text-ink-3">
+              →
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
+              {snippet.expansion}
+            </span>
+          </button>
+        )}
+        <Button
+          variant="danger-ghost"
+          size="sm"
+          data-snippet-remove=""
+          disabled={disabled}
+          onClick={() => onRemove(index)}
+          aria-label={removeLabel}
+          title={removeLabel}
+          className="flex shrink-0 items-center"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </div>
+      <SnippetFieldError id={errorId} error={error} />
+    </Row>
+  );
+};
+
+const AddSnippetForm: React.FC<{
+  snippets: VoiceSnippet[];
+  disabled: boolean;
+  onAdd: (snippet: VoiceSnippet) => Promise<boolean>;
+}> = ({ snippets, disabled, onAdd }) => {
+  const { t } = useTranslation();
+  const errorId = useId();
+  const [trigger, setTrigger] = useState("");
+  const [expansion, setExpansion] = useState("");
+  const [error, setError] = useState<SnippetError | null>(null);
+
+  const submit = async () => {
+    const nextError = validateSnippet(trigger, expansion, snippets);
+    setError(nextError);
+    if (nextError) return;
+    if (
+      await onAdd({
+        trigger: normalizeSnippetTrigger(trigger),
+        expansion: expansion.trim(),
+      })
+    ) {
+      setTrigger("");
+      setExpansion("");
+    }
+  };
+
+  return (
+    <Row>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          variant="compact"
+          className="min-w-[11rem] flex-1"
+          value={trigger}
+          disabled={disabled}
+          placeholder={t("flow.snippets.triggerPlaceholder")}
+          aria-label={t("flow.snippets.triggerPlaceholder")}
+          aria-invalid={
+            error === "emptyTrigger" || error === "duplicate" ? true : undefined
+          }
+          aria-describedby={error ? errorId : undefined}
+          onChange={(event) => {
+            setTrigger(event.target.value);
+            if (error) setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+        />
+        <span aria-hidden="true" className="text-xs text-ink-3">
+          →
+        </span>
+        <Input
+          variant="compact"
+          className="min-w-[13rem] flex-[1.4]"
+          value={expansion}
+          disabled={disabled}
+          placeholder={t("flow.snippets.expansionPlaceholder")}
+          aria-label={t("flow.snippets.expansionPlaceholder")}
+          aria-invalid={error === "emptyExpansion" ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
+          onChange={(event) => {
+            setExpansion(event.target.value);
+            if (error) setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+        />
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={disabled}
+          onClick={() => void submit()}
+        >
+          {t("flow.snippets.add")}
+        </Button>
+      </div>
+      <SnippetFieldError id={errorId} error={error} />
+    </Row>
   );
 };
 
@@ -371,12 +660,22 @@ export const PerAppToneSettings: React.FC = () => {
   }, [load, refreshLastApp]);
 
   const rules = settings?.app_tones ?? [];
+  const snippets = settings?.snippets ?? [];
 
   // Rule edits are applied to the store's latest rules, not this render's,
   // so quick consecutive edits (e.g. blur-commit then a click) all land.
   const updateRules = useCallback(
     (update: (current: AppToneRule[]) => AppToneRule[]) =>
       save((current) => ({ ...current, app_tones: update(current.app_tones) })),
+    [save],
+  );
+
+  const updateSnippets = useCallback(
+    (update: (current: VoiceSnippet[]) => VoiceSnippet[]) =>
+      save((current) => ({
+        ...current,
+        snippets: update(current.snippets ?? []),
+      })),
     [save],
   );
 
@@ -463,6 +762,58 @@ export const PerAppToneSettings: React.FC = () => {
         {!postProcessEnabled && (
           <PostProcessingToggle descriptionMode="inline" grouped />
         )}
+      </SettingsGroup>
+
+      <SettingsGroup title={t("flow.fastPath.title")}>
+        <ToggleSwitch
+          checked={settings.fast_path_enabled}
+          onChange={(checked) =>
+            void save((cur) => ({ ...cur, fast_path_enabled: checked }))
+          }
+          isUpdating={isSaving}
+          label={t("flow.fastPath.title")}
+          description={t("flow.fastPath.description")}
+          descriptionMode="inline"
+          grouped
+        />
+      </SettingsGroup>
+
+      <SettingsGroup
+        title={t("flow.snippets.title")}
+        description={t("flow.snippets.description")}
+      >
+        {snippets.length === 0 ? (
+          <Row>
+            <p className="text-sm text-ink-3">{t("flow.snippets.empty")}</p>
+          </Row>
+        ) : (
+          snippets.map((snippet, index) => (
+            <SnippetRow
+              key={`${index}-${snippet.trigger}`}
+              snippet={snippet}
+              index={index}
+              snippets={snippets}
+              disabled={isSaving}
+              onChange={(i, next) =>
+                updateSnippets((current) =>
+                  current.map((s, j) => (j === i ? next : s)),
+                )
+              }
+              onRemove={(i) =>
+                void updateSnippets((current) =>
+                  current.filter((_, j) => j !== i),
+                )
+              }
+            />
+          ))
+        )}
+        <AddSnippetForm
+          snippets={snippets}
+          disabled={isSaving}
+          onAdd={(snippet) =>
+            updateSnippets((current) => [...current, snippet])
+          }
+        />
       </SettingsGroup>
 
       <SettingsGroup
