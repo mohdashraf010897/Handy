@@ -255,8 +255,7 @@ test.describe("Wave 4B — History 1-Click Correct & Save to Dictionary (Headles
     await installWave4bHistoryMock(page);
     await page.goto("/");
 
-    // Navigate to History in sidebar
-    await page.getByText("History", { exact: true }).click();
+    // Wave 5 Studio lands directly on Desk with the Takes Ledger visible
     await expect(page.getByText("Check github.com/low app")).toBeVisible();
 
     // Open inline editor on entry 101 ("Check github.com/low app")
@@ -303,8 +302,8 @@ test.describe("Wave 4B — History 1-Click Correct & Save to Dictionary (Headles
       dictionaryWord: "lowyap",
     });
 
-    // Switch to Advanced settings and verify CustomWords synced "lowyap" live
-    await page.getByText("Advanced", { exact: true }).click();
+    // Switch to Lexicon in Studio rail and verify CustomWords synced "lowyap" live
+    await page.getByRole("button", { name: "Lexicon", exact: true }).click();
     await expect(page.getByRole("button", { name: /lowyap/i })).toBeVisible();
   });
 
@@ -314,7 +313,6 @@ test.describe("Wave 4B — History 1-Click Correct & Save to Dictionary (Headles
     await installWave4bHistoryMock(page);
     await page.goto("/");
 
-    await page.getByText("History", { exact: true }).click();
     await expect(page.getByText("Visit low app.com today")).toBeVisible();
 
     const correctButtons = page.getByRole("button", {

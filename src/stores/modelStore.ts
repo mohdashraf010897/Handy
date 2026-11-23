@@ -21,6 +21,7 @@ interface ModelsStore {
   downloadingModels: Record<string, true>;
   verifyingModels: Record<string, true>;
   downloadProgress: Record<string, DownloadProgress>;
+  pendingAutoSelectModelId: string | null;
   loading: boolean;
   error: string | null;
   initialized: boolean;
@@ -43,6 +44,7 @@ interface ModelsStore {
   // Internal setters
   setModels: (models: ModelInfo[]) => void;
   setCurrentModel: (modelId: string) => void;
+  setPendingAutoSelectModelId: (modelId: string | null) => void;
   setError: (error: string | null) => void;
   setLoading: (loading: boolean) => void;
 }
@@ -54,6 +56,7 @@ export const useModelStore = create<ModelsStore>()(
     downloadingModels: {},
     verifyingModels: {},
     downloadProgress: {},
+    pendingAutoSelectModelId: null,
     loading: true,
     error: null,
     initialized: false,
@@ -62,6 +65,8 @@ export const useModelStore = create<ModelsStore>()(
     // Internal setters
     setModels: (models) => set({ models }),
     setCurrentModel: (currentModel) => set({ currentModel }),
+    setPendingAutoSelectModelId: (pendingAutoSelectModelId) =>
+      set({ pendingAutoSelectModelId }),
     setError: (error) => set({ error }),
     setLoading: (loading) => set({ loading }),
 
@@ -268,14 +273,24 @@ export const useModelStore = create<ModelsStore>()(
 
       listen<string>("model-download-complete", (event) => {
         const modelId = event.payload;
+        const shouldAutoSelect = get().pendingAutoSelectModelId === modelId;
         set(
           produce((state) => {
             delete state.downloadingModels[modelId];
             delete state.verifyingModels[modelId];
             delete state.downloadProgress[modelId];
+            if (state.pendingAutoSelectModelId === modelId) {
+              state.pendingAutoSelectModelId = null;
+            }
           }),
         );
-        get().loadModels();
+        void get()
+          .loadModels()
+          .then(() => {
+            if (shouldAutoSelect) {
+              void get().selectModel(modelId);
+            }
+          });
       });
 
       listen<{ model_id: string; error: string }>(
@@ -287,6 +302,9 @@ export const useModelStore = create<ModelsStore>()(
               delete state.downloadingModels[modelId];
               delete state.verifyingModels[modelId];
               delete state.downloadProgress[modelId];
+              if (state.pendingAutoSelectModelId === modelId) {
+                state.pendingAutoSelectModelId = null;
+              }
               state.error = error;
             }),
           );

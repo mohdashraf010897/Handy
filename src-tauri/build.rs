@@ -3,6 +3,7 @@ fn main() {
     build_apple_intelligence_bridge();
     #[cfg(target_os = "macos")]
     build_macos_meeting_audio_bridge();
+    build_macos_speech_bridge();
 
     generate_tray_translations();
 
@@ -498,7 +499,105 @@ fn build_macos_meeting_audio_bridge() {
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=AudioToolbox");
     println!("cargo:rustc-link-lib=framework=CoreAudio");
+    println!("cargo:rustc-link-lib=framework=EventKit");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+}
+
+fn build_macos_speech_bridge() {
+    use std::env;
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+
+    const REAL: &str = "swift/macos_speech.swift";
+    const STUB: &str = "swift/macos_speech_stub.swift";
+    println!("cargo:rerun-if-changed={REAL}");
+    println!("cargo:rerun-if-changed={STUB}");
+    println!("cargo:rerun-if-env-changed=SWIFTC");
+    println!("cargo:rerun-if-env-changed=SDKROOT");
+    println!("cargo:rustc-check-cfg=cfg(macos_speech_swift_stub)");
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR not set"));
+    let static_lib = out_dir.join("libmacos_speech.a");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        fn xcrun(args: &[&str]) -> String {
+            let output = Command::new("xcrun")
+                .args(args)
+                .output()
+                .expect("run xcrun");
+            assert!(output.status.success(), "xcrun {args:?} failed");
+            String::from_utf8(output.stdout)
+                .expect("xcrun returned invalid UTF-8")
+                .trim()
+                .to_owned()
+        }
+
+        let swiftc = env::var("SWIFTC").unwrap_or_else(|_| xcrun(&["--find", "swiftc"]));
+        let sdk =
+            env::var("SDKROOT").unwrap_or_else(|_| xcrun(&["--sdk", "macosx", "--show-sdk-path"]));
+        let target = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+            Ok("aarch64") => "arm64-apple-macosx10.15",
+            Ok("x86_64") => "x86_64-apple-macosx10.15",
+            other => panic!("Unsupported macOS speech target: {other:?}"),
+        };
+        let object = out_dir.join("macos_speech.o");
+        let status = Command::new(swiftc)
+            .args([
+                "-parse-as-library",
+                "-target",
+                target,
+                "-sdk",
+                &sdk,
+                "-O",
+                "-c",
+                REAL,
+                "-o",
+            ])
+            .arg(&object)
+            .status()
+            .expect("invoke swiftc for macOS speech");
+        assert!(status.success(), "swiftc failed to compile {REAL}");
+
+        let status = Command::new("libtool")
+            .args(["-static", "-o"])
+            .arg(&static_lib)
+            .arg(&object)
+            .status()
+            .expect("archive the macOS speech object");
+        assert!(status.success(), "libtool failed for macOS speech");
+        // Swift runtime search paths and rpath come from the meeting audio bridge.
+        println!("cargo:rustc-link-lib=framework=Speech");
+        println!("cargo:rustc-link-lib=framework=AVFoundation");
+    } else {
+        // Non-Mac builders without a native Swift toolchain use the equivalent
+        // Rust stub; don't make Swift a new requirement for Linux/Windows.
+        let swiftc = env::var_os("SWIFTC").unwrap_or_else(|| "swiftc".into());
+        if env::var_os("HOST") != env::var_os("TARGET")
+            || !Command::new(&swiftc)
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        {
+            return;
+        }
+        let status = Command::new(swiftc)
+            .args([
+                "-parse-as-library",
+                "-O",
+                "-emit-library",
+                "-static",
+                STUB,
+                "-o",
+            ])
+            .arg(&static_lib)
+            .status()
+            .expect("invoke swiftc for the speech stub");
+        assert!(status.success(), "swiftc failed to compile {STUB}");
+        println!("cargo:rustc-cfg=macos_speech_swift_stub");
+    }
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    println!("cargo:rustc-link-lib=static=macos_speech");
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

@@ -14,7 +14,8 @@ use crate::budget::{
 };
 use crate::local_gguf::{strip_reasoning_and_fences, CompletionBackend};
 use crate::templates::{
-    required_headings, template_label, validate_expanded_notes, validate_rollup_bullets,
+    normalize_expanded_notes_markdown, required_headings, template_label, validate_expanded_notes,
+    validate_rollup_bullets,
 };
 
 /// Default per-prompt character budget for [`HybridMapReduceSummarizer`].
@@ -96,6 +97,27 @@ impl HybridMapReduceSummarizer {
     where
         F: Fn(&str) -> bool,
     {
+        self.try_backends_mapped(
+            system_prompt,
+            user_prompt,
+            max_tokens,
+            str::to_owned,
+            validator,
+        )
+    }
+
+    fn try_backends_mapped<M, F>(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        max_tokens: u32,
+        map_output: M,
+        validator: F,
+    ) -> Option<SummaryOutput>
+    where
+        M: Fn(&str) -> String,
+        F: Fn(&str) -> bool,
+    {
         if self.backends.is_empty() {
             return None;
         }
@@ -111,17 +133,71 @@ impl HybridMapReduceSummarizer {
             if !backend.supports_non_latin_scripts() && has_blocked_script {
                 continue;
             }
-            if prompt_chars > backend.max_prompt_chars() {
+            let effective_sys = if backend.supports_non_latin_scripts() {
+                std::borrow::Cow::Borrowed(system_prompt)
+            } else {
+                std::borrow::Cow::Owned(sanitize_system_prompt_for_latin_backend(system_prompt))
+            };
+            let effective_chars = if backend.supports_non_latin_scripts() {
+                prompt_chars
+            } else {
+                effective_sys
+                    .chars()
+                    .count()
+                    .saturating_add(user_prompt.chars().count())
+            };
+            if effective_chars > backend.max_prompt_chars() {
                 continue;
             }
 
-            if let Ok(raw) = backend.complete(system_prompt, user_prompt, max_tokens) {
+            if let Ok(raw) = backend.complete(&effective_sys, user_prompt, max_tokens) {
                 let cleaned = strip_reasoning_and_fences(&raw);
-                if validator(&cleaned) {
-                    return Some(SummaryOutput {
-                        markdown: cleaned,
-                        source_id: backend.source_id().to_owned(),
-                    });
+                let normalized = map_output(&cleaned);
+                if (!backend.supports_non_latin_scripts()
+                    && contains_apple_intelligence_blocked_script(&normalized))
+                    || !validator(&normalized)
+                {
+                    continue;
+                }
+                return Some(SummaryOutput {
+                    markdown: normalized,
+                    source_id: backend.source_id().to_owned(),
+                });
+            }
+        }
+
+        // Second pass: when no non-Latin-capable backend succeeded (e.g. only
+        // on-device Apple Intelligence is available) and a predominantly English
+        // meeting contains minor Hindustani script islands, Romanize those spans
+        // so Apple Intelligence can still produce a structured abstractive summary.
+        if has_blocked_script && is_predominantly_english_meeting_text(user_prompt) {
+            let roman_sys = sanitize_system_prompt_for_latin_backend(system_prompt);
+            let roman_user = lowyap_flow::hindustani_to_roman_hinglish(user_prompt);
+            if !contains_apple_intelligence_blocked_script(&roman_sys)
+                && !contains_apple_intelligence_blocked_script(&roman_user)
+            {
+                let roman_chars = roman_sys
+                    .chars()
+                    .count()
+                    .saturating_add(roman_user.chars().count());
+                for backend in &self.backends {
+                    if backend.supports_non_latin_scripts()
+                        || roman_chars > backend.max_prompt_chars()
+                    {
+                        continue;
+                    }
+                    if let Ok(raw) = backend.complete(&roman_sys, &roman_user, max_tokens) {
+                        let cleaned = strip_reasoning_and_fences(&raw);
+                        let normalized = map_output(&cleaned);
+                        if !contains_apple_intelligence_blocked_script(&normalized)
+                            && validator(&normalized)
+                        {
+                            return Some(SummaryOutput {
+                                markdown: normalized,
+                                source_id: backend.source_id().to_owned(),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -386,9 +462,14 @@ impl NoteSummarizer for HybridMapReduceSummarizer {
                 &effective_tail,
                 req.language_instruction.as_deref(),
             );
-            if let Some(out) = self.try_backends(&system_prompt, &user_prompt, 1_536, |md| {
-                validate_expanded_notes(md, req.template)
-            }) {
+            let has_rough_notes = !bounded_rough.trim().is_empty();
+            if let Some(out) = self.try_backends_mapped(
+                &system_prompt,
+                &user_prompt,
+                1_536,
+                |md| normalize_expanded_notes_markdown(md, req.template, has_rough_notes),
+                |md| validate_expanded_notes(md, req.template),
+            ) {
                 return Ok(out);
             }
         }
@@ -757,6 +838,45 @@ fn select_diverse_bullets(candidates: &[CandidateBullet], limit: usize) -> Vec<S
         .into_iter()
         .map(|idx| candidates[idx].rendered.clone())
         .collect()
+}
+
+fn is_predominantly_english_meeting_text(text: &str) -> bool {
+    let mut latin = 0usize;
+    let mut non_latin = 0usize;
+    for ch in text.chars() {
+        if ch.is_ascii_alphabetic() {
+            latin += 1;
+        } else if ch.is_alphabetic() {
+            non_latin += 1;
+        }
+    }
+    // Exclude short boilerplate-only prompts; require substantial English content
+    // (`>= 240` Latin letters and `>= 3x` non-Latin letters) before Romanizing
+    // minor Hindustani spans for a Latin-only backend.
+    latin >= 240 && latin >= non_latin.saturating_mul(3)
+}
+
+/// Replaces non-Latin script instructions (`Perso-Arabic` / `Devanagari`) with an
+/// explicit Latin-script directive when invoking a Latin-only backend such as
+/// on-device Apple Intelligence, preventing FoundationModels `Unsupported language`
+/// rejections or garbled Perso-Arabic output.
+fn sanitize_system_prompt_for_latin_backend(system_prompt: &str) -> String {
+    let romanized = lowyap_flow::hindustani_to_roman_hinglish(system_prompt);
+    if !romanized.contains("Perso-Arabic") && !romanized.contains("Devanagari") {
+        return romanized;
+    }
+
+    let mut kept: Vec<&str> = Vec::new();
+    for line in romanized.lines() {
+        if line.contains("Perso-Arabic") || line.contains("Devanagari") {
+            kept.push(
+                "Write all headings and bullet points in clear English (Latin script), preserving speaker labels, technical terms, and Romanized Hinglish/multilingual terms accurately. Never output Perso-Arabic or Devanagari characters.",
+            );
+        } else {
+            kept.push(line);
+        }
+    }
+    kept.join("\n")
 }
 
 fn truncate_lines_to_budget(multiline: &str, max_chars: usize) -> String {
@@ -1602,5 +1722,89 @@ mod tests {
             MeetingTemplate::Standup
         ));
         assert!(out.markdown.contains("AEC3"));
+    }
+
+    #[test]
+    fn apple_intelligence_strips_perso_arabic_instruction_and_normalizes_missing_empty_rough_notes_heading(
+    ) {
+        struct AssertingAppleBackend;
+        impl CompletionBackend for AssertingAppleBackend {
+            fn source_id(&self) -> &'static str {
+                "apple_intelligence"
+            }
+            fn max_prompt_chars(&self) -> usize {
+                9_000
+            }
+            fn supports_non_latin_scripts(&self) -> bool {
+                false
+            }
+            fn complete(
+                &self,
+                system_prompt: &str,
+                user_prompt: &str,
+                _max_tokens: u32,
+            ) -> Result<String, PortError> {
+                assert!(
+                    !system_prompt.contains("keep Urdu speech in Perso-Arabic"),
+                    "Latin-only backend must never receive Perso-Arabic output directive: {system_prompt}"
+                );
+                assert!(
+                    !contains_apple_intelligence_blocked_script(user_prompt),
+                    "user_prompt must be Romanized before calling Latin-only backend"
+                );
+                // Simulate 3B model using 'and' instead of '&' and omitting Expanded from Your Notes when rough_notes is empty
+                Ok("### TL;DR\n- Reviewed UI components observability telemetry.\n\n### Key Decisions and Discussion\n- Standardized event names across cards.\n\n### Action Items\n- **Me**: Ship schema PR on Monday.".to_owned())
+            }
+        }
+
+        let summarizer =
+            HybridMapReduceSummarizer::with_default_budget(vec![Box::new(AssertingAppleBackend)]);
+        let segments = vec![
+            TranscriptSegment {
+                speaker: lowyap_ports::SpeakerIdentity {
+                    channel: SpeakerChannel::Me,
+                    speaker_id: "me".into(),
+                    display_label: "Me".into(),
+                    confidence: Some(1.0),
+                },
+                start_ms: 0,
+                end_ms: 8_000,
+                text: "We need to standardize UI components observability metrics across all product surfaces before next week's release.".into(),
+                language: Some("en".into()),
+            },
+            TranscriptSegment {
+                speaker: lowyap_ports::SpeakerIdentity {
+                    channel: SpeakerChannel::Others,
+                    speaker_id: "speaker_1".into(),
+                    display_label: "Speaker 1".into(),
+                    confidence: Some(0.9),
+                },
+                start_ms: 9_000,
+                end_ms: 18_000,
+                text: "Agreed, let's also verify latency histograms, payload validation rules, and dashboard alerts in staging today. میں فیڈنگ کرتا ہوں.".into(),
+                language: Some("ur".into()),
+            },
+        ];
+
+        let out = summarizer
+            .expand_hybrid_notes(&HybridNotesRequest {
+                title: "Meeting 2026-11-23 15:54".into(),
+                template: MeetingTemplate::General,
+                rough_notes: String::new(),
+                rollups: Vec::new(),
+                tail_segments: segments,
+                language_instruction: Some(
+                    "When summarizing multilingual speech, keep Urdu speech in Perso-Arabic script (never Devanagari) and keep English terms in Latin script.".into(),
+                ),
+            })
+            .expect("apple_intelligence summary should succeed after heading normalization");
+
+        assert_eq!(out.source_id, "apple_intelligence");
+        assert!(validate_expanded_notes(
+            &out.markdown,
+            MeetingTemplate::General
+        ));
+        assert!(out.markdown.contains("## Key Decisions & Discussion"));
+        assert!(out.markdown.contains("## Expanded from Your Notes"));
     }
 }

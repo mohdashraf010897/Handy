@@ -46,24 +46,65 @@ pub enum BatchDecode {
     Whole,
 }
 
-/// Streaming wins: a streaming model handles long audio itself. Otherwise
-/// long audio is chunked unless the model keeps its accuracy on it.
+/// Streaming wins. Every other engine can predecode chunks while recording,
+/// even when it also supports long-form batch decoding.
 pub fn live_decode(model: ModelTraits, long_form_chunking: bool) -> LiveDecode {
     if model.streaming {
         LiveDecode::Stream
-    } else if long_form_chunking && !model.long_form {
+    } else if long_form_chunking {
         LiveDecode::Chunked
     } else {
         LiveDecode::None
     }
 }
 
-/// As live, except that a streaming model takes a whole clip in one run, as
-/// it did before long-form chunking existed.
+/// Preserve whole-clip decoding for streaming and long-form batch engines.
 pub fn batch_decode(model: ModelTraits, long_form_chunking: bool) -> BatchDecode {
     if long_form_chunking && !model.long_form && !model.streaming {
         BatchDecode::Chunked
     } else {
         BatchDecode::Whole
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_policy_predecodes_every_non_streaming_engine_when_enabled() {
+        for long_form in [false, true] {
+            let model = ModelTraits {
+                streaming: false,
+                long_form,
+            };
+            assert_eq!(live_decode(model, true), LiveDecode::Chunked);
+            assert_eq!(live_decode(model, false), LiveDecode::None);
+        }
+    }
+
+    #[test]
+    fn streaming_wins_and_batch_policy_is_unchanged() {
+        for streaming in [false, true] {
+            for long_form in [false, true] {
+                for enabled in [false, true] {
+                    let model = ModelTraits {
+                        streaming,
+                        long_form,
+                    };
+                    if streaming {
+                        assert_eq!(live_decode(model, enabled), LiveDecode::Stream);
+                    }
+                    assert_eq!(
+                        batch_decode(model, enabled),
+                        if enabled && !streaming && !long_form {
+                            BatchDecode::Chunked
+                        } else {
+                            BatchDecode::Whole
+                        }
+                    );
+                }
+            }
+        }
     }
 }

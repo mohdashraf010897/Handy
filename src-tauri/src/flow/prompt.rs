@@ -70,6 +70,38 @@ pub fn with_tone<'a>(app: &AppHandle, settings: &'a AppSettings) -> Cow<'a, AppS
     prompt_settings(settings, tone, script_instruction)
 }
 
+/// Builds the Stage-B `AppSettings` for plug-and-play Linguist rewriting:
+/// - When the user has the built-in default prompt (`default_improve_transcriptions`)
+///   selected, replaces its template with `lowyap_flow::compose_linguist_prompt_template(req)`
+///   so any local or cloud provider gets self-repair, preposition, paragraphing,
+///   lexicon, script-lock, and cursor-continuity instructions.
+/// - When the user intentionally selected a custom prompt, preserves their prompt
+///   and appends tone + script governance.
+pub fn prepare_linguist_settings<'a>(
+    settings: &'a AppSettings,
+    req: &lowyap_ports::LinguistRequest,
+    tone: Tone,
+) -> Cow<'a, AppSettings> {
+    let Some(active_id) = settings.active_post_process_prompt().map(|p| p.id.clone()) else {
+        return Cow::Borrowed(settings);
+    };
+    if active_id == "default_improve_transcriptions" {
+        let Some(index) = settings
+            .post_process_prompts
+            .iter()
+            .position(|p| p.id == active_id)
+        else {
+            return Cow::Borrowed(settings);
+        };
+        let mut updated = settings.clone();
+        if let Some(prompt) = updated.post_process_prompts.get_mut(index) {
+            prompt.prompt = lowyap_flow::compose_linguist_prompt_template(req);
+        }
+        return Cow::Owned(updated);
+    }
+    prompt_settings(settings, tone, req.script_rule.as_deref())
+}
+
 #[cfg(test)]
 fn tone_settings(settings: &AppSettings, tone: Tone) -> Cow<'_, AppSettings> {
     prompt_settings(settings, tone, None)

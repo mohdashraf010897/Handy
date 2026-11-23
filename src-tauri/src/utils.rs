@@ -17,12 +17,16 @@ pub fn redact_text(text: &str) -> &str {
     }
 }
 
-/// Main window's opening and minimum page size, in logical pixels.
-pub const MAIN_WINDOW_SIZE: (f64, f64) = (720.0, 600.0);
+/// Main window's opening size, in logical pixels.
+pub const MAIN_WINDOW_SIZE: (f64, f64) = (960.0, 660.0);
+
+/// Main window's minimum size, in logical pixels.
+pub const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (820.0, 560.0);
 
 /// Title bar height in logical pixels (macOS draws it inside the inner size).
 /// Call on the main thread.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 pub fn measure_title_bar(window: &tauri::WebviewWindow) -> f64 {
     let Ok(ptr) = window.ns_window() else {
         return 0.0;

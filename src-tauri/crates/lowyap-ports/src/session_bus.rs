@@ -11,6 +11,9 @@ use crate::domain::{AudioCaptureMode, OutputRouteKind};
 /// Default undo window for a softly cancelled dictation take.
 pub const DEFAULT_SOFT_CANCEL_GRACE_MS: u64 = 5_000;
 
+/// Default grace window before an auto-detected call hangup finalizes meeting notes.
+pub const DEFAULT_MEETING_AUTO_STOP_GRACE_MS: u64 = 8_000;
+
 /// Current dictation lifecycle state, discriminated by `phase` on the wire.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -123,6 +126,28 @@ pub enum MeetingPhase {
         /// Available capture streams.
         capture_mode: AudioCaptureMode,
     },
+    /// Meeting capture was automatically paused when the watched call ended and
+    /// will finalize at `expires_at_ms` unless the user resumes.
+    SoftStopped {
+        /// Identifier of this meeting.
+        meeting_id: String,
+        /// Display title.
+        title: String,
+        /// Original recording start.
+        started_at_ms: u64,
+        /// Time at which call hangup was detected and capture froze.
+        stopped_at_ms: u64,
+        /// Time at which notes will auto-finalize if not resumed.
+        expires_at_ms: u64,
+        /// Total auto-stop grace countdown duration in milliseconds.
+        grace_ms: u64,
+        /// Duration of completed pauses prior to auto-stop.
+        accumulated_paused_ms: u64,
+        /// Source application, when known.
+        app_name: Option<String>,
+        /// Available capture streams.
+        capture_mode: AudioCaptureMode,
+    },
     /// Capture has ended and notes are being generated.
     Summarizing {
         /// Identifier of the meeting being summarized.
@@ -166,6 +191,12 @@ impl MeetingPhase {
                 accumulated_paused_ms,
                 ..
             } => (paused_at_ms, started_at_ms, accumulated_paused_ms),
+            Self::SoftStopped {
+                started_at_ms,
+                stopped_at_ms,
+                accumulated_paused_ms,
+                ..
+            } => (stopped_at_ms, started_at_ms, accumulated_paused_ms),
             Self::Idle | Self::Summarizing { .. } => return 0,
         };
         end_ms
@@ -178,6 +209,7 @@ impl MeetingPhase {
             Self::Idle => None,
             Self::Recording { meeting_id, .. }
             | Self::Paused { meeting_id, .. }
+            | Self::SoftStopped { meeting_id, .. }
             | Self::Summarizing { meeting_id, .. } => Some(meeting_id),
         }
     }
@@ -249,6 +281,23 @@ pub enum OverlayProjection {
         /// Display title.
         title: String,
     },
+    /// Auto-stopped meeting grace pill (`Notetaker stopped · Resume [×]`).
+    MeetingSoftStopped {
+        /// Meeting awaiting finalization or resume.
+        meeting_id: String,
+        /// Display title.
+        title: String,
+        /// Frozen active recording duration at call hangup.
+        elapsed_ms: u64,
+        /// Timestamp when the call ended and auto-stop started.
+        stopped_at_ms: u64,
+        /// Timestamp when the grace window expires and notes finalize.
+        expires_at_ms: u64,
+        /// Grace window duration in milliseconds.
+        grace_ms: u64,
+        /// Source call application, when known.
+        app_name: Option<String>,
+    },
     /// Offer to start capturing a detected call.
     CallDetected {
         /// Identifier of this detected call.
@@ -292,9 +341,15 @@ impl TrayMeetingProjection {
             }
             | MeetingPhase::Paused {
                 meeting_id, title, ..
+            }
+            | MeetingPhase::SoftStopped {
+                meeting_id, title, ..
             } => Self {
                 active: true,
-                paused: matches!(meeting, MeetingPhase::Paused { .. }),
+                paused: matches!(
+                    meeting,
+                    MeetingPhase::Paused { .. } | MeetingPhase::SoftStopped { .. }
+                ),
                 summarizing: false,
                 meeting_id: Some(meeting_id.clone()),
                 title: Some(title.clone()),
@@ -428,6 +483,23 @@ pub fn resolve_overlay_priority(
                 app_name: app_name.clone(),
             }
         }
+        MeetingPhase::SoftStopped {
+            meeting_id,
+            title,
+            stopped_at_ms,
+            expires_at_ms,
+            grace_ms,
+            app_name,
+            ..
+        } => OverlayProjection::MeetingSoftStopped {
+            meeting_id: meeting_id.clone(),
+            title: title.clone(),
+            elapsed_ms: meeting.elapsed_ms(now_ms),
+            stopped_at_ms: *stopped_at_ms,
+            expires_at_ms: *expires_at_ms,
+            grace_ms: *grace_ms,
+            app_name: app_name.clone(),
+        },
         MeetingPhase::Summarizing { meeting_id, title } => OverlayProjection::MeetingSummarizing {
             meeting_id: meeting_id.clone(),
             title: title.clone(),
@@ -625,7 +697,9 @@ impl SessionStateMachine {
         detected_call: Option<DetectedCallBanner>,
         now_ms: u64,
     ) -> SessionBusSnapshot {
-        if meeting.meeting_id() != self.meeting.meeting_id() {
+        if meeting.meeting_id() != self.meeting.meeting_id()
+            || matches!(meeting, MeetingPhase::SoftStopped { .. })
+        {
             self.meeting_pill_dismissed = false;
         }
         self.meeting = meeting;

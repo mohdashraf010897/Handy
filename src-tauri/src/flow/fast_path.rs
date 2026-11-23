@@ -23,6 +23,7 @@ pub fn should_bypass_llm(
     flow_core::should_bypass_llm(text, tone.into(), fast_path_enabled, full_utterance_snippet)
 }
 
+#[cfg(test)]
 pub fn apply_deterministic_polish(text: &str, tone: Tone) -> String {
     flow_core::apply_deterministic_polish(text, tone.into())
 }

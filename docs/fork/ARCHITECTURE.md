@@ -68,6 +68,7 @@ flowchart LR
 ```
 
 Hooks H1-H5 are the only planned edits to upstream pipeline code. Everything else lives under `flow/`.
+Note on task identity (`SV-13`): `TranscribeAction::stop` runs ASR (`transcribe_recording`) and cleanup (`process_transcription_output`) sequentially inside the **same Tokio task**, which `flow::timing` relies on (`tokio::task::try_id()`) to pair `asr_end` with `cleanup_start` without touching history-retry calls.
 
 ## 3. Extension-point map (step 1)
 

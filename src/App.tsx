@@ -28,11 +28,23 @@ import {
   clearOnboardingProgress,
   type OnboardingStep as OnboardingPreviewStep,
 } from "./components/onboarding/onboardingStore";
-import { DebugSettings, ModelsSettings } from "./components/settings";
+import { DeskWorkspace } from "./components/desk";
+import { LexiconWorkspace } from "./components/lexicon";
+import { MeetingsWorkspace } from "./components/meetings";
+import {
+  StudioSettingsWorkspace,
+  type StudioSettingsTab,
+} from "./components/settings/StudioSettingsWorkspace";
+import { VoiceStyleWorkspace } from "./components/voice";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FileDropOverlay } from "./components/FileDropOverlay";
-import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
+import {
+  Sidebar,
+  SidebarSection,
+  resolveStudioNavigation,
+} from "./components/Sidebar";
 import { WhatsNewGate } from "./components/whats-new";
+import { useOsType } from "./hooks/useOsType";
 import { useSettings } from "./hooks/useSettings";
 import { useSettingsStore } from "./stores/settingsStore";
 import { commands } from "@/bindings";
@@ -47,35 +59,51 @@ type OnboardingStep =
   | "replaceModel"
   | "done";
 
-const renderSettingsContent = (
+const renderStudioSurface = (
   section: SidebarSection,
+  settingsTab: StudioSettingsTab,
   onPreviewOnboarding: (step: OnboardingPreviewStep) => void,
   onRunOnboarding: () => void,
   onRunModelMigration: () => void,
-  onSectionChange: (section: SidebarSection) => void,
+  onNavigate: (
+    section: SidebarSection,
+    nextSettingsTab?: StudioSettingsTab,
+  ) => void,
 ) => {
-  if (section === "models") {
-    return (
-      <ModelsSettings onChangeLanguages={() => onSectionChange("general")} />
-    );
+  switch (section) {
+    case "desk":
+      return (
+        <DeskWorkspace
+          onNavigate={(target, nextTab) =>
+            onNavigate(
+              target,
+              target === "settings" ? (nextTab ?? "shortcuts") : undefined,
+            )
+          }
+        />
+      );
+    case "meetings":
+      return <MeetingsWorkspace />;
+    case "lexicon":
+      return <LexiconWorkspace />;
+    case "voice":
+      return <VoiceStyleWorkspace />;
+    case "settings":
+      return (
+        <StudioSettingsWorkspace
+          initialTab={settingsTab}
+          onNavigateToLexicon={() => onNavigate("lexicon")}
+          onPreviewOnboarding={onPreviewOnboarding}
+          onRunOnboarding={onRunOnboarding}
+          onRunModelMigration={onRunModelMigration}
+        />
+      );
   }
-  if (section === "debug") {
-    return (
-      <DebugSettings
-        onPreviewOnboarding={onPreviewOnboarding}
-        onRunOnboarding={onRunOnboarding}
-        onRunModelMigration={onRunModelMigration}
-      />
-    );
-  }
-
-  const ActiveComponent =
-    SECTIONS_CONFIG[section]?.component || SECTIONS_CONFIG.general.component;
-  return <ActiveComponent />;
 };
 
 function App() {
   const { t, i18n } = useTranslation();
+  const osType = useOsType();
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(
     null,
   );
@@ -84,9 +112,21 @@ function App() {
   // Set when a returning user's selected model is a retired (ONNX) model that
   // is still on disk: they must update it before the app can transcribe.
   const [migrationModelId, setMigrationModelId] = useState<string | null>(null);
-  const [currentSection, setCurrentSection] =
-    useState<SidebarSection>("general");
-  const showHistory = useCallback(() => setCurrentSection("history"), []);
+  const [currentSection, setCurrentSection] = useState<SidebarSection>("desk");
+  const [settingsTab, setSettingsTab] =
+    useState<StudioSettingsTab>("shortcuts");
+
+  const handleSectionChange = useCallback(
+    (section: SidebarSection, nextSettingsTab?: StudioSettingsTab) => {
+      setCurrentSection(section);
+      if (nextSettingsTab) {
+        setSettingsTab(nextSettingsTab);
+      }
+    },
+    [],
+  );
+
+  const showHistory = useCallback(() => setCurrentSection("desk"), []);
   const { settings, updateSetting } = useSettings();
   const direction = getLanguageDirection(i18n.language);
   const refreshAudioDevices = useSettingsStore(
@@ -126,7 +166,7 @@ function App() {
     }
   }, [onboardingStep, refreshAudioDevices, refreshOutputDevices]);
 
-  // Handle keyboard shortcuts for debug mode toggle
+  // Handle keyboard shortcuts for debug mode toggle and Studio Settings (Cmd+, / Ctrl+,)
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // Check for Ctrl+Shift+D (Windows/Linux) or Cmd+Shift+D (macOS)
@@ -137,8 +177,23 @@ function App() {
 
       if (isDebugShortcut) {
         event.preventDefault();
-        const currentDebugMode = settings?.debug_mode ?? false;
-        updateSetting("debug_mode", !currentDebugMode);
+        const nextDebugMode = !(settings?.debug_mode ?? false);
+        updateSetting("debug_mode", nextDebugMode);
+        if (nextDebugMode) {
+          handleSectionChange("settings", "debug");
+        }
+        return;
+      }
+
+      const isSettingsShortcut =
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key === "," &&
+        (event.metaKey || event.ctrlKey);
+
+      if (isSettingsShortcut) {
+        event.preventDefault();
+        handleSectionChange("settings", "shortcuts");
       }
     };
 
@@ -149,21 +204,21 @@ function App() {
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [settings?.debug_mode, updateSetting]);
+  }, [settings?.debug_mode, updateSetting, handleSectionChange]);
 
   // Navigate to a specific sidebar section (e.g., when clicking "Start" on the
-  // floating "Meeting detected • Now" pill).
+  // floating "Meeting detected • Now" pill or legacy deep-links).
   useEffect(() => {
     const unlisten = listen<string>("navigate-section", (event) => {
-      const target = event.payload as SidebarSection;
-      if (target && target in SECTIONS_CONFIG) {
-        setCurrentSection(target);
+      const resolved = resolveStudioNavigation(event.payload);
+      if (resolved) {
+        handleSectionChange(resolved.section, resolved.settingsTab);
       }
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [handleSectionChange]);
 
   // Listen for recording errors from the backend and show a toast
   useEffect(() => {
@@ -217,6 +272,41 @@ function App() {
           },
         },
       });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
+  useEffect(() => {
+    const unlisten = listen<number | null>("paste-copied-fallback", (event) => {
+      const dictationId =
+        typeof event.payload === "number" ? event.payload : null;
+      toast.info(
+        t("errors.pasteCopiedFallbackTitle", {
+          defaultValue: "Ready to Paste (⌘V)",
+        }),
+        {
+          description: t("errors.pasteCopiedFallback", {
+            defaultValue:
+              "No text cursor was active when lowyap finished, so your words are copied to the clipboard. Click where you want them and press ⌘V.",
+          }),
+          duration: 10000,
+          action: {
+            label: t("errors.copyLastDictation"),
+            onClick: () => {
+              void commands
+                .copyLastDictation(dictationId)
+                .then((res) => {
+                  if (res.status === "ok" && res.data) {
+                    toast.success(t("errors.copiedLastDictation"));
+                  }
+                })
+                .catch(() => {});
+            },
+          },
+        },
+      );
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -455,32 +545,45 @@ function App() {
           <WhatsNewGate />
         </ErrorBoundary>
         {/* Main content area that takes remaining space */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden bg-background">
           <Sidebar
             activeSection={currentSection}
-            onSectionChange={setCurrentSection}
+            onSectionChange={handleSectionChange}
           />
-          {/* Scrollable content area */}
+          {/* Right Studio workspace column + bottom engine bar */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div ref={settingsScrollRef} className="flex-1 overflow-y-auto">
-              {/* Models fills the window: its table scrolls, not the page. */}
+            {osType === "macos" && (
               <div
-                className={`flex flex-col items-center p-4 gap-4 ${currentSection === "models" ? "h-full" : ""}`}
+                data-tauri-drag-region
+                className="h-[26px] w-full shrink-0"
+                aria-hidden="true"
+              />
+            )}
+            <div
+              ref={settingsScrollRef}
+              className="flex-1 overflow-y-auto px-7 pb-6 pt-2"
+            >
+              <div
+                className={`flex flex-col items-center gap-4 ${
+                  currentSection === "settings" && settingsTab === "models"
+                    ? "h-full"
+                    : ""
+                }`}
               >
                 <SecureInputWarning />
-                {renderSettingsContent(
+                {renderStudioSurface(
                   currentSection,
+                  settingsTab,
                   setOnboardingPreview,
                   runOnboarding,
                   runModelMigration,
-                  setCurrentSection,
+                  handleSectionChange,
                 )}
               </div>
             </div>
+            <Footer onShowHistory={showHistory} />
           </div>
         </div>
-        {/* Fixed footer at bottom */}
-        <Footer onShowHistory={showHistory} />
         <FileDropOverlay onDropped={showHistory} />
       </div>
     );

@@ -6,31 +6,42 @@
  */
 
 :root {
-  /* Palette source of truth. Each themed color is defined once as a
-     light/dark pair; the active tokens below and the `data-theme` overrides
-     in App.css reference these, so a hex value lives in exactly one place. */
-  --light-color-text: #0f0f0f;
-  --light-color-background: #fbfbfb;
-  --light-color-logo-primary: #b9a8ff;
-  --light-color-logo-stroke: #261c45;
-  --light-color-overlay-accent: #6946e5;
+  /* Vocal Hardware Palette — Anodized Warm Stone (Light) × Machined Carbon (Dark)
+     paired with WCAG AA Signal Vermilion (#C0320C light / #FF6B3D dark). */
+  --light-color-text: #141412;
+  --light-color-background: #f4f2ec;
+  --light-color-surface: #ffffff;
+  --light-color-rail: #eae7df;
+  --light-color-ink-2: #4a4842;
+  --light-color-ink-3: #605d56;
+  --light-color-logo-primary: #c0320c;
+  --light-color-logo-stroke: #1c1b18;
+  --light-color-overlay-accent: #c0320c;
+  --light-color-background-ui: #c0320c;
+  --light-color-background-ui-hover: #a32807;
 
-  --dark-color-text: #fbfbfb;
-  --dark-color-background: #2c2b29;
-  --dark-color-logo-primary: #a08cff;
-  --dark-color-overlay-accent: #a08cff;
+  --dark-color-text: #f2f1ee;
+  --dark-color-background: #111113;
+  --dark-color-surface: #18181c;
+  --dark-color-rail: #0b0b0d;
+  --dark-color-ink-2: #b3b2ac;
+  --dark-color-ink-3: #908f8a;
+  --dark-color-logo-primary: #ff6b3d;
+  --dark-color-overlay-accent: #ff6b3d;
+  --dark-color-background-ui: #d43b13;
+  --dark-color-background-ui-hover: #b8310d;
 
-  /* Status colors. Each has a -wash tint below. */
-  --light-color-warning: #d97706;
-  --light-color-error: #dc2626;
+  /* Status colors — WCAG AA >= 4.5:1 across both Stone and Carbon surfaces. */
+  --light-color-warning: #9a5200;
+  --light-color-error: #b91c1c;
   --dark-color-warning: #fbbf24;
   --dark-color-error: #f87171;
 
-  /* Success. The brand accent already means "recording", so it gets its own hue. */
-  --light-color-moss: #2f7d5b;
-  --dark-color-moss: #86c9a4;
+  /* On-device seal / live meeting status. */
+  --light-color-moss: #16653e;
+  --dark-color-moss: #34d399;
 
-  /* Plum: the ink for keycaps and picked items. */
+  /* Plum: machined charcoal/ivory ink for keycaps and picked items. */
   --light-color-plum: var(--light-color-logo-stroke);
   --dark-color-plum: var(--dark-color-text);
 
@@ -42,37 +53,37 @@
     var(--dark-color-background)
   );
 
-  /* Demo's laptop: lid, base gradient and wallpaper. */
-  --light-color-demo-lid: #1f1e21;
-  --dark-color-demo-lid: #0f0e10;
-  --light-color-demo-alu-hi: #ececee;
-  --dark-color-demo-alu-hi: #5a585d;
-  --light-color-demo-alu-lo: #cdccd1;
-  --dark-color-demo-alu-lo: #3b3a3e;
+  /* Demo's laptop: anodized aluminum chassis & warm studio desk backdrop. */
+  --light-color-demo-lid: #1c1b18;
+  --dark-color-demo-lid: #0b0b0d;
+  --light-color-demo-alu-hi: #e9e6de;
+  --dark-color-demo-alu-hi: #565550;
+  --light-color-demo-alu-lo: #cbc7bd;
+  --dark-color-demo-alu-lo: #383733;
   --light-demo-wallpaper:
     radial-gradient(
-      110% 80% at 90% 105%,
-      color-mix(in srgb, var(--light-color-logo-primary) 50%, #fbfbfb) 0%,
+      110% 80% at 88% 105%,
+      color-mix(in srgb, var(--light-color-logo-primary) 26%, #f8f6f0) 0%,
       transparent 60%
     ),
     radial-gradient(
-      90% 80% at 5% -5%,
-      color-mix(in srgb, #c7b9ef 55%, #fbfbfb) 0%,
+      90% 80% at 8% -5%,
+      color-mix(in srgb, #d8d2c5 65%, #f8f6f0) 0%,
       transparent 62%
     ),
-    color-mix(in srgb, #e9e1f3 60%, #fbfbfb);
+    #eae6dc;
   --dark-demo-wallpaper:
     radial-gradient(
-      110% 80% at 90% 105%,
-      color-mix(in srgb, var(--dark-color-logo-primary) 26%, #1b1719) 0%,
+      110% 80% at 88% 105%,
+      color-mix(in srgb, var(--dark-color-logo-primary) 22%, #151518) 0%,
       transparent 60%
     ),
     radial-gradient(
-      90% 80% at 5% -5%,
-      color-mix(in srgb, #7c68c0 38%, #1b1719) 0%,
+      90% 80% at 8% -5%,
+      color-mix(in srgb, #2e2d2a 55%, #151518) 0%,
       transparent 62%
     ),
-    #1f1a1e;
+    #161619;
 
   /* The wordmark. Dark mode outlines it in white to cut down on accent colour. */
   --light-color-wordmark: var(--light-color-logo-primary);
@@ -125,15 +136,18 @@
     var(--dark-color-background)
   );
 
-  /* Tokens that do not change between light and dark (#6946e5 = 5.56:1 with white, WCAG AA) */
-  --color-background-ui: #6946e5;
-  --color-background-ui-hover: #5b38d6;
-  --color-mid-gray: #808080;
+  /* Primary actions keep >= 4.68:1 white-text contrast in both themes. */
+  --color-background-ui: var(--light-color-background-ui);
+  --color-background-ui-hover: var(--light-color-background-ui-hover);
 
   /* Active palette — defaults to light, follows the OS via the media query
      below, or is forced by `data-theme` (see the overrides below). */
   --color-text: var(--light-color-text);
   --color-background: var(--light-color-background);
+  --color-surface: var(--light-color-surface);
+  --color-rail: var(--light-color-rail);
+  --color-ink-2: var(--light-color-ink-2);
+  --color-ink-3: var(--light-color-ink-3);
   --color-logo-primary: var(--light-color-logo-primary);
   --color-overlay-accent: var(--light-color-overlay-accent);
   --color-warning: var(--light-color-warning);
@@ -153,9 +167,8 @@
   --color-warning-wash: var(--light-color-warning-wash);
   --color-error-wash: var(--light-color-error-wash);
 
-  /* Grey steps: secondary text, hints/icons, control edges, dividers, hover fill. */
-  --color-ink-2: color-mix(in srgb, var(--color-text) 60%, transparent);
-  --color-ink-3: var(--color-mid-gray);
+  /* Neutral control edges, dividers, and hover fill. */
+  --color-mid-gray: var(--color-ink-3);
   --color-line-strong: color-mix(
     in srgb,
     var(--color-mid-gray) 80%,
@@ -173,8 +186,14 @@
   :root {
     --color-text: var(--dark-color-text);
     --color-background: var(--dark-color-background);
+    --color-surface: var(--dark-color-surface);
+    --color-rail: var(--dark-color-rail);
+    --color-ink-2: var(--dark-color-ink-2);
+    --color-ink-3: var(--dark-color-ink-3);
     --color-logo-primary: var(--dark-color-logo-primary);
     --color-overlay-accent: var(--dark-color-overlay-accent);
+    --color-background-ui: var(--dark-color-background-ui);
+    --color-background-ui-hover: var(--dark-color-background-ui-hover);
     --color-warning: var(--dark-color-warning);
     --color-error: var(--dark-color-error);
     --color-moss: var(--dark-color-moss);
@@ -207,8 +226,14 @@
 :root[data-theme="light"] {
   --color-text: var(--light-color-text);
   --color-background: var(--light-color-background);
+  --color-surface: var(--light-color-surface);
+  --color-rail: var(--light-color-rail);
+  --color-ink-2: var(--light-color-ink-2);
+  --color-ink-3: var(--light-color-ink-3);
   --color-logo-primary: var(--light-color-logo-primary);
   --color-overlay-accent: var(--light-color-overlay-accent);
+  --color-background-ui: var(--light-color-background-ui);
+  --color-background-ui-hover: var(--light-color-background-ui-hover);
   --color-warning: var(--light-color-warning);
   --color-error: var(--light-color-error);
   --color-moss: var(--light-color-moss);
@@ -230,8 +255,14 @@
 :root[data-theme="dark"] {
   --color-text: var(--dark-color-text);
   --color-background: var(--dark-color-background);
+  --color-surface: var(--dark-color-surface);
+  --color-rail: var(--dark-color-rail);
+  --color-ink-2: var(--dark-color-ink-2);
+  --color-ink-3: var(--dark-color-ink-3);
   --color-logo-primary: var(--dark-color-logo-primary);
   --color-overlay-accent: var(--dark-color-overlay-accent);
+  --color-background-ui: var(--dark-color-background-ui);
+  --color-background-ui-hover: var(--dark-color-background-ui-hover);
   --color-warning: var(--dark-color-warning);
   --color-error: var(--dark-color-error);
   --color-moss: var(--dark-color-moss);

@@ -31,8 +31,12 @@ export const OnboardingShell: React.FC<OnboardingShellProps> = ({
   return (
     <div
       data-onboarding=""
-      className="h-screen w-full flex overflow-hidden bg-background select-none cursor-default"
+      className="relative h-screen w-full flex overflow-hidden bg-background select-none cursor-default"
     >
+      <div
+        data-tauri-drag-region
+        className="fixed inset-x-0 top-0 z-40 h-[32px]"
+      />
       {/* Disabled buttons go neutral so the only accent one is the next step.
           The column is capped so a long row truncates instead of widening. */}
       <div className="relative m-auto grid h-[600px] w-[720px] shrink-0 grid-cols-[minmax(0,1fr)] grid-rows-[48px_1fr_76px] font-ui text-body leading-[1.6] text-text antialiased [&_button:disabled]:border-line [&_button:disabled]:bg-wash [&_button:disabled]:text-ink-3 [&_button:disabled]:opacity-100">

@@ -18,7 +18,13 @@ import { HindustaniScriptSelector } from "../HindustaniScriptSelector";
 import { MicAutoBoostToggle } from "../MicAutoBoostToggle";
 import { isChinese } from "@/lib/utils/languageSuggestions";
 
-export const GeneralSettings: React.FC = () => {
+export interface GeneralSettingsProps {
+  studioScoped?: boolean;
+}
+
+export const GeneralSettings: React.FC<GeneralSettingsProps> = ({
+  studioScoped = false,
+}) => {
   const { t } = useTranslation();
   const { audioFeedbackEnabled, getSetting } = useSettings();
   const isLinux = type() === "linux";
@@ -34,14 +40,18 @@ export const GeneralSettings: React.FC = () => {
         {/* Cancel shortcut remains hidden on Linux because of dynamic shortcut instability. */}
         {!isLinux && <ShortcutInput shortcutId="cancel" grouped={true} />}
       </SettingsGroup>
-      <SettingsGroup title={t("settings.languages.title")}>
-        <PreferredLanguages descriptionMode="tooltip" grouped={true} />
-        <HindustaniScriptSelector descriptionMode="tooltip" grouped={true} />
-        {speaksChinese && (
-          <ChineseScriptSetting descriptionMode="tooltip" grouped={true} />
-        )}
-      </SettingsGroup>
-      <ModelSettingsCard />
+      {!studioScoped && (
+        <>
+          <SettingsGroup title={t("settings.languages.title")}>
+            <PreferredLanguages descriptionMode="tooltip" grouped={true} />
+            <HindustaniScriptSelector descriptionMode="tooltip" grouped={true} />
+            {speaksChinese && (
+              <ChineseScriptSetting descriptionMode="tooltip" grouped={true} />
+            )}
+          </SettingsGroup>
+          <ModelSettingsCard />
+        </>
+      )}
       <SettingsGroup title={t("settings.sound.title")}>
         <MicrophoneSelector descriptionMode="tooltip" grouped={true} />
         <MicAutoBoostToggle descriptionMode="tooltip" grouped={true} />

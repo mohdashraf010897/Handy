@@ -1,7 +1,8 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Globe, Zap } from "lucide-react";
-import { modelMatchesLanguage } from "@handy-computer/models";
+import { ChevronDown, Cpu, Globe, Zap } from "lucide-react";
+import { useOsType } from "@/hooks/useOsType";
+import type { OSType } from "@/lib/utils/keyboard";
 import { Button } from "../../ui/Button";
 import { Radio } from "../../ui/Radio";
 import { GradeChip } from "../../shared/GradeChip";
@@ -68,22 +69,33 @@ const vt = (id: string, part = "") => ({
     "mf-" + id.toLowerCase().replace(/[^a-z0-9]+/g, "-") + (part && "-" + part),
 });
 
+import {
+  MACOS_NATIVE_SPEECH_ID,
+  resolveMacZeroWaitTarget,
+} from "../macZeroWaitHelpers";
+
+export { MACOS_NATIVE_SPEECH_ID, resolveMacZeroWaitTarget };
+
 interface ModelProps {
   progress?: { index: number; count: number };
+  os?: OSType;
   models: Models;
   onBack?: () => void;
-  /** The picked model (catalog id), once Download or Continue is pressed. */
+  /** The picked model (catalog id or "macos-native-speech"), once Download or Continue is pressed. */
   onChoose: (modelId: string) => void;
 }
 
 /** Screen 3: pick one of three suggested models, or Show all for the table. */
 export const Model: React.FC<ModelProps> = ({
   progress,
+  os,
   models,
   onBack,
   onChoose,
 }) => {
   const { t, i18n } = useTranslation();
+  const detectedOs = useOsType();
+  const isMac = (os ?? detectedOs) === "macos";
   const words = useDownloadWords();
   const speedWords = useSpeedWords();
   const { modelId, extraModelId, downloadId, set } = useOnboardingStore();
@@ -99,9 +111,34 @@ export const Model: React.FC<ModelProps> = ({
     m.capabilities[CAPABILITIES[c].flag];
   const previews = (m: CatalogModel) => has(m, "preview");
   const pick = picks.find((p) => p.role === "pick") ?? picks[0];
-  const selectedId = modelId ?? downloadId ?? pick?.model.id ?? null;
+
+  const byId = useMemo(() => new Map(offered.map((m) => [m.id, m])), [offered]);
+  const {
+    englishGoalModel,
+    multilingualGoalModel,
+    isEnglishOnly,
+    autoHdModel,
+  } = useMemo(
+    () =>
+      resolveMacZeroWaitTarget({
+        offered,
+        pickModel: pick?.model,
+        langs,
+      }),
+    [offered, pick?.model, langs],
+  );
+
+  const selectedId =
+    modelId ??
+    downloadId ??
+    (isMac ? autoHdModel?.id : undefined) ??
+    pick?.model.id ??
+    (isMac ? MACOS_NATIVE_SPEECH_ID : null);
+
+  const isNativeSelected = selectedId === MACOS_NATIVE_SPEECH_ID;
   const isPick = (id: string | null) =>
-    !!id && picks.some((p) => p.model.id === id);
+    !!id &&
+    (id === MACOS_NATIVE_SPEECH_ID || picks.some((p) => p.model.id === id));
   // A model picked from the full list stays as a fourth card unless a pick.
   const extraId =
     selectedId && !isPick(selectedId)
@@ -113,26 +150,9 @@ export const Model: React.FC<ModelProps> = ({
     if (extraId !== extraModelId) set({ extraModelId: extraId });
   }, [extraId, extraModelId, set]);
 
-  const byId = useMemo(() => new Map(offered.map((m) => [m.id, m])), [offered]);
-  const englishGoalModel =
-    byId.get("parakeet-unified-en-0.6b") ??
-    byId.get("parakeet-tdt-0.6b-v2") ??
-    byId.get("parakeet-tdt-0.6b-v3") ??
-    offered.find((m) => modelMatchesLanguage(m, "en")) ??
-    pick?.model;
-  const isMultilingualCandidate = (m: CatalogModel) =>
-    m.id !== englishGoalModel?.id &&
-    (modelMatchesLanguage(m, "ur") ||
-      m.languages.includes("ur") ||
-      m.languages.length >= 10);
-  const multilingualGoalModel = [
-    byId.get("whisper-large-v3-turbo"),
-    byId.get("whisper-medium"),
-    byId.get("whisper-large-v3"),
-    offered.find(isMultilingualCandidate),
-  ].find((m): m is CatalogModel => !!m && isMultilingualCandidate(m));
   const isNonGoalSelected =
     !!selectedId &&
+    selectedId !== MACOS_NATIVE_SPEECH_ID &&
     !!(englishGoalModel || multilingualGoalModel) &&
     selectedId !== englishGoalModel?.id &&
     selectedId !== multilingualGoalModel?.id;
@@ -220,8 +240,10 @@ export const Model: React.FC<ModelProps> = ({
     // open() is stable enough for a listener re-added with showAll
   }, [showAll]);
 
-  if (!pick || !selectedId) return null;
-  const selected = byId.get(selectedId) ?? pick.model;
+  if ((!pick && !isMac) || !selectedId) return null;
+  const selected = isNativeSelected
+    ? undefined
+    : (byId.get(selectedId) ?? pick?.model);
 
   /* ---------------- the download ---------------- */
 
@@ -501,27 +523,44 @@ export const Model: React.FC<ModelProps> = ({
 
   /* ---------------- the footer ---------------- */
 
-  // Nothing to download for a model on disk, or the one already downloading.
-  // Its download stopped: the button downloads it again.
-  const selectedState = models.downloadState(selected).state;
+  // Nothing to download for a model on disk, or the one already downloading,
+  // or when Built-in macOS Voice Only (0 MB) is chosen.
+  const selectedState = isNativeSelected
+    ? "ready"
+    : models.downloadState(selected).state;
   const continuing =
+    isNativeSelected ||
     selectedState === "ready" ||
     (downloadId === selectedId && selectedState !== "failed");
   // Switching mid-download pauses it (the partial stays on disk), so no dialog.
   const switching =
-    loading && loading.id !== selectedId && loadingState.state === "downloading"
+    !isNativeSelected &&
+    loading &&
+    loading.id !== selectedId &&
+    loadingState.state === "downloading"
       ? { name: loading.name, percent: words.percent(loadingState) }
       : null;
   const primary = (
-    <Button variant="primary" size="lg" onClick={() => onChoose(selectedId)}>
-      {continuing
-        ? t("onboarding.shell.continue")
-        : t(
-            switching
-              ? "onboarding.model.downloadInstead"
-              : "onboarding.model.download",
-            { size: sizeOf(selected) },
-          )}
+    <Button
+      variant="primary"
+      size="lg"
+      data-testid="onboarding-model-continue"
+      onClick={() => onChoose(selectedId)}
+    >
+      {isMac
+        ? continuing
+          ? t("onboarding.shell.continue")
+          : t("onboarding.model.consumer.startInstantlyCta", {
+              defaultValue: "Start instantly",
+            })
+        : continuing
+          ? t("onboarding.shell.continue")
+          : t(
+              switching
+                ? "onboarding.model.downloadInstead"
+                : "onboarding.model.download",
+              { size: selected ? sizeOf(selected) : "" },
+            )}
     </Button>
   );
   const hint = switching ? (
@@ -533,6 +572,17 @@ export const Model: React.FC<ModelProps> = ({
         {t("onboarding.model.resumeLater")}
       </div>
     </div>
+  ) : isNativeSelected ? (
+    t("onboarding.model.consumer.nativeHint", {
+      defaultValue: "0 MB download \u00b7 100% on-device macOS voice",
+    })
+  ) : isMac ? (
+    continuing
+      ? ""
+      : t("onboarding.model.consumer.hdBackgroundHint", {
+          defaultValue:
+            "Dictate right away \u00b7 HD voice prepares quietly in the background",
+        })
   ) : continuing ? (
     ""
   ) : (
@@ -616,6 +666,11 @@ export const Model: React.FC<ModelProps> = ({
     };
 
     const hasBothGoals = !!(englishGoalModel && multilingualGoalModel);
+    const hdTargetId = autoHdModel?.id ?? MACOS_NATIVE_SPEECH_ID;
+    const isHdConsumerActive =
+      !isNativeSelected &&
+      (!advancedOpen || selectedId === hdTargetId);
+    const hdLine = autoHdModel ? lineFor(autoHdModel.id) : false;
 
     return (
       <OnboardingShell
@@ -637,33 +692,173 @@ export const Model: React.FC<ModelProps> = ({
               advancedOpen ? "min-h-0 flex-1 overflow-y-auto pb-[4px]" : ""
             }`}
           >
-            <div className="w-full flex-none text-start">
-              <h2 className="m-0 mb-[8px] text-label font-[650] uppercase tracking-[0.04em] text-ink-3">
-                {t("onboarding.model.goals.heading")}
-              </h2>
+            {isMac ? (
               <div
-                className={`grid gap-[10px] ${
-                  hasBothGoals ? "grid-cols-2" : "grid-cols-1"
-                }`}
+                data-testid="macos-zero-wait-consumer-cards"
+                className="w-full flex-none text-start"
               >
-                {goalCard(
-                  "english",
-                  englishGoalModel,
-                  <Zap size={16} strokeWidth={2.2} aria-hidden="true" />,
-                  t("onboarding.model.goals.englishTitle"),
-                  t("onboarding.model.goals.englishDesc"),
-                )}
-                {goalCard(
-                  "multilingual",
-                  multilingualGoalModel,
-                  <Globe size={16} strokeWidth={2.1} aria-hidden="true" />,
-                  t("onboarding.model.goals.multilingualTitle"),
-                  t("onboarding.model.goals.multilingualDesc"),
-                )}
+                <h2 className="m-0 mb-[8px] text-label font-[650] uppercase tracking-[0.04em] text-ink-3">
+                  {t("onboarding.model.consumer.heading", {
+                    defaultValue: "Start dictating right away — zero waiting",
+                  })}
+                </h2>
+                <div className="grid grid-cols-2 gap-[10px]">
+                  {/* Option 1: Start Instantly + Prepare HD Offline Voice in Background (Recommended) */}
+                  <button
+                    type="button"
+                    data-testid="consumer-option-instant-hd"
+                    aria-pressed={isHdConsumerActive}
+                    onClick={() => choose(hdTargetId, false)}
+                    className={`relative flex min-w-0 cursor-pointer flex-col items-start gap-[6px] rounded-panel border-[1.5px] bg-background px-[16px] text-start transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary ${
+                      isHdConsumerActive
+                        ? "border-plum-pick"
+                        : "border-line-strong hover:border-ink-3 hover:bg-wash"
+                    } ${hdLine ? "pt-[14px] pb-[18px]" : "py-[14px]"}`}
+                  >
+                    <span className="flex w-full items-center justify-between gap-[8px]">
+                      <span className="inline-flex items-center gap-[8px]">
+                        <span
+                          className={`grid size-[32px] shrink-0 place-items-center rounded-[9px] ${
+                            isHdConsumerActive
+                              ? "bg-background-ui/12 text-background-ui"
+                              : "bg-wash text-ink-2"
+                          }`}
+                        >
+                          <Zap
+                            size={16}
+                            strokeWidth={2.2}
+                            aria-hidden="true"
+                          />
+                        </span>
+                        <Tag className="font-semibold text-logo-primary">
+                          {t("onboarding.model.consumer.recommendedBadge", {
+                            defaultValue: "Recommended",
+                          })}
+                        </Tag>
+                      </span>
+                      <Radio checked={isHdConsumerActive} />
+                    </span>
+                    <b className="mt-[2px] font-display text-name font-[650] leading-[1.25] tracking-[-0.01em] text-text">
+                      {t("onboarding.model.consumer.instantHdTitle", {
+                        defaultValue:
+                          "Start Instantly + Prepare HD Offline Voice in Background",
+                      })}
+                    </b>
+                    <span className="text-small leading-[1.4] text-ink-2 text-pretty">
+                      {isEnglishOnly
+                        ? t("onboarding.model.consumer.instantHdDescEnglish", {
+                            defaultValue:
+                              "Try \u2325 Space right away with built-in macOS voice while lowyap quietly prepares your high-accuracy English voice pack in the background.",
+                          })
+                        : t(
+                            "onboarding.model.consumer.instantHdDescMultilingual",
+                            {
+                              defaultValue:
+                                "Try \u2325 Space right away with built-in macOS voice while lowyap quietly prepares your 100+ language HD voice pack in the background.",
+                            },
+                          )}
+                    </span>
+                    <span className="mt-auto inline-flex max-w-full items-center pt-[4px]">
+                      <Tag className="inline-flex max-w-full items-center gap-[5px]">
+                        <span className="truncate">
+                          {t("onboarding.model.consumer.instantHdTag", {
+                            defaultValue: "0s wait \u00b7 Auto-upgrades when ready",
+                          })}
+                        </span>
+                      </Tag>
+                    </span>
+                    {hdLine && thinLine("inset-x-4 bottom-[6px]")}
+                  </button>
+
+                  {/* Option 2: Built-in macOS Voice Only (0 MB download) */}
+                  <button
+                    type="button"
+                    data-testid="consumer-option-macos-native"
+                    aria-pressed={isNativeSelected}
+                    onClick={() => choose(MACOS_NATIVE_SPEECH_ID, false)}
+                    className={`relative flex min-w-0 cursor-pointer flex-col items-start gap-[6px] rounded-panel border-[1.5px] bg-background px-[16px] py-[14px] text-start transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary ${
+                      isNativeSelected
+                        ? "border-plum-pick"
+                        : "border-line-strong hover:border-ink-3 hover:bg-wash"
+                    }`}
+                  >
+                    <span className="flex w-full items-center justify-between gap-[8px]">
+                      <span className="inline-flex items-center gap-[8px]">
+                        <span
+                          className={`grid size-[32px] shrink-0 place-items-center rounded-[9px] ${
+                            isNativeSelected
+                              ? "bg-background-ui/12 text-background-ui"
+                              : "bg-wash text-ink-2"
+                          }`}
+                        >
+                          <Cpu
+                            size={16}
+                            strokeWidth={2.1}
+                            aria-hidden="true"
+                          />
+                        </span>
+                        <Tag className="font-mono">
+                          {t("onboarding.model.consumer.zeroMbBadge", {
+                            defaultValue: "0 MB download",
+                          })}
+                        </Tag>
+                      </span>
+                      <Radio checked={isNativeSelected} />
+                    </span>
+                    <b className="mt-[2px] font-display text-name font-[650] leading-[1.25] tracking-[-0.01em] text-text">
+                      {t("onboarding.model.consumer.nativeOnlyTitle", {
+                        defaultValue:
+                          "Built-in macOS Voice Only (0 MB download)",
+                      })}
+                    </b>
+                    <span className="text-small leading-[1.4] text-ink-2 text-pretty">
+                      {t("onboarding.model.consumer.nativeOnlyDesc", {
+                        defaultValue:
+                          "Uses Apple\u2019s built-in on-device speech engine with zero extra disk space and zero downloads. 100% private on your Mac.",
+                      })}
+                    </span>
+                    <span className="mt-auto inline-flex max-w-full items-center pt-[4px]">
+                      <Tag className="inline-flex max-w-full items-center gap-[5px]">
+                        <span className="truncate">
+                          {t("onboarding.model.consumer.nativeOnlyTag", {
+                            defaultValue: "0 MB disk space \u00b7 100% on-device",
+                          })}
+                        </span>
+                      </Tag>
+                    </span>
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="w-full flex-none text-start">
+                <h2 className="m-0 mb-[8px] text-label font-[650] uppercase tracking-[0.04em] text-ink-3">
+                  {t("onboarding.model.goals.heading")}
+                </h2>
+                <div
+                  className={`grid gap-[10px] ${
+                    hasBothGoals ? "grid-cols-2" : "grid-cols-1"
+                  }`}
+                >
+                  {goalCard(
+                    "english",
+                    englishGoalModel,
+                    <Zap size={16} strokeWidth={2.2} aria-hidden="true" />,
+                    t("onboarding.model.goals.englishTitle"),
+                    t("onboarding.model.goals.englishDesc"),
+                  )}
+                  {goalCard(
+                    "multilingual",
+                    multilingualGoalModel,
+                    <Globe size={16} strokeWidth={2.1} aria-hidden="true" />,
+                    t("onboarding.model.goals.multilingualTitle"),
+                    t("onboarding.model.goals.multilingualDesc"),
+                  )}
+                </div>
+              </div>
+            )}
             <button
               type="button"
+              data-testid="onboarding-model-advanced-toggle"
               aria-expanded={advancedOpen}
               aria-controls="onboarding-model-advanced"
               onClick={() => setAdvancedOpen((prev) => !prev)}
@@ -671,9 +866,13 @@ export const Model: React.FC<ModelProps> = ({
             >
               <span>
                 {advancedOpen
-                  ? t("onboarding.model.goals.advancedToggleHide")
-                  : t("onboarding.model.goals.advancedToggleShow", {
+                  ? t("onboarding.model.consumer.advancedHide", {
+                      defaultValue: "Hide advanced voice engines",
+                    })
+                  : t("onboarding.model.consumer.advancedShow", {
                       count: models.offered.length,
+                      defaultValue:
+                        "Choose a specific voice engine (Advanced)",
                     })}
               </span>
               <ChevronDown
@@ -689,6 +888,24 @@ export const Model: React.FC<ModelProps> = ({
                 id="onboarding-model-advanced"
                 className="mt-[8px] flex w-full flex-none flex-col"
               >
+                {isMac && hasBothGoals && (
+                  <div className="mb-[8px] grid grid-cols-2 gap-[10px] text-start">
+                    {goalCard(
+                      "english",
+                      englishGoalModel,
+                      <Zap size={16} strokeWidth={2.2} aria-hidden="true" />,
+                      t("onboarding.model.goals.englishTitle"),
+                      t("onboarding.model.goals.englishDesc"),
+                    )}
+                    {goalCard(
+                      "multilingual",
+                      multilingualGoalModel,
+                      <Globe size={16} strokeWidth={2.1} aria-hidden="true" />,
+                      t("onboarding.model.goals.multilingualTitle"),
+                      t("onboarding.model.goals.multilingualDesc"),
+                    )}
+                  </div>
+                )}
                 <div
                   role="radiogroup"
                   aria-label={t("onboarding.model.label")}

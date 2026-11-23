@@ -19,8 +19,10 @@ import {
 } from "@/components/meetings/api";
 import { syncLanguageFromSettings } from "@/i18n";
 import {
+  DEFAULT_MEETING_AUTO_STOP_GRACE_MS,
   DEFAULT_SOFT_CANCEL_GRACE_MS,
   type MeetingActiveOverlay,
+  type MeetingSoftStoppedOverlay,
   type MeetingSummarizingOverlay,
   SESSION_BUS_EVENT,
   type SessionBusSnapshot,
@@ -43,6 +45,7 @@ type OverlayState =
   | "transcribing"
   | "processing"
   | "meeting_active"
+  | "meeting_soft_stopped"
   | "meeting_summarizing"
   | "notice";
 
@@ -60,6 +63,7 @@ type OverlayNoticeKind =
   | "no_speech"
   | "mic_permission"
   | "no_mic"
+  | "copied_to_clipboard"
   | "call_detected";
 
 interface DetectedCallPayload {
@@ -69,9 +73,92 @@ interface DetectedCallPayload {
   app_name: string;
 }
 
-// Number of reactive bars in the waveform (the simple, smoothed style shared by
-// every overlay form). Mic levels arrive as 16 FFT buckets; we take the first N.
-const WAVE_BARS = 9;
+// 11 center-weighted symmetrical tactile bars driven at 60fps via rAF.
+// Incoming `mic-level` events arrive as 16 FFT buckets (~15-30 Hz); we map
+// them onto a symmetrical center-peaked arch and spring/lerp at 60fps.
+const WAVE_BARS = 11;
+const WAVE_CENTER_INDEX = 5;
+const WAVE_CENTER_WEIGHTS: readonly number[] = [
+  0.36, 0.52, 0.7, 0.86, 0.96, 1.0, 0.96, 0.86, 0.7, 0.52, 0.36,
+];
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function mapBucketsToSymmetricalTargets(buckets: number[]): number[] {
+  const b = (idx: number) => Math.max(0, Math.min(1, buckets[idx] ?? 0));
+  const vocalPresence = (b(0) + b(1) + b(2) + b(3)) * 0.25;
+  const targets = new Array<number>(WAVE_BARS);
+  for (let i = 0; i < WAVE_BARS; i++) {
+    const dist = Math.abs(i - WAVE_CENTER_INDEX);
+    const isLeft = i < WAVE_CENTER_INDEX;
+    let band = 0;
+    switch (dist) {
+      case 0:
+        band = b(0) * 0.5 + b(1) * 0.35 + b(2) * 0.15;
+        break;
+      case 1:
+        band = isLeft
+          ? b(1) * 0.55 + b(3) * 0.45
+          : b(2) * 0.55 + b(3) * 0.45;
+        break;
+      case 2:
+        band = isLeft
+          ? b(3) * 0.55 + b(5) * 0.45
+          : b(4) * 0.55 + b(6) * 0.45;
+        break;
+      case 3:
+        band = isLeft
+          ? b(5) * 0.55 + b(8) * 0.45
+          : b(6) * 0.55 + b(9) * 0.45;
+        break;
+      case 4:
+        band = isLeft
+          ? b(7) * 0.55 + b(11) * 0.45
+          : b(8) * 0.55 + b(12) * 0.45;
+        break;
+      default:
+        band = isLeft
+          ? b(10) * 0.55 + b(14) * 0.45
+          : b(11) * 0.55 + b(15) * 0.45;
+        break;
+    }
+    targets[i] = Math.min(
+      1,
+      (band * 0.58 + vocalPresence * 0.42) * WAVE_CENTER_WEIGHTS[i],
+    );
+  }
+  return targets;
+}
+
+function computeWaveBarHeightPx(
+  level: number,
+  index: number,
+  breathPhaseRad: number,
+  withBreath: boolean,
+): number {
+  const clamped = Math.max(0, Math.min(1, level));
+  const breathAttenuation = 1 - Math.min(1, clamped * 2.5);
+  const breathPx = withBreath
+    ? Math.sin(breathPhaseRad - Math.abs(index - WAVE_CENTER_INDEX) * 0.42) *
+      0.6 *
+      breathAttenuation
+    : 0;
+  const restingFloor = withBreath ? 3.6 : 3;
+  const activeSpan = withBreath ? 14.4 : 15;
+  return Math.max(
+    3,
+    Math.min(
+      18,
+      restingFloor + breathPx + Math.pow(clamped, 0.68) * activeSpan,
+    ),
+  );
+}
 
 // Only call out a model load in the Live preview once it has run this long.
 // Warm loads finish in well under this (~0.2s on Apple Silicon, ~1.5s on a
@@ -138,6 +225,9 @@ const RecordingOverlay: React.FC = () => {
   const [undoPending, setUndoPending] = useState(false);
   const [meetingOverlay, setMeetingOverlay] =
     useState<MeetingActiveOverlay | null>(null);
+  const [meetingSoftStoppedOverlay, setMeetingSoftStoppedOverlay] =
+    useState<MeetingSoftStoppedOverlay | null>(null);
+  const [meetingSoftStopProgress, setMeetingSoftStopProgress] = useState(1);
   const [summarizingOverlay, setSummarizingOverlay] =
     useState<MeetingSummarizingOverlay | null>(null);
   const [meetingDisplayElapsedMs, setMeetingDisplayElapsedMs] = useState(0);
@@ -150,6 +240,7 @@ const RecordingOverlay: React.FC = () => {
   const stateRef = useRef<OverlayState>("recording");
   const isVisibleRef = useRef(false);
   const activeTakeIdRef = useRef<number | null>(null);
+  const softCancelledTakeIdRef = useRef<number | null>(null);
   const preSoftCancelStreamingRef = useRef(false);
   const undoPendingRef = useRef(false);
   const confirmPendingRef = useRef(false);
@@ -161,7 +252,21 @@ const RecordingOverlay: React.FC = () => {
   stateRef.current = state;
   isVisibleRef.current = isVisible;
 
-  const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
+  const targetLevelsRef = useRef<number[]>(Array(WAVE_BARS).fill(0));
+  const currentLevelsRef = useRef<number[]>(Array(WAVE_BARS).fill(0));
+  const breathPhaseRef = useRef(0);
+  const waveBarRefs = useRef<(HTMLElement | null)[]>([]);
+
+  const resetWaveformLevels = () => {
+    const zero = Array(WAVE_BARS).fill(0);
+    targetLevelsRef.current = [...zero];
+    currentLevelsRef.current = [...zero];
+    breathPhaseRef.current = 0;
+    setLevels(zero);
+    for (const el of waveBarRefs.current) {
+      if (el) el.style.height = "3px";
+    }
+  };
   // Live-text scroll-back: the text region "sticks" to the newest line while the
   // user is at the bottom; if they scroll up to read history, auto-follow pauses
   // until they scroll back down.
@@ -228,6 +333,7 @@ const RecordingOverlay: React.FC = () => {
         case "hidden": {
           setSoftCancelInfo(null);
           setMeetingOverlay(null);
+          setMeetingSoftStoppedOverlay(null);
           setSummarizingOverlay(null);
           setCaptureReady(false);
           setIsPaused(false);
@@ -243,7 +349,8 @@ const RecordingOverlay: React.FC = () => {
         }
         case "dictation_recording": {
           const wasSoftCancelledSameTake =
-            stateRef.current === "soft_cancelled" &&
+            (stateRef.current === "soft_cancelled" ||
+              softCancelledTakeIdRef.current === overlay.take_id) &&
             activeTakeIdRef.current === overlay.take_id;
           const isNewTake = activeTakeIdRef.current !== overlay.take_id;
           activeTakeIdRef.current = overlay.take_id;
@@ -265,11 +372,11 @@ const RecordingOverlay: React.FC = () => {
               stateRef.current = "recording";
             }
           } else if (isNewTake) {
+            softCancelledTakeIdRef.current = null;
             preSoftCancelStreamingRef.current = false;
             if (stateRef.current !== "streaming") {
               setElapsed(0);
-              smoothedLevelsRef.current = Array(16).fill(0);
-              setLevels(Array(WAVE_BARS).fill(0));
+              resetWaveformLevels();
               setCaptureReady(overlay.locked || overlay.paused);
               setState("recording");
               stateRef.current = "recording";
@@ -291,6 +398,7 @@ const RecordingOverlay: React.FC = () => {
             preSoftCancelStreamingRef.current = true;
           }
           activeTakeIdRef.current = overlay.take_id;
+          softCancelledTakeIdRef.current = overlay.take_id;
           undoPendingRef.current = false;
           confirmPendingRef.current = false;
           setUndoPending(false);
@@ -315,6 +423,7 @@ const RecordingOverlay: React.FC = () => {
         }
         case "dictation_transcribing": {
           activeTakeIdRef.current = overlay.take_id;
+          softCancelledTakeIdRef.current = null;
           setSoftCancelInfo(null);
           setIsPaused(false);
           if (stateRef.current === "streaming") {
@@ -344,6 +453,7 @@ const RecordingOverlay: React.FC = () => {
         case "meeting_active": {
           preSoftCancelStreamingRef.current = false;
           setSoftCancelInfo(null);
+          setMeetingSoftStoppedOverlay(null);
           setSummarizingOverlay(null);
           meetingTogglePendingRef.current = false;
           meetingStopPendingRef.current = false;
@@ -355,10 +465,35 @@ const RecordingOverlay: React.FC = () => {
           setIsVisible(true);
           break;
         }
+        case "meeting_soft_stopped": {
+          preSoftCancelStreamingRef.current = false;
+          localMeetingDismissedIdRef.current = null;
+          setSoftCancelInfo(null);
+          setMeetingOverlay(null);
+          setSummarizingOverlay(null);
+          meetingTogglePendingRef.current = false;
+          meetingStopPendingRef.current = false;
+          setMeetingTogglePending(false);
+          setMeetingStopPending(false);
+          setMeetingSoftStoppedOverlay(overlay);
+          setMeetingSoftStopProgress(
+            computeSoftCancelProgress(
+              overlay.stopped_at_ms,
+              overlay.expires_at_ms,
+              overlay.grace_ms,
+              snapshot.server_now_ms,
+            ),
+          );
+          setState("meeting_soft_stopped");
+          stateRef.current = "meeting_soft_stopped";
+          setIsVisible(true);
+          break;
+        }
         case "meeting_summarizing": {
           preSoftCancelStreamingRef.current = false;
           setSoftCancelInfo(null);
           setMeetingOverlay(null);
+          setMeetingSoftStoppedOverlay(null);
           setSummarizingOverlay(overlay);
           setState("meeting_summarizing");
           stateRef.current = "meeting_summarizing";
@@ -409,20 +544,37 @@ const RecordingOverlay: React.FC = () => {
       const unlistenShow = await listen("show-overlay", async (event) => {
         const overlayState = event.payload as OverlayState;
         const seqAtShow = latestSeqRef.current;
+        const isResumingSoftCancelledSameTake =
+          (overlayState === "recording" || overlayState === "streaming") &&
+          softCancelledTakeIdRef.current !== null &&
+          softCancelledTakeIdRef.current === activeTakeIdRef.current;
+        const resolvedState: OverlayState =
+          isResumingSoftCancelledSameTake && preSoftCancelStreamingRef.current
+            ? "streaming"
+            : overlayState;
+
         // Reset synchronously before settings I/O. A fast microphone can emit
         // recording-ready while the awaits below are in flight; resetting after
         // them would overwrite that event and leave the overlay stuck arming.
+        // Exception: undoing a soft-cancelled take preserves pre-cancel elapsed
+        // speech duration and live preview text instead of resetting to 00:00.
         setIsPaused(false);
         pausePendingRef.current = false;
         finishPendingRef.current = false;
-        if (overlayState === "recording" || overlayState === "streaming") {
-          setCaptureReady(false);
-          setElapsed(0);
-          smoothedLevelsRef.current = Array(16).fill(0);
-          setLevels(Array(WAVE_BARS).fill(0));
-          setStreamText({ committed: "", tentative: "" });
+        if (resolvedState === "recording" || resolvedState === "streaming") {
+          if (isResumingSoftCancelledSameTake) {
+            setCaptureReady(true);
+          } else {
+            setCaptureReady(false);
+            setElapsed(0);
+            resetWaveformLevels();
+            setStreamText({ committed: "", tentative: "" });
+          }
         }
-        if (overlayState === "soft_cancelled") {
+        if (resolvedState === "soft_cancelled") {
+          if (activeTakeIdRef.current !== null) {
+            softCancelledTakeIdRef.current = activeTakeIdRef.current;
+          }
           setSoftCancelInfo((prev) => {
             if (prev) return prev;
             const nowMs = Date.now() + clockSkewRef.current;
@@ -435,7 +587,24 @@ const RecordingOverlay: React.FC = () => {
           });
           setSoftCancelProgress(1);
         }
-        if (overlayState === "meeting_active") {
+        if (resolvedState === "meeting_soft_stopped") {
+          setMeetingSoftStoppedOverlay((prev) => {
+            if (prev) return prev;
+            const nowMs = Date.now() + clockSkewRef.current;
+            return {
+              mode: "meeting_soft_stopped",
+              meeting_id: "active",
+              title: "",
+              elapsed_ms: 0,
+              stopped_at_ms: nowMs,
+              expires_at_ms: nowMs + DEFAULT_MEETING_AUTO_STOP_GRACE_MS,
+              grace_ms: DEFAULT_MEETING_AUTO_STOP_GRACE_MS,
+              app_name: null,
+            };
+          });
+          setMeetingSoftStopProgress(1);
+        }
+        if (resolvedState === "meeting_active") {
           setMeetingOverlay((prev) => {
             if (prev) return prev;
             const nowMs = Date.now() + clockSkewRef.current;
@@ -457,18 +626,20 @@ const RecordingOverlay: React.FC = () => {
         // are never overwritten after settings I/O completes.
         if (
           seqAtShow === 0 ||
-          overlayState === "streaming" ||
+          resolvedState === "streaming" ||
           latestSnapshotRef.current?.overlay.mode !== "dictation_soft_cancelled"
         ) {
-          setState(overlayState);
-          stateRef.current = overlayState;
+          setState(resolvedState);
+          stateRef.current = resolvedState;
         }
-        if (overlayState === "streaming") {
+        if (resolvedState === "streaming") {
           setPhase("listening");
           setWorkKind("transcribing");
-          setElapsed(0);
-          setLoadNoticeShown(false);
-          setSession((s) => s + 1); // remount the card fresh for this session
+          if (!isResumingSoftCancelledSameTake) {
+            setElapsed(0);
+            setLoadNoticeShown(false);
+            setSession((s) => s + 1); // remount the card fresh for this session
+          }
         }
         setIsVisible(true);
 
@@ -481,10 +652,12 @@ const RecordingOverlay: React.FC = () => {
         pausePendingRef.current = false;
         finishPendingRef.current = false;
         preSoftCancelStreamingRef.current = false;
+        softCancelledTakeIdRef.current = null;
 
         const snap = latestSnapshotRef.current;
         if (snap?.overlay.mode === "meeting_active") {
           setSoftCancelInfo(null);
+          setMeetingSoftStoppedOverlay(null);
           setSummarizingOverlay(null);
           setMeetingOverlay(snap.overlay);
           setState("meeting_active");
@@ -492,9 +665,20 @@ const RecordingOverlay: React.FC = () => {
           setIsVisible(true);
           return;
         }
+        if (snap?.overlay.mode === "meeting_soft_stopped") {
+          setSoftCancelInfo(null);
+          setMeetingOverlay(null);
+          setSummarizingOverlay(null);
+          setMeetingSoftStoppedOverlay(snap.overlay);
+          setState("meeting_soft_stopped");
+          stateRef.current = "meeting_soft_stopped";
+          setIsVisible(true);
+          return;
+        }
         if (snap?.overlay.mode === "meeting_summarizing") {
           setSoftCancelInfo(null);
           setMeetingOverlay(null);
+          setMeetingSoftStoppedOverlay(null);
           setSummarizingOverlay(snap.overlay);
           setState("meeting_summarizing");
           stateRef.current = "meeting_summarizing";
@@ -505,6 +689,7 @@ const RecordingOverlay: React.FC = () => {
           const meetingId = snap.meeting.meeting_id;
           if (
             snap.meeting.phase === "summarizing" ||
+            snap.meeting.phase === "soft_stopped" ||
             localMeetingDismissedIdRef.current !== meetingId
           ) {
             const projected = projectMeetingOverlay(
@@ -513,6 +698,7 @@ const RecordingOverlay: React.FC = () => {
             );
             if (projected?.mode === "meeting_active") {
               setSoftCancelInfo(null);
+              setMeetingSoftStoppedOverlay(null);
               setSummarizingOverlay(null);
               setMeetingOverlay(projected);
               setState("meeting_active");
@@ -520,9 +706,20 @@ const RecordingOverlay: React.FC = () => {
               setIsVisible(true);
               return;
             }
+            if (projected?.mode === "meeting_soft_stopped") {
+              setSoftCancelInfo(null);
+              setMeetingOverlay(null);
+              setSummarizingOverlay(null);
+              setMeetingSoftStoppedOverlay(projected);
+              setState("meeting_soft_stopped");
+              stateRef.current = "meeting_soft_stopped";
+              setIsVisible(true);
+              return;
+            }
             if (projected?.mode === "meeting_summarizing") {
               setSoftCancelInfo(null);
               setMeetingOverlay(null);
+              setMeetingSoftStoppedOverlay(null);
               setSummarizingOverlay(projected);
               setState("meeting_summarizing");
               stateRef.current = "meeting_summarizing";
@@ -555,12 +752,19 @@ const RecordingOverlay: React.FC = () => {
       );
 
       const unlistenReady = await listen("recording-ready", () => {
-        setElapsed(0);
+        const isResumingSoftCancelledSameTake =
+          softCancelledTakeIdRef.current !== null &&
+          softCancelledTakeIdRef.current === activeTakeIdRef.current;
+        if (!isResumingSoftCancelledSameTake) {
+          setElapsed(0);
+        }
         setIsPaused(false);
         setCaptureReady(true);
       });
 
       const unlistenPaused = await listen("recording-paused", () => {
+        targetLevelsRef.current = Array(WAVE_BARS).fill(0);
+        currentLevelsRef.current = Array(WAVE_BARS).fill(0);
         setIsPaused(true);
       });
 
@@ -569,15 +773,14 @@ const RecordingOverlay: React.FC = () => {
       });
 
       const unlistenLevel = await listen<number[]>("mic-level", (event) => {
-        const newLevels = event.payload as number[];
-        // Exponential smoothing across the 16 buckets, then take the first N
-        // bars for the shared waveform.
-        const smoothed = smoothedLevelsRef.current.map((prev, i) => {
-          const target = newLevels[i] || 0;
-          return prev * 0.7 + target * 0.3;
-        });
-        smoothedLevelsRef.current = smoothed;
-        setLevels(smoothed.slice(0, WAVE_BARS));
+        const nextTargets = mapBucketsToSymmetricalTargets(
+          Array.isArray(event.payload) ? event.payload : [],
+        );
+        targetLevelsRef.current = nextTargets;
+        if (prefersReducedMotion()) {
+          currentLevelsRef.current = [...nextTargets];
+          setLevels(nextTargets);
+        }
       });
 
       const unlistenStream = await events.streamTextEvent.listen((event) => {
@@ -671,6 +874,63 @@ const RecordingOverlay: React.FC = () => {
   const isListeningPhase =
     state === "recording" || (state === "streaming" && phase === "listening");
 
+  // Smooth 60fps requestAnimationFrame spring/lerp loop + subtle ±0.6px organic
+  // breath motion while visible & listening (falls back to direct updates under
+  // prefers-reduced-motion: reduce).
+  useEffect(() => {
+    if (!isVisible || !isListeningPhase || isPaused) return;
+    if (prefersReducedMotion()) {
+      const snap = [...targetLevelsRef.current];
+      currentLevelsRef.current = snap;
+      setLevels(snap);
+      return;
+    }
+
+    let rafId = 0;
+    let lastTs = performance.now();
+
+    const step = (now: number) => {
+      const dt = Math.min(0.05, Math.max(0.001, (now - lastTs) / 1000));
+      lastTs = now;
+      if (captureReady) {
+        breathPhaseRef.current =
+          (breathPhaseRef.current + dt * 3.1) % (Math.PI * 200);
+      }
+
+      const targets = targetLevelsRef.current;
+      const currents = currentLevelsRef.current;
+      const bars = waveBarRefs.current;
+      const withBreath = captureReady && !isPaused;
+
+      for (let i = 0; i < WAVE_BARS; i++) {
+        const target = targets[i] ?? 0;
+        const prev = currents[i] ?? 0;
+        const rate = target > prev ? 28 : 11;
+        const alpha = 1 - Math.exp(-rate * dt);
+        const next = prev + (target - prev) * alpha;
+        currents[i] = next;
+
+        const barEl = bars[i];
+        if (barEl) {
+          const h = computeWaveBarHeightPx(
+            next,
+            i,
+            breathPhaseRef.current,
+            withBreath,
+          );
+          barEl.style.height = `${h.toFixed(2)}px`;
+        }
+      }
+
+      rafId = window.requestAnimationFrame(step);
+    };
+
+    rafId = window.requestAnimationFrame(step);
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, [isVisible, isListeningPhase, isPaused, captureReady]);
+
   // Elapsed capture timer ticks only while samples are flowing and not paused.
   useEffect(() => {
     if (!isListeningPhase || !isVisible || !captureReady || isPaused) return;
@@ -727,6 +987,7 @@ const RecordingOverlay: React.FC = () => {
       const meetingId = snap.meeting.meeting_id;
       if (
         snap.meeting.phase === "summarizing" ||
+        snap.meeting.phase === "soft_stopped" ||
         localMeetingDismissedIdRef.current !== meetingId
       ) {
         const projected = projectMeetingOverlay(
@@ -735,6 +996,7 @@ const RecordingOverlay: React.FC = () => {
         );
         if (projected?.mode === "meeting_active") {
           setSoftCancelInfo(null);
+          setMeetingSoftStoppedOverlay(null);
           setSummarizingOverlay(null);
           setMeetingOverlay(projected);
           setState("meeting_active");
@@ -742,9 +1004,20 @@ const RecordingOverlay: React.FC = () => {
           setIsVisible(true);
           return;
         }
+        if (projected?.mode === "meeting_soft_stopped") {
+          setSoftCancelInfo(null);
+          setMeetingOverlay(null);
+          setSummarizingOverlay(null);
+          setMeetingSoftStoppedOverlay(projected);
+          setState("meeting_soft_stopped");
+          stateRef.current = "meeting_soft_stopped";
+          setIsVisible(true);
+          return;
+        }
         if (projected?.mode === "meeting_summarizing") {
           setSoftCancelInfo(null);
           setMeetingOverlay(null);
+          setMeetingSoftStoppedOverlay(null);
           setSummarizingOverlay(projected);
           setState("meeting_summarizing");
           stateRef.current = "meeting_summarizing";
@@ -819,6 +1092,50 @@ const RecordingOverlay: React.FC = () => {
     };
   }, [isVisible, state, softCancelInfo]);
 
+  // Smooth 100% -> 0% countdown bar for auto-stopped meetings after call hangup.
+  useEffect(() => {
+    if (
+      !isVisible ||
+      state !== "meeting_soft_stopped" ||
+      !meetingSoftStoppedOverlay
+    ) {
+      return;
+    }
+
+    const computeNow = () =>
+      computeSoftCancelProgress(
+        meetingSoftStoppedOverlay.stopped_at_ms,
+        meetingSoftStoppedOverlay.expires_at_ms,
+        meetingSoftStoppedOverlay.grace_ms,
+        Date.now() + clockSkewRef.current,
+      );
+
+    setMeetingSoftStopProgress(computeNow());
+
+    const reducedMotion = prefersReducedMotion();
+    let rafId = 0;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const tick = () => {
+      const next = computeNow();
+      setMeetingSoftStopProgress(next);
+      if (!reducedMotion && next > 0) {
+        rafId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    if (reducedMotion) {
+      intervalId = setInterval(tick, 250);
+    } else {
+      rafId = window.requestAnimationFrame(tick);
+    }
+
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isVisible, state, meetingSoftStoppedOverlay]);
+
   // SV-86: Drift-free live MM:SS meeting timer across pause/resume cycles.
   useEffect(() => {
     if (!isVisible || state !== "meeting_active" || !meetingOverlay) return;
@@ -849,9 +1166,20 @@ const RecordingOverlay: React.FC = () => {
   const formatElapsed = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-  const transcribingLabel = modelLoading
-    ? t("overlay.loadingModel")
-    : t("overlay.transcribing");
+  const formatStageEllipsis = (text: string) => text.replace(/\.{3}$/, "…");
+  const listeningLabel = t("overlay.listening", { defaultValue: "Listening" });
+  const transcribingLabel = formatStageEllipsis(
+    modelLoading
+      ? t("overlay.loadingModel", { defaultValue: "Loading model…" })
+      : t("overlay.transcribing", { defaultValue: "Transcribing…" }),
+  );
+  const rawPolishing = t("overlay.polishing", {
+    defaultValue: t("overlay.processing", { defaultValue: "Polishing…" }),
+  });
+  const polishingLabel =
+    rawPolishing === "Processing..." || rawPolishing === "Processing…"
+      ? "Polishing…"
+      : formatStageEllipsis(rawPolishing);
 
   const handleTogglePause = async () => {
     if (pausePendingRef.current) return;
@@ -885,20 +1213,37 @@ const RecordingOverlay: React.FC = () => {
   };
 
   // ---- Shared building blocks (one visual language for every overlay form) ----
+  const reducedMotionNow = prefersReducedMotion();
+  const withBreathNow = captureReady && !isPaused && !reducedMotionNow;
   const waveform = (
     <div
+      data-testid="overlay-waveform"
       className={`swave ${captureReady ? "ready" : "arming"} ${
         captureReady && isPaused ? "paused" : ""
       }`}
     >
-      {levels.map((v, i) => (
-        <i
-          key={i}
-          style={{
-            height: `${Math.max(3, Math.min(18, 3 + Math.pow(v, 0.7) * 15))}px`,
-          }}
-        />
-      ))}
+      {levels.map((v, i) => {
+        const liveVal = reducedMotionNow
+          ? v
+          : (currentLevelsRef.current[i] ?? v);
+        const h = computeWaveBarHeightPx(
+          liveVal,
+          i,
+          breathPhaseRef.current,
+          withBreathNow,
+        );
+        return (
+          <i
+            key={i}
+            ref={(el) => {
+              waveBarRefs.current[i] = el;
+            }}
+            style={{
+              height: `${h.toFixed(2)}px`,
+            }}
+          />
+        );
+      })}
     </div>
   );
 
@@ -1012,19 +1357,26 @@ const RecordingOverlay: React.FC = () => {
     </button>
   );
 
-  // dot (left) | waveform + paused label (center) | timer + pause/resume + done + cancel (right)
-  const listeningRow = (showCancel: boolean) => (
+  // dot (left) | waveform + stage label (center) | timer + pause/resume + done + cancel (right)
+  const listeningRow = (showCancel: boolean, showStageLabel = false) => (
     <div className={`sbase ${captureReady ? "is-capturing" : ""}`}>
       <div className="sbase-l">
         <span className={`sdot ${captureReady ? "ready" : "arming"}`} />
       </div>
       <div className="sbase-mid">
         {waveform}
-        {captureReady && isPaused && (
-          <span className="spaused-label">
-            {t("overlay.paused", { defaultValue: "Paused" })}
-          </span>
-        )}
+        {captureReady &&
+          (isPaused ? (
+            <span data-testid="overlay-stage-label" className="spaused-label">
+              {t("overlay.paused", { defaultValue: "Paused" })}
+            </span>
+          ) : (
+            showStageLabel && (
+              <span data-testid="overlay-stage-label" className="sstage-label">
+                {listeningLabel}
+              </span>
+            )
+          ))}
       </div>
       <div className="sbase-r">
         {captureReady && (
@@ -1050,7 +1402,9 @@ const RecordingOverlay: React.FC = () => {
       <div className="sbase-l">
         <span className="sspinner" />
       </div>
-      <span className="swork-label">{label}</span>
+      <span data-testid="overlay-stage-label" className="swork-label">
+        {label}
+      </span>
       <div className="sbase-r">
         {withPasteRaw && pasteRawBtn}
         {showCancel && cancelBtn}
@@ -1117,13 +1471,11 @@ const RecordingOverlay: React.FC = () => {
           </div>
           {working
             ? workingRow(
-                workKind === "polishing"
-                  ? t("overlay.processing")
-                  : transcribingLabel,
+                workKind === "polishing" ? polishingLabel : transcribingLabel,
                 true,
                 showPasteRaw,
               )
-            : listeningRow(true)}
+            : listeningRow(true, false)}
         </div>
       </div>
     );
@@ -1176,6 +1528,10 @@ const RecordingOverlay: React.FC = () => {
         return t("overlay.noticeMicPermission");
       case "no_mic":
         return t("overlay.noticeNoMic");
+      case "copied_to_clipboard":
+        return t("overlay.noticeCopiedToClipboard", {
+          defaultValue: "Copied — press ⌘V to paste",
+        });
       case "transcription_failed":
       default:
         return t("overlay.noticeTranscriptionFailed");
@@ -1349,12 +1705,54 @@ const RecordingOverlay: React.FC = () => {
     }
   };
 
+  const handleResumeStoppedMeeting = async () => {
+    if (meetingTogglePendingRef.current || meetingStopPendingRef.current) {
+      return;
+    }
+    meetingTogglePendingRef.current = true;
+    setMeetingTogglePending(true);
+    const seqBefore = latestSeqRef.current;
+    const base = meetingSoftStoppedOverlay;
+    try {
+      const nextLive = await resume_meeting_notes();
+      if (nextLive && latestSeqRef.current === seqBefore) {
+        const nowServerMs = Date.now() + clockSkewRef.current;
+        const elapsedMs = Math.max(
+          0,
+          nextLive.elapsed_ms ?? base?.elapsed_ms ?? 0,
+        );
+        setMeetingSoftStoppedOverlay(null);
+        setMeetingOverlay({
+          mode: "meeting_active",
+          meeting_id:
+            nextLive.active_meeting_id ?? base?.meeting_id ?? "active",
+          title: nextLive.title || base?.title || "",
+          paused: false,
+          elapsed_ms: elapsedMs,
+          started_at_ms: nowServerMs - elapsedMs,
+          accumulated_paused_ms: 0,
+          paused_at_ms: null,
+          app_name: nextLive.app_name ?? base?.app_name ?? null,
+        });
+        setState("meeting_active");
+        stateRef.current = "meeting_active";
+        setIsVisible(true);
+      }
+    } catch {
+      // Backend may have already finalized the meeting notes.
+    } finally {
+      meetingTogglePendingRef.current = false;
+      setMeetingTogglePending(false);
+    }
+  };
+
   const handleStopMeeting = async () => {
     if (meetingStopPendingRef.current) return;
     meetingStopPendingRef.current = true;
     setMeetingStopPending(true);
-    const currentMeeting = meetingOverlay;
+    const currentMeeting = meetingOverlay ?? meetingSoftStoppedOverlay;
     setMeetingOverlay(null);
+    setMeetingSoftStoppedOverlay(null);
     setSummarizingOverlay({
       mode: "meeting_summarizing",
       meeting_id: currentMeeting?.meeting_id ?? "summarizing",
@@ -1487,6 +1885,87 @@ const RecordingOverlay: React.FC = () => {
     );
   }
 
+  // ---- Surface B2: Call-End Auto-Stop Pill ("Notetaker stopped · Resume [×]") ----
+  if (state === "meeting_soft_stopped") {
+    const stoppedLabel = t("overlay.meetingStopped", {
+      defaultValue: "Notetaker stopped",
+    });
+    const resumeMeetingLabel = t("overlay.resumeMeeting", {
+      defaultValue: "Resume",
+    });
+    const dismissStoppedLabel = t("overlay.dismissMeetingStopped", {
+      defaultValue: "Save & close",
+    });
+    const progressPercent = Math.round(meetingSoftStopProgress * 100);
+
+    return (
+      <div
+        dir={direction}
+        className={`ov-stage ${position} ov-fade ${isVisible ? "show" : ""}`}
+      >
+        <div
+          data-testid="overlay-meeting-soft-stopped-pill"
+          className="scard compact is-soft-cancelled is-meeting-soft-stopped"
+        >
+          <div className="sundo-row">
+            <div className="sundo-leading">
+              <span className="smeeting-stopped-halo" aria-hidden="true">
+                <span className="smeeting-stopped-dot" />
+              </span>
+              <span className="sundo-label">{stoppedLabel}</span>
+            </div>
+            <div className="sundo-actions">
+              <button
+                type="button"
+                data-testid="overlay-meeting-resume-stopped-btn"
+                className="sundo-btn"
+                disabled={meetingTogglePending || meetingStopPending}
+                aria-label={resumeMeetingLabel}
+                onClick={() => void handleResumeStoppedMeeting()}
+              >
+                {resumeMeetingLabel}
+              </button>
+              <button
+                type="button"
+                data-testid="overlay-meeting-confirm-stop-btn"
+                className="sx sundo-dismiss"
+                disabled={meetingStopPending}
+                aria-label={dismissStoppedLabel}
+                title={dismissStoppedLabel}
+                onClick={() => void handleStopMeeting()}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M4 4 L12 12 M12 4 L4 12"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div
+            role="progressbar"
+            data-testid="overlay-meeting-soft-stop-progress"
+            className="sundo-progress-track"
+            aria-label={stoppedLabel}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+          >
+            <div
+              className="sundo-progress-fill"
+              style={{
+                width: `${(meetingSoftStopProgress * 100).toFixed(2)}%`,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ---- Surface B: SV-86 Unified Active Meeting Pill ----
   if (state === "meeting_active") {
     const meetingPaused = meetingOverlay?.paused ?? false;
@@ -1571,7 +2050,9 @@ const RecordingOverlay: React.FC = () => {
                     />
                   </svg>
                 )}
-                <span>
+                <span
+                  className={meetingPaused ? undefined : "smeeting-sr-only"}
+                >
                   {meetingPaused ? resumeMeetingLabel : pauseMeetingLabel}
                 </span>
               </button>
@@ -1595,7 +2076,7 @@ const RecordingOverlay: React.FC = () => {
                     fill="currentColor"
                   />
                 </svg>
-                <span>{stopMeetingLabel}</span>
+                <span className="smeeting-sr-only">{stopMeetingLabel}</span>
               </button>
 
               <button
@@ -1785,8 +2266,7 @@ const RecordingOverlay: React.FC = () => {
   const working = state === "transcribing" || state === "processing";
   const capturingCard = !working && captureReady;
   const pausedCard = capturingCard && isPaused;
-  const workLabel =
-    state === "processing" ? t("overlay.processing") : transcribingLabel;
+  const workLabel = state === "processing" ? polishingLabel : transcribingLabel;
 
   return (
     <div
@@ -1802,7 +2282,7 @@ const RecordingOverlay: React.FC = () => {
       >
         {working
           ? workingRow(workLabel, true, showPasteRaw)
-          : listeningRow(true)}
+          : listeningRow(true, true)}
       </div>
     </div>
   );

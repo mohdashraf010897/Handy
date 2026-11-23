@@ -29,7 +29,9 @@ use tauri::{AppHandle, Emitter};
 const SAMPLE_RATE: u64 = 16_000;
 const ROLLUP_WINDOW_MS: u64 = 300_000; // 5 minutes
 const RECENT_SEGMENTS_CAP: usize = 40;
-const DETECTOR_POLL_INTERVAL: Duration = Duration::from_millis(2_500);
+const DETECTOR_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(1_000);
+const DETECTOR_ACTIVE_POLL_INTERVAL: Duration = Duration::from_millis(750);
+const CALL_END_NEGATIVE_POLLS_REQUIRED: u8 = 3;
 const SILENCE_RMS_THRESHOLD: f32 = 0.0025;
 
 pub trait ChunkTranscriber: Send + Sync {
@@ -63,6 +65,9 @@ impl ChunkTranscriber for TranscriptionManagerChunkTranscriber {
 pub trait CallDetectorBackend: Send + Sync {
     fn poll_detected_call(&self) -> Result<Option<DetectedCallInfo>, String>;
     fn dismiss_call(&self, call_id: Option<&str>) -> Result<(), String>;
+    fn active_call_app(&self) -> Option<crate::meeting::macos_bridge::RunningCallApp> {
+        None
+    }
 }
 
 #[derive(Debug, Default)]
@@ -104,6 +109,10 @@ impl CallDetectorBackend for PlatformCallDetector {
         }
         Ok(())
     }
+
+    fn active_call_app(&self) -> Option<crate::meeting::macos_bridge::RunningCallApp> {
+        crate::meeting::macos_bridge::detect_running_call_app()
+    }
 }
 
 #[derive(Default)]
@@ -126,11 +135,24 @@ struct ActiveMeeting {
     worker: Option<JoinHandle<()>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SoftStopDeadline {
+    stopped_at_ms: u64,
+    expires_at_ms: u64,
+    grace_ms: u64,
+    epoch: u64,
+}
+
 #[derive(Default)]
 struct MeetingClock {
     started_at_ms: u64,
     paused_at_ms: Option<u64>,
     accumulated_paused_ms: u64,
+    soft_stop: Option<SoftStopDeadline>,
+    soft_stop_epoch: u64,
+    watched_call_bundle_id: Option<String>,
+    call_end_negative_polls: u8,
+    auto_stop_suppressed_until_rejoin: bool,
 }
 
 type EchoCancellerFactory = dyn Fn() -> Box<dyn lowyap_ports::EchoCanceller> + Send + Sync;
@@ -335,6 +357,16 @@ impl MeetingSessionManager {
         title: Option<String>,
         template: Option<MeetingTemplate>,
     ) -> Result<MeetingLiveState, String> {
+        let calendar_ctx = crate::meeting::macos_bridge::active_calendar_meeting();
+        self.start_meeting_with_calendar(title, template, calendar_ctx)
+    }
+
+    pub fn start_meeting_with_calendar(
+        &self,
+        title: Option<String>,
+        template: Option<MeetingTemplate>,
+        calendar_ctx: Option<crate::meeting::macos_bridge::ActiveCalendarMeeting>,
+    ) -> Result<MeetingLiveState, String> {
         let mut active_guard = self
             .inner
             .active_meeting
@@ -345,20 +377,52 @@ impl MeetingSessionManager {
         }
 
         let capture = self.inner.capture_backend.start_capture()?;
-        let resolved_template = template.unwrap_or(MeetingTemplate::General);
-        let resolved_title = normalize_title(title);
+        let user_supplied_title = title
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+        let (calendar_title, expected_attendees) = match calendar_ctx {
+            Some(ctx) => (
+                Some(ctx.title.trim().to_owned()).filter(|s| !s.is_empty()),
+                ctx.attendees,
+            ),
+            None => (None, Vec::new()),
+        };
+        let resolved_template = template.unwrap_or_else(|| {
+            if expected_attendees.len() == 1 {
+                MeetingTemplate::OneOnOne
+            } else {
+                MeetingTemplate::General
+            }
+        });
+        let resolved_title = normalize_title(user_supplied_title.or(calendar_title));
         let meeting_id = self.next_meeting_id();
         let started_at = crate::session_bus::now_ms();
         let started_at_ms = i64::try_from(started_at).unwrap_or(i64::MAX);
 
         let capture_mode = capture.capture_mode();
         let output_route = capture.output_route();
-        let app_name = self.inner.live_state.lock().ok().and_then(|state| {
-            state
-                .detected_call
-                .as_ref()
-                .map(|call| call.app_name.clone())
-        });
+        let detected_from_state = self
+            .inner
+            .live_state
+            .lock()
+            .ok()
+            .and_then(|state| state.detected_call.clone());
+        let active_app_probe = if detected_from_state.is_none() {
+            self.inner.call_detector.active_call_app()
+        } else {
+            None
+        };
+        let app_name = detected_from_state
+            .as_ref()
+            .map(|call| call.app_name.clone())
+            .or_else(|| active_app_probe.as_ref().map(|app| app.app_name.clone()));
+        let watched_call_bundle_id = detected_from_state
+            .as_ref()
+            .map(|call| call.app_bundle_id.clone())
+            .filter(|b| !b.trim().is_empty())
+            .or_else(|| active_app_probe.map(|app| app.bundle_id));
 
         self.inner.store.create_meeting(
             &meeting_id,
@@ -396,6 +460,7 @@ impl MeetingSessionManager {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = MeetingClock {
                 started_at_ms: started_at,
+                watched_call_bundle_id,
                 ..MeetingClock::default()
             };
         }
@@ -413,6 +478,7 @@ impl MeetingSessionManager {
                 worker_stop,
                 worker_pause,
                 started_at_ms,
+                expected_attendees,
             );
         });
 
@@ -449,11 +515,14 @@ impl MeetingSessionManager {
                 return Err("Meeting is not currently recording.".to_string());
             }
             live.status = MeetingStatus::Paused;
-            self.inner
+            let mut clock = self
+                .inner
                 .clock
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .paused_at_ms = Some(crate::session_bus::now_ms());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            clock.paused_at_ms = Some(crate::session_bus::now_ms());
+            clock.soft_stop = None;
+            clock.call_end_negative_polls = 0;
             active.paused_flag.store(true, Ordering::Release);
         }
 
@@ -463,7 +532,7 @@ impl MeetingSessionManager {
     }
 
     pub fn resume_meeting(&self) -> Result<MeetingLiveState, String> {
-        let (meeting_id, marker_elapsed) = {
+        let (meeting_id, marker_elapsed, was_soft_stopped) = {
             let active = self
                 .inner
                 .active_meeting
@@ -486,6 +555,14 @@ impl MeetingSessionManager {
                 .clock
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let was_soft_stopped = clock.soft_stop.take().is_some();
+            if was_soft_stopped {
+                // Suppress repeat auto-stop after an explicit post-hangup Resume
+                // unless the user later joins a live call session again.
+                clock.auto_stop_suppressed_until_rejoin = true;
+                clock.watched_call_bundle_id = None;
+            }
+            clock.call_end_negative_polls = 0;
             if let Some(paused_at) = clock.paused_at_ms.take() {
                 clock.accumulated_paused_ms = clock
                     .accumulated_paused_ms
@@ -493,24 +570,165 @@ impl MeetingSessionManager {
             }
             live.status = MeetingStatus::Recording;
             active.paused_flag.store(false, Ordering::Release);
-            (active.meeting_id.clone(), live.elapsed_ms)
+            (active.meeting_id.clone(), live.elapsed_ms, was_soft_stopped)
         };
 
-        let marker_text = format!("[Paused {}]", format_mm_ss(marker_elapsed));
-        if let Ok(segment) = self.inner.store.append_segment(
-            &meeting_id,
-            SpeakerChannel::Others,
-            marker_elapsed,
-            marker_elapsed,
-            &marker_text,
-            None,
-        ) {
-            push_recent_segment(&self.inner, segment);
+        if !was_soft_stopped {
+            let marker_text = format!("[Paused {}]", format_mm_ss(marker_elapsed));
+            if let Ok(segment) = self.inner.store.append_segment(
+                &meeting_id,
+                SpeakerChannel::Others,
+                marker_elapsed,
+                marker_elapsed,
+                &marker_text,
+                None,
+            ) {
+                push_recent_segment(&self.inner, segment);
+            }
         }
 
         let state = self.get_live_state();
         emit_live_state(&self.inner, &state);
         Ok(state)
+    }
+
+    /// Transitions an active recording into the Wispr-style post-hangup grace
+    /// window (`MeetingPhase::SoftStopped`), freezing capture immediately and
+    /// scheduling auto-finalization after `grace_ms` unless resumed or stopped.
+    pub(crate) fn soft_stop_on_call_end(&self, grace_ms: u64) -> Option<(String, u64)> {
+        let now = crate::session_bus::now_ms();
+        let (meeting_id, epoch) = {
+            let active = self.inner.active_meeting.lock().ok()?;
+            let active = active
+                .as_ref()
+                .filter(|active| !active.stop_flag.load(Ordering::Acquire))?;
+            let mut live = self.inner.live_state.lock().ok()?;
+            if live.status != MeetingStatus::Recording {
+                return None;
+            }
+            live.status = MeetingStatus::Paused;
+            let mut clock = self
+                .inner
+                .clock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            clock.soft_stop_epoch = clock.soft_stop_epoch.saturating_add(1);
+            let epoch = clock.soft_stop_epoch;
+            clock.paused_at_ms = Some(now);
+            clock.call_end_negative_polls = 0;
+            clock.soft_stop = Some(SoftStopDeadline {
+                stopped_at_ms: now,
+                expires_at_ms: now.saturating_add(grace_ms),
+                grace_ms,
+                epoch,
+            });
+            active.paused_flag.store(true, Ordering::Release);
+            (active.meeting_id.clone(), epoch)
+        };
+
+        let state = self.get_live_state();
+        emit_live_state(&self.inner, &state);
+
+        if grace_ms > 0 {
+            let manager = self.clone();
+            let target_meeting_id = meeting_id.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(grace_ms));
+                manager.expire_soft_stop_if_matching(&target_meeting_id, epoch);
+            });
+        }
+
+        Some((meeting_id, epoch))
+    }
+
+    pub(crate) fn expire_soft_stop_if_matching(
+        &self,
+        expected_meeting_id: &str,
+        expected_epoch: u64,
+    ) -> bool {
+        let should_finalize = {
+            let live = match self.inner.live_state.lock() {
+                Ok(guard) => guard,
+                Err(_) => return false,
+            };
+            if live.status != MeetingStatus::Paused
+                || live.active_meeting_id.as_deref() != Some(expected_meeting_id)
+            {
+                return false;
+            }
+            let clock = self
+                .inner
+                .clock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            clock
+                .soft_stop
+                .as_ref()
+                .is_some_and(|deadline| deadline.epoch == expected_epoch)
+        };
+
+        if should_finalize {
+            debug!(
+                "call-end grace window expired for {} (epoch={}); auto-finalizing notes",
+                expected_meeting_id, expected_epoch
+            );
+            self.stop_meeting().is_ok()
+        } else {
+            false
+        }
+    }
+
+    /// Evaluates one poll tick of the active-meeting call watcher.
+    /// Returns `true` if the meeting transitioned into `SoftStopped` on this tick.
+    pub(crate) fn poll_active_call_watcher(&self) -> bool {
+        let should_trigger = {
+            let mut live = match self.inner.live_state.lock() {
+                Ok(guard) => guard,
+                Err(_) => return false,
+            };
+            if live.status != MeetingStatus::Recording || !live.auto_detect_enabled {
+                return false;
+            }
+            let running_app = self.inner.call_detector.active_call_app();
+            let mut clock = self
+                .inner
+                .clock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+            match running_app {
+                Some(app) => {
+                    clock.call_end_negative_polls = 0;
+                    clock.auto_stop_suppressed_until_rejoin = false;
+                    if clock.watched_call_bundle_id.is_none() {
+                        clock.watched_call_bundle_id = Some(app.bundle_id);
+                    }
+                    if live.app_name.is_none() {
+                        live.app_name = Some(app.app_name);
+                    }
+                    false
+                }
+                None => {
+                    if clock.watched_call_bundle_id.is_some()
+                        && !clock.auto_stop_suppressed_until_rejoin
+                    {
+                        clock.call_end_negative_polls =
+                            clock.call_end_negative_polls.saturating_add(1);
+                        clock.call_end_negative_polls >= CALL_END_NEGATIVE_POLLS_REQUIRED
+                    } else {
+                        clock.call_end_negative_polls = 0;
+                        false
+                    }
+                }
+            }
+        };
+
+        if should_trigger {
+            self.soft_stop_on_call_end(lowyap_ports::DEFAULT_MEETING_AUTO_STOP_GRACE_MS)
+                .is_some()
+        } else {
+            false
+        }
     }
 
     pub fn update_live_rough_notes(&self, rough_notes: String) -> Result<(), String> {
@@ -547,6 +765,10 @@ impl MeetingSessionManager {
 
         if let Ok(mut live) = self.inner.live_state.lock() {
             live.status = MeetingStatus::Summarizing;
+            if let Ok(mut clock) = self.inner.clock.lock() {
+                clock.soft_stop = None;
+                clock.call_end_negative_polls = 0;
+            }
         }
         emit_live_state(&self.inner, &self.get_live_state());
 
@@ -583,7 +805,13 @@ impl MeetingSessionManager {
 
             let fresh_detail = self.inner.store.get_meeting_detail(&meeting_id)?;
             if lowyap_summarize::is_placeholder_meeting_title(&fresh_detail.summary.title) {
-                let rollup_strings = to_rollup_strings(&fresh_detail.rollups);
+                let mut rollup_strings = to_rollup_strings(&fresh_detail.rollups);
+                if rollup_strings.is_empty()
+                    && summary.summary_source != "local_extractive"
+                    && !summary.text.trim().is_empty()
+                {
+                    rollup_strings.push(summary.text.clone());
+                }
                 let port_segments = to_port_segments(&fresh_detail.segments);
                 let backends = build_production_completion_backends(self.inner.app_handle.as_ref());
                 if let Some(generated_title) = lowyap_summarize::generate_meeting_title(
@@ -592,11 +820,26 @@ impl MeetingSessionManager {
                     &port_segments,
                     backends.first().map(|b| b.as_ref()),
                 ) {
-                    let _ = self.inner.store.update_placeholder_title_if_unchanged(
+                    let placeholder_title = fresh_detail.summary.title.clone();
+                    let updated = self.inner.store.update_placeholder_title_if_unchanged(
                         &meeting_id,
-                        &fresh_detail.summary.title,
+                        &placeholder_title,
                         &generated_title,
                     )?;
+                    if updated {
+                        let old_h1 = format!("# {}", placeholder_title.trim());
+                        let trimmed_md = summary.text.trim_start();
+                        if let Some(rest) = trimmed_md.strip_prefix(&old_h1) {
+                            if rest.is_empty() || rest.starts_with('\n') || rest.starts_with('\r') {
+                                let synced_md = format!("# {generated_title}{rest}");
+                                let _ = self.inner.store.update_expanded_notes(
+                                    &meeting_id,
+                                    &synced_md,
+                                    &summary.summary_source,
+                                );
+                            }
+                        }
+                    }
                 }
             }
 
@@ -780,11 +1023,24 @@ impl MeetingSessionManager {
             return;
         }
 
+        let manager = self.clone();
         let inner = Arc::clone(&self.inner);
         let handle = thread::spawn(move || {
             while !inner.detector_stop.load(Ordering::Acquire) {
+                let status = inner
+                    .live_state
+                    .lock()
+                    .map(|g| g.status)
+                    .unwrap_or(MeetingStatus::Idle);
+
+                if status == MeetingStatus::Recording {
+                    let _ = manager.poll_active_call_watcher();
+                    thread::sleep(DETECTOR_ACTIVE_POLL_INTERVAL);
+                    continue;
+                }
+
                 if should_skip_detection(&inner) {
-                    thread::sleep(DETECTOR_POLL_INTERVAL);
+                    thread::sleep(DETECTOR_IDLE_POLL_INTERVAL);
                     continue;
                 }
 
@@ -816,7 +1072,7 @@ impl MeetingSessionManager {
                     }
                 }
 
-                thread::sleep(DETECTOR_POLL_INTERVAL);
+                thread::sleep(DETECTOR_IDLE_POLL_INTERVAL);
             }
         });
 
@@ -856,12 +1112,15 @@ fn run_capture_worker(
     stop_flag: Arc<AtomicBool>,
     paused_flag: Arc<AtomicBool>,
     started_at_ms: i64,
+    expected_attendees: Vec<String>,
 ) {
     let capture_mode = capture.capture_mode();
     let mut echo_canceller = (inner.echo_canceller_factory)();
     let mut segmenter = (inner.segmenter_factory)(inner.app_handle.as_ref());
     let mut diarizer = (inner.diarizer_factory)(capture_mode);
-    let mut name_resolver = lowyap_diarize::NameCueResolver::new();
+    let mut name_resolver =
+        lowyap_diarize::NameCueResolver::with_expected_attendees(expected_attendees);
+    let mut echo_dedup = EchoDeduplicator::default();
     let mut me_only_enroll_buf: Vec<f32> = Vec::with_capacity(8_000);
     let mut me_samples_seen: u64 = 0;
     let mut others_samples_seen: u64 = 0;
@@ -897,8 +1156,11 @@ fn run_capture_worker(
                         &inner,
                         &meeting_id,
                         &span,
+                        capture_mode,
+                        chunk.output_route,
                         diarizer.as_mut(),
                         &mut name_resolver,
+                        &mut echo_dedup,
                     );
                 }
                 echo_canceller.reset();
@@ -922,11 +1184,13 @@ fn run_capture_worker(
         feed_dual_chunk(
             &inner,
             &meeting_id,
+            capture_mode,
             &chunk,
             echo_canceller.as_mut(),
             segmenter.as_mut(),
             diarizer.as_mut(),
             &mut name_resolver,
+            &mut echo_dedup,
             &mut me_only_enroll_buf,
             &mut me_samples_seen,
             &mut others_samples_seen,
@@ -955,11 +1219,13 @@ fn run_capture_worker(
             feed_dual_chunk(
                 &inner,
                 &meeting_id,
+                capture_mode,
                 &tail_chunk,
                 echo_canceller.as_mut(),
                 segmenter.as_mut(),
                 diarizer.as_mut(),
                 &mut name_resolver,
+                &mut echo_dedup,
                 &mut me_only_enroll_buf,
                 &mut me_samples_seen,
                 &mut others_samples_seen,
@@ -972,13 +1238,17 @@ fn run_capture_worker(
     }
     me_only_enroll_buf.clear();
 
+    let final_route = capture.output_route();
     for span in segmenter.flush() {
         persist_utterance_span(
             &inner,
             &meeting_id,
             &span,
+            capture_mode,
+            final_route,
             diarizer.as_mut(),
             &mut name_resolver,
+            &mut echo_dedup,
         );
     }
 
@@ -1049,19 +1319,49 @@ fn emit_due_rollups(
 fn feed_dual_chunk(
     inner: &MeetingSessionManagerInner,
     meeting_id: &str,
+    capture_mode: AudioCaptureMode,
     chunk: &crate::meeting::types::DualPcmChunk,
     echo_canceller: &mut dyn lowyap_ports::EchoCanceller,
     segmenter: &mut dyn lowyap_ports::UtteranceSegmenter,
     diarizer: &mut dyn lowyap_ports::SpeakerDiarizer,
     name_resolver: &mut lowyap_diarize::NameCueResolver,
+    echo_dedup: &mut EchoDeduplicator,
     me_only_enroll_buf: &mut Vec<f32>,
     me_samples_seen: &mut u64,
     others_samples_seen: &mut u64,
 ) {
     let port_route: lowyap_ports::OutputRouteKind = chunk.output_route.into();
     let others_rms = rms_energy(&chunk.others_16k);
-    if !chunk.me_16k.is_empty() {
-        let cleaned_me = echo_canceller.process_16k(&chunk.me_16k, &chunk.others_16k, port_route);
+    let cleaned_me = if !chunk.me_16k.is_empty() {
+        Some(echo_canceller.process_16k(&chunk.me_16k, &chunk.others_16k, port_route))
+    } else {
+        None
+    };
+
+    // Advance `Others` first on each dual chunk so overlapping remote utterances
+    // are visible to `EchoDeduplicator` immediately when a `Me` bleed span closes.
+    if !chunk.others_16k.is_empty() {
+        let start_ms = samples_to_ms(*others_samples_seen);
+        *others_samples_seen = others_samples_seen.saturating_add(chunk.others_16k.len() as u64);
+        for span in segmenter.push_chunk(
+            lowyap_ports::SpeakerChannel::Others,
+            &chunk.others_16k,
+            start_ms,
+        ) {
+            persist_utterance_span(
+                inner,
+                meeting_id,
+                &span,
+                capture_mode,
+                chunk.output_route,
+                diarizer,
+                name_resolver,
+                echo_dedup,
+            );
+        }
+    }
+
+    if let Some(cleaned_me) = cleaned_me {
         let me_rms = rms_energy(&cleaned_me);
         if others_rms < 0.004 && me_rms >= 0.012 {
             me_only_enroll_buf.extend_from_slice(&cleaned_me);
@@ -1078,29 +1378,157 @@ fn feed_dual_chunk(
         let start_ms = samples_to_ms(*me_samples_seen);
         *me_samples_seen = me_samples_seen.saturating_add(cleaned_me.len() as u64);
         for span in segmenter.push_chunk(lowyap_ports::SpeakerChannel::Me, &cleaned_me, start_ms) {
-            persist_utterance_span(inner, meeting_id, &span, diarizer, name_resolver);
-        }
-    }
-
-    if !chunk.others_16k.is_empty() {
-        let start_ms = samples_to_ms(*others_samples_seen);
-        *others_samples_seen = others_samples_seen.saturating_add(chunk.others_16k.len() as u64);
-        for span in segmenter.push_chunk(
-            lowyap_ports::SpeakerChannel::Others,
-            &chunk.others_16k,
-            start_ms,
-        ) {
-            persist_utterance_span(inner, meeting_id, &span, diarizer, name_resolver);
+            persist_utterance_span(
+                inner,
+                meeting_id,
+                &span,
+                capture_mode,
+                chunk.output_route,
+                diarizer,
+                name_resolver,
+                echo_dedup,
+            );
         }
     }
 }
 
+#[derive(Debug, Clone)]
+struct RecentDedupeEntry {
+    segment_id: Option<i64>,
+    start_ms: u64,
+    end_ms: u64,
+    tokens: Vec<String>,
+}
+
+/// Cross-channel transcript deduplicator that catches residual loudspeaker bleed
+/// when room reflections or CoreAudio route delays slip past linear/nonlinear AEC.
+#[derive(Debug, Default)]
+struct EchoDeduplicator {
+    recent_others: Vec<RecentDedupeEntry>,
+    recent_me: Vec<RecentDedupeEntry>,
+}
+
+impl EchoDeduplicator {
+    const WINDOW_MS: u64 = 18_000;
+    const OVERLAP_SLACK_MS: u64 = 1_800;
+
+    fn normalize_tokens(text: &str) -> Vec<String> {
+        let roman = lowyap_flow::hindustani_to_roman_hinglish(text);
+        roman
+            .split(|c: char| !c.is_alphanumeric())
+            .map(|tok| tok.trim().to_ascii_lowercase())
+            .filter(|tok| tok.chars().count() >= 2)
+            .collect()
+    }
+
+    fn windows_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
+        let expanded_b_start = b_start.saturating_sub(Self::OVERLAP_SLACK_MS);
+        let expanded_b_end = b_end.saturating_add(Self::OVERLAP_SLACK_MS);
+        a_start <= expanded_b_end && a_end >= expanded_b_start
+    }
+
+    /// Fraction of `candidate_me` tokens explained by `others` tokens.
+    fn me_containment_in_others(me_tokens: &[String], others_tokens: &[String]) -> f32 {
+        if me_tokens.is_empty() || others_tokens.is_empty() {
+            return 0.0;
+        }
+        let matched = me_tokens
+            .iter()
+            .filter(|mt| {
+                others_tokens.iter().any(|ot| {
+                    ot == *mt
+                        || (mt.len() >= 4
+                            && ot.len() >= 4
+                            && lowyap_flow::is_accent_phonetic_match(mt, ot))
+                })
+            })
+            .count();
+        matched as f32 / me_tokens.len() as f32
+    }
+
+    fn is_bleed_match(me_tokens: &[String], others_tokens: &[String]) -> bool {
+        let containment = Self::me_containment_in_others(me_tokens, others_tokens);
+        if me_tokens.len() == 1 {
+            me_tokens[0].len() >= 5 && containment >= 1.0
+        } else {
+            containment >= 0.65
+        }
+    }
+
+    fn prune(&mut self, now_end_ms: u64) {
+        let min_keep = now_end_ms.saturating_sub(Self::WINDOW_MS);
+        self.recent_others.retain(|e| e.end_ms >= min_keep);
+        self.recent_me.retain(|e| e.end_ms >= min_keep);
+    }
+
+    fn should_drop_me(&mut self, start_ms: u64, end_ms: u64, text: &str) -> bool {
+        self.prune(end_ms);
+        let me_tokens = Self::normalize_tokens(text);
+        if me_tokens.is_empty() {
+            return false;
+        }
+        self.recent_others.iter().any(|other| {
+            Self::windows_overlap(start_ms, end_ms, other.start_ms, other.end_ms)
+                && Self::is_bleed_match(&me_tokens, &other.tokens)
+        })
+    }
+
+    fn record_me(&mut self, segment_id: i64, start_ms: u64, end_ms: u64, text: &str) {
+        let tokens = Self::normalize_tokens(text);
+        if !tokens.is_empty() {
+            self.recent_me.push(RecentDedupeEntry {
+                segment_id: Some(segment_id),
+                start_ms,
+                end_ms,
+                tokens,
+            });
+        }
+    }
+
+    /// Records a newly completed `Others` utterance and returns IDs of any
+    /// earlier `Me` fragments that were actually echo-bleed subsets of it.
+    fn record_others_and_collect_bleed_me_ids(
+        &mut self,
+        start_ms: u64,
+        end_ms: u64,
+        text: &str,
+    ) -> Vec<i64> {
+        self.prune(end_ms);
+        let others_tokens = Self::normalize_tokens(text);
+        if others_tokens.is_empty() {
+            return Vec::new();
+        }
+        let mut stale_ids = Vec::new();
+        self.recent_me.retain(|me| {
+            let is_bleed = Self::windows_overlap(me.start_ms, me.end_ms, start_ms, end_ms)
+                && Self::is_bleed_match(&me.tokens, &others_tokens);
+            if is_bleed {
+                if let Some(id) = me.segment_id {
+                    stale_ids.push(id);
+                }
+            }
+            !is_bleed
+        });
+        self.recent_others.push(RecentDedupeEntry {
+            segment_id: None,
+            start_ms,
+            end_ms,
+            tokens: others_tokens,
+        });
+        stale_ids
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn persist_utterance_span(
     inner: &MeetingSessionManagerInner,
     meeting_id: &str,
     span: &lowyap_ports::UtteranceSpan,
+    capture_mode: AudioCaptureMode,
+    output_route: OutputRouteKind,
     diarizer: &mut dyn lowyap_ports::SpeakerDiarizer,
     name_resolver: &mut lowyap_diarize::NameCueResolver,
+    echo_dedup: &mut EchoDeduplicator,
 ) {
     if span.samples_16k.is_empty() || rms_energy(&span.samples_16k) < SILENCE_RMS_THRESHOLD {
         return;
@@ -1113,12 +1541,33 @@ fn persist_utterance_span(
             return;
         }
     };
-    let trimmed = text.trim();
+    let normalized = if let Some(app) = inner.app_handle.as_ref() {
+        let app_settings = crate::settings::get_settings(app);
+        let script_pref = crate::flow::multilingual::active_hindustani_script(app);
+        normalize_meeting_segment_script(text.trim(), &app_settings.spoken_languages, script_pref)
+    } else {
+        text.trim().to_owned()
+    };
+    let trimmed = normalized.trim();
     if trimmed.is_empty() {
         return;
     }
 
+    let dedup_active =
+        capture_mode == AudioCaptureMode::DualStream && output_route != OutputRouteKind::Headphones;
+    if dedup_active
+        && span.channel == lowyap_ports::SpeakerChannel::Me
+        && echo_dedup.should_drop_me(span.start_ms, span.end_ms, trimmed)
+    {
+        debug!(
+            "suppressed loudspeaker echo-bleed duplicate on Me ({}..{} ms): {:?}",
+            span.start_ms, span.end_ms, trimmed
+        );
+        return;
+    }
+
     let identity = diarizer.identify(span);
+    let prev_remote_count = name_resolver.remote_speaker_count();
     let was_unbound = name_resolver.bound_name(&identity.speaker_id).is_none();
     name_resolver.observe_transcript_turn(
         identity.channel,
@@ -1128,6 +1577,33 @@ fn persist_utterance_span(
         trimmed,
     );
     let newly_bound = was_unbound && name_resolver.bound_name(&identity.speaker_id).is_some();
+    let sole_hint_revoked = prev_remote_count == 1 && name_resolver.remote_speaker_count() == 2;
+    if sole_hint_revoked {
+        let mut to_reset: Vec<(String, String)> = Vec::new();
+        if let Ok(mut live) = inner.live_state.lock() {
+            for existing in &mut live.recent_segments {
+                if let Some(sid) = existing.speaker_id.as_deref() {
+                    if sid != "me" && name_resolver.bound_name(sid).is_none() {
+                        let clean_default = existing
+                            .speaker_label
+                            .as_deref()
+                            .and_then(|lbl| lbl.split(" (").next())
+                            .unwrap_or("Speaker 1")
+                            .to_owned();
+                        existing.speaker_label = Some(clean_default.clone());
+                        if !to_reset.iter().any(|(seen, _)| seen == sid) {
+                            to_reset.push((sid.to_owned(), clean_default));
+                        }
+                    }
+                }
+            }
+        }
+        for (sid, clean_default) in to_reset {
+            let _ = inner
+                .store
+                .backfill_speaker_label(meeting_id, &sid, &clean_default);
+        }
+    }
     let resolved_label =
         name_resolver.display_label_for(&identity.speaker_id, &identity.display_label);
     let speaker = if identity.speaker_id == "me" {
@@ -1162,7 +1638,32 @@ fn persist_utterance_span(
         Some(&identity.speaker_id),
         Some(&resolved_label),
     ) {
-        Ok(segment) => push_recent_segment(inner, segment),
+        Ok(segment) => {
+            if dedup_active {
+                match speaker {
+                    SpeakerChannel::Me => {
+                        echo_dedup.record_me(segment.id, span.start_ms, span.end_ms, trimmed);
+                    }
+                    SpeakerChannel::Others => {
+                        let bleed_ids = echo_dedup.record_others_and_collect_bleed_me_ids(
+                            span.start_ms,
+                            span.end_ms,
+                            trimmed,
+                        );
+                        if !bleed_ids.is_empty() {
+                            for id in &bleed_ids {
+                                let _ = inner.store.delete_segment(meeting_id, *id);
+                            }
+                            if let Ok(mut live) = inner.live_state.lock() {
+                                live.recent_segments
+                                    .retain(|seg| !bleed_ids.contains(&seg.id));
+                            }
+                        }
+                    }
+                }
+            }
+            push_recent_segment(inner, segment);
+        }
         Err(err) => warn!("failed to append transcript segment: {err}"),
     }
 }
@@ -1213,15 +1714,31 @@ fn sync_session_bus(inner: &MeetingSessionManagerInner) {
                 app_name: live.app_name.clone(),
                 capture_mode,
             },
-            MeetingStatus::Paused => MeetingPhase::Paused {
-                meeting_id: live.active_meeting_id.clone()?,
-                title: live.title.clone(),
-                started_at_ms: clock.started_at_ms,
-                paused_at_ms: clock.paused_at_ms?,
-                accumulated_paused_ms: clock.accumulated_paused_ms,
-                app_name: live.app_name.clone(),
-                capture_mode,
-            },
+            MeetingStatus::Paused => {
+                if let Some(soft_stop) = clock.soft_stop.as_ref() {
+                    MeetingPhase::SoftStopped {
+                        meeting_id: live.active_meeting_id.clone()?,
+                        title: live.title.clone(),
+                        started_at_ms: clock.started_at_ms,
+                        stopped_at_ms: soft_stop.stopped_at_ms,
+                        expires_at_ms: soft_stop.expires_at_ms,
+                        grace_ms: soft_stop.grace_ms,
+                        accumulated_paused_ms: clock.accumulated_paused_ms,
+                        app_name: live.app_name.clone(),
+                        capture_mode,
+                    }
+                } else {
+                    MeetingPhase::Paused {
+                        meeting_id: live.active_meeting_id.clone()?,
+                        title: live.title.clone(),
+                        started_at_ms: clock.started_at_ms,
+                        paused_at_ms: clock.paused_at_ms?,
+                        accumulated_paused_ms: clock.accumulated_paused_ms,
+                        app_name: live.app_name.clone(),
+                        capture_mode,
+                    }
+                }
+            }
             MeetingStatus::Summarizing => MeetingPhase::Summarizing {
                 meeting_id: live.active_meeting_id.clone()?,
                 title: live.title.clone(),
@@ -1279,6 +1796,39 @@ fn format_mm_ss(ms: u64) -> String {
     let minutes = total_sec / 60;
     let seconds = total_sec % 60;
     format!("{minutes:02}:{seconds:02}")
+}
+
+/// Ensures single-script Roman Hinglish + English consistency in bilingual
+/// `en` + `ur`/`hi` meetings when `script_pref` is `Auto` or `RomanHinglish`
+/// (unless the user explicitly selected `UrduPersoArabic`, `Devanagari`, or `"ar"`).
+pub(crate) fn normalize_meeting_segment_script(
+    text: &str,
+    spoken_languages: &[String],
+    script_pref: HindustaniScript,
+) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let has_ar = spoken_languages
+        .iter()
+        .any(|l| l.eq_ignore_ascii_case("ar"));
+    if has_ar {
+        return lowyap_flow::normalize_script_output(text, spoken_languages, script_pref.into());
+    }
+    let has_en = spoken_languages
+        .iter()
+        .any(|l| l.eq_ignore_ascii_case("en"));
+    let has_hindustani = spoken_languages
+        .iter()
+        .any(|l| l.eq_ignore_ascii_case("ur") || l.eq_ignore_ascii_case("hi"));
+
+    match script_pref {
+        HindustaniScript::RomanHinglish => lowyap_flow::hindustani_to_roman_hinglish(text),
+        HindustaniScript::Auto if has_en && has_hindustani => {
+            lowyap_flow::hindustani_to_roman_hinglish(text)
+        }
+        _ => lowyap_flow::normalize_script_output(text, spoken_languages, script_pref.into()),
+    }
 }
 
 #[cfg(test)]
@@ -1945,5 +2495,249 @@ mod tests {
             .expect("rough notes");
         let detail_custom = manager_custom.stop_meeting().expect("stop custom");
         assert_eq!(detail_custom.summary.title, "Architecture Deep Dive");
+    }
+
+    #[test]
+    fn start_meeting_with_calendar_auto_titles_one_on_one_and_attributes_attendee_roster() {
+        let backend = Arc::new(MockBackend::new(
+            AudioCaptureMode::DualStream,
+            OutputRouteKind::Headphones,
+        ));
+        let transcriber: Arc<dyn ChunkTranscriber> = Arc::new(ScriptedQueueTranscriber::new(vec![
+            "Yeah the onboarding conversion metrics jumped twelve percent.",
+        ]));
+        let dir = tempdir().expect("tempdir");
+        let store = MeetingStore::open_in_path(dir.path().join("meetings.db")).expect("store");
+        let manager = MeetingSessionManager::new_for_tests_with_production_dsp(
+            store,
+            backend.clone(),
+            transcriber,
+            Arc::new(NoopCallDetector),
+        );
+
+        let calendar_ctx = crate::meeting::macos_bridge::ActiveCalendarMeeting {
+            title: "1:1: Product & Growth".to_string(),
+            attendees: vec!["Sarah Chen".to_string()],
+        };
+
+        let live = manager
+            .start_meeting_with_calendar(None, None, Some(calendar_ctx))
+            .expect("start with calendar");
+        assert_eq!(live.title, "1:1: Product & Growth");
+        assert_eq!(live.template, MeetingTemplate::OneOnOne);
+        let meeting_id = live.active_meeting_id.expect("meeting id");
+
+        let mut others_pcm = synth_harmonic_voice(1_200, 195.0, 0.38);
+        others_pcm.extend(vec![0.0; 750 * 16]);
+        backend.push_chunk(DualPcmChunk {
+            me_16k: vec![0.0; others_pcm.len()],
+            others_16k: others_pcm,
+            output_route: OutputRouteKind::Headphones,
+        });
+
+        wait_until(3_500, || {
+            manager
+                .get_meeting_detail(&meeting_id)
+                .map(|detail| !detail.segments.is_empty())
+                .unwrap_or(false)
+        });
+
+        let detail = manager.stop_meeting().expect("stop");
+        assert_eq!(detail.summary.title, "1:1: Product & Growth");
+        assert_eq!(detail.summary.template, MeetingTemplate::OneOnOne);
+        assert_eq!(detail.segments.len(), 1);
+        assert_eq!(
+            detail.segments[0].effective_speaker_label(),
+            "Speaker 1 (Sarah Chen)"
+        );
+    }
+
+    #[test]
+    fn echo_deduplicator_suppresses_cross_script_speaker_bleed_and_preserves_real_replies() {
+        let mut dedup = EchoDeduplicator::default();
+        let initial_pruned = dedup.record_others_and_collect_bleed_me_ids(
+            1_000,
+            4_500,
+            "Haan ji sir, kal Guru Nanak Jayanti ki chhutti hai",
+        );
+        assert!(initial_pruned.is_empty());
+
+        // Cross-script Urdu bleed on Me overlapping Others -> suppressed!
+        assert!(dedup.should_drop_me(1_400, 4_100, "گورنانک جینتی کی چھٹی ہے",));
+
+        // Distinct Me reply overlapping Others -> preserved!
+        assert!(!dedup.should_drop_me(
+            1_800,
+            4_200,
+            "Got it, let us move the deployment to Wednesday morning instead",
+        ));
+
+        // Non-overlapping Me utterance > 18s later -> preserved!
+        assert!(!dedup.should_drop_me(28_000, 30_000, "گورنانک جینتی کی چھٹی ہے",));
+
+        // Retroactive pruning when Me's bleed fragment closed slightly before Others' longer turn closed:
+        dedup.record_me(42, 32_200, 34_100, "content cards delivery pipeline");
+        let stale_ids = dedup.record_others_and_collect_bleed_me_ids(
+            32_000,
+            35_400,
+            "We are reviewing the content cards delivery pipeline across mobile SDKs",
+        );
+        assert_eq!(stale_ids, vec![42]);
+    }
+
+    struct ToggleCallDetector {
+        active_app: Mutex<Option<crate::meeting::macos_bridge::RunningCallApp>>,
+    }
+
+    impl ToggleCallDetector {
+        fn new(initial: Option<(&str, &str)>) -> Self {
+            Self {
+                active_app: Mutex::new(initial.map(|(bundle_id, app_name)| {
+                    crate::meeting::macos_bridge::RunningCallApp {
+                        bundle_id: bundle_id.to_string(),
+                        app_name: app_name.to_string(),
+                        tier: crate::meeting::macos_bridge::RunningCallAppTier::Dedicated,
+                    }
+                })),
+            }
+        }
+
+        fn set_app(&self, app: Option<(&str, &str)>) {
+            *self.active_app.lock().expect("detector lock") =
+                app.map(
+                    |(bundle_id, app_name)| crate::meeting::macos_bridge::RunningCallApp {
+                        bundle_id: bundle_id.to_string(),
+                        app_name: app_name.to_string(),
+                        tier: crate::meeting::macos_bridge::RunningCallAppTier::Dedicated,
+                    },
+                );
+        }
+    }
+
+    impl CallDetectorBackend for ToggleCallDetector {
+        fn poll_detected_call(&self) -> Result<Option<DetectedCallInfo>, String> {
+            Ok(None)
+        }
+
+        fn dismiss_call(&self, _call_id: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn active_call_app(&self) -> Option<crate::meeting::macos_bridge::RunningCallApp> {
+            self.active_app.lock().expect("detector lock").clone()
+        }
+    }
+
+    #[test]
+    fn call_end_watcher_soft_stops_after_hangup_and_resume_suppresses_until_rejoin() {
+        let backend = Arc::new(MockBackend::new(
+            AudioCaptureMode::DualStream,
+            OutputRouteKind::Headphones,
+        ));
+        let detector = Arc::new(ToggleCallDetector::new(Some((
+            "com.microsoft.teams2",
+            "Microsoft Teams",
+        ))));
+        let dir = tempdir().expect("tempdir");
+        let store = MeetingStore::open_in_path(dir.path().join("meetings.db")).expect("store");
+        let manager = MeetingSessionManager::new_for_tests(
+            store,
+            backend,
+            Arc::new(MockChunkTranscriber),
+            detector.clone(),
+        );
+
+        // Mid-call start populates app_name even when detected_call banner was not active.
+        let started = manager.start_meeting(None, None).expect("start");
+        assert_eq!(started.app_name.as_deref(), Some("Microsoft Teams"));
+        let meeting_id = started.active_meeting_id.expect("meeting id");
+
+        // Hang up Teams -> 2 negative polls stay recording, 3rd poll triggers SoftStopped.
+        detector.set_app(None);
+        assert!(!manager.poll_active_call_watcher());
+        assert!(!manager.poll_active_call_watcher());
+        assert_eq!(manager.get_live_state().status, MeetingStatus::Recording);
+
+        assert!(manager.poll_active_call_watcher());
+        assert_eq!(manager.get_live_state().status, MeetingStatus::Paused);
+        assert!(manager
+            .inner
+            .clock
+            .lock()
+            .expect("clock")
+            .soft_stop
+            .is_some());
+
+        // Clicking Resume restores Recording and suppresses immediate re-stop while still off-call.
+        let resumed = manager.resume_meeting().expect("resume");
+        assert_eq!(resumed.status, MeetingStatus::Recording);
+        for _ in 0..5 {
+            assert!(
+                !manager.poll_active_call_watcher(),
+                "post-hangup Resume must not re-stop while user dictates wrap-up notes"
+            );
+        }
+        assert_eq!(manager.get_live_state().status, MeetingStatus::Recording);
+
+        // Rejoining a call re-arms the watcher, and hanging up + grace expiry finalizes notes.
+        detector.set_app(Some(("com.microsoft.teams2", "Microsoft Teams")));
+        assert!(!manager.poll_active_call_watcher());
+        detector.set_app(None);
+        let (_, epoch) = manager
+            .soft_stop_on_call_end(0)
+            .expect("explicit soft stop");
+        assert!(manager.expire_soft_stop_if_matching(&meeting_id, epoch));
+        assert_eq!(manager.get_live_state().status, MeetingStatus::Idle);
+    }
+
+    #[test]
+    fn manual_in_person_meeting_without_call_app_never_auto_stops() {
+        let backend = Arc::new(MockBackend::new(
+            AudioCaptureMode::MicOnlyFallback,
+            OutputRouteKind::Speakers,
+        ));
+        let detector = Arc::new(ToggleCallDetector::new(None));
+        let dir = tempdir().expect("tempdir");
+        let store = MeetingStore::open_in_path(dir.path().join("meetings.db")).expect("store");
+        let manager = MeetingSessionManager::new_for_tests(
+            store,
+            backend,
+            Arc::new(MockChunkTranscriber),
+            detector,
+        );
+
+        let started = manager.start_meeting(None, None).expect("start");
+        assert_eq!(started.app_name, None);
+        for _ in 0..8 {
+            assert!(!manager.poll_active_call_watcher());
+        }
+        assert_eq!(manager.get_live_state().status, MeetingStatus::Recording);
+        let _ = manager.stop_meeting();
+    }
+
+    #[test]
+    fn normalize_meeting_segment_script_unifies_bilingual_hinglish_and_respects_explicit_scripts() {
+        let langs_en_ur = vec!["en".to_string(), "ur".to_string()];
+        // Auto + en + ur converts stray Perso-Arabic islands to Roman Hinglish for 100% consistent meeting notes
+        let unified = normalize_meeting_segment_script(
+            "میں فیڈنگ کرتا ہوں for the UI component",
+            &langs_en_ur,
+            HindustaniScript::Auto,
+        );
+        assert!(
+            unified
+                .chars()
+                .all(|c| !('\u{0600}'..='\u{06FF}').contains(&c)),
+            "expected Roman Hinglish without Perso-Arabic islands, got '{unified}'"
+        );
+        assert!(unified.contains("UI component"));
+
+        // Explicit UrduPersoArabic preference preserves Perso-Arabic
+        let explicit_urdu = normalize_meeting_segment_script(
+            "میٹنگ نوٹس کا معیار",
+            &langs_en_ur,
+            HindustaniScript::UrduPersoArabic,
+        );
+        assert!(explicit_urdu.contains("میٹنگ نوٹس"));
     }
 }

@@ -6,6 +6,7 @@ license = "MIT"
 description = "Pure-Rust token-budgeted map-reduce meeting summarizer, auto-title generator, and loopback Qwen3-4B GGUF OpenAI-compatible adapter for lowyap"
 
 [dependencies]
+lowyap-flow = { path = "../lowyap-flow" }
 lowyap-ports = { path = "../lowyap-ports" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

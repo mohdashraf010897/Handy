@@ -1,5 +1,6 @@
 //! Spoken URL formatting for dictation.
 
+#[cfg(test)]
 pub use lowyap_flow::spoken_urls::format_spoken_urls;
 
 #[cfg(test)]

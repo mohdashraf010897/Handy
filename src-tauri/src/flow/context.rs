@@ -3,10 +3,20 @@
 //! Only the app identity is read (macOS bundle id and name, Windows exe name);
 //! window titles are never read because they routinely contain private data.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::{
+    atomic::{AtomicI32, Ordering},
+    Mutex, PoisonError,
+};
 use std::time::Instant;
 
 use crate::flow::settings::{AppToneRule, FlowSettings, Tone};
+
+/// PID captured during the most recent `capture()` on macOS (`0` when absent).
+static LAST_CAPTURED_PID: AtomicI32 = AtomicI32::new(0);
+/// External target app PID from hotkey press. Non-zero only when dictation began
+/// outside `lowyap`, so if the user clicks `lowyap` while waiting, `clipboard::paste`
+/// can hand focus back to that target app before injecting `Cmd+V`.
+static ACTIVE_PASTE_TARGET_PID: AtomicI32 = AtomicI32::new(0);
 
 /// The app that was frontmost when dictation started.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -32,6 +42,8 @@ fn capture() -> Option<AppContext> {
 
     objc2::rc::autoreleasepool(|_| {
         let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+        let pid = app.processIdentifier();
+        LAST_CAPTURED_PID.store(if pid > 0 { pid } else { 0 }, Ordering::Release);
         let context = AppContext {
             app_id: app.bundleIdentifier().map(|id| id.to_string()),
             app_name: app.localizedName().map(|name| name.to_string()),
@@ -215,14 +227,79 @@ pub(crate) static LAST_APP_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Remembers a captured app unless it is this app's own window.
 pub fn remember(context: Option<&AppContext>, own_ids: &[&str]) {
-    let Some(context) = context else { return };
+    let captured_pid = LAST_CAPTURED_PID.swap(0, Ordering::AcqRel);
+    let Some(context) = context else {
+        ACTIVE_PASTE_TARGET_PID.store(0, Ordering::Release);
+        return;
+    };
     let Some(app_id) = context.app_id.as_deref() else {
+        ACTIVE_PASTE_TARGET_PID.store(0, Ordering::Release);
         return;
     };
     if own_ids.iter().any(|own| app_matches(own, app_id)) {
+        // User intentionally started dictation inside `lowyap` itself — keep focus here.
+        ACTIVE_PASTE_TARGET_PID.store(0, Ordering::Release);
         return;
     }
+    ACTIVE_PASTE_TARGET_PID.store(captured_pid, Ordering::Release);
     *LAST_APP.lock().unwrap_or_else(PoisonError::into_inner) = Some(context.clone());
+}
+
+/// If dictation started in an external app, and `lowyap` itself became frontmost
+/// while the user checked status, re-activate that external target app before
+/// injecting `Cmd+V`. Never steals focus when another external app is active or
+/// when dictation started inside `lowyap`.
+#[cfg(target_os = "macos")]
+pub fn restore_target_app_if_self_frontmost(own_ids: &[&str]) -> bool {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+
+    let target_pid = ACTIVE_PASTE_TARGET_PID.swap(0, Ordering::AcqRel);
+    if target_pid <= 0 {
+        return false;
+    }
+
+    let restored = objc2::rc::autoreleasepool(|_| {
+        let Some(frontmost) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
+            return false;
+        };
+        let front_bundle = frontmost
+            .bundleIdentifier()
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+        let self_is_frontmost =
+            !front_bundle.is_empty() && own_ids.iter().any(|own| app_matches(own, &front_bundle));
+        if !self_is_frontmost {
+            return false;
+        }
+        let Some(target_app) =
+            NSRunningApplication::runningApplicationWithProcessIdentifier(target_pid)
+        else {
+            return false;
+        };
+        if target_app.isTerminated() {
+            return false;
+        }
+        #[allow(deprecated)]
+        let ok = target_app.activateWithOptions(NSApplicationActivationOptions::empty());
+        if ok {
+            log::info!(
+                "flow: restored focus from lowyap back to original dictation target (pid {}) before paste",
+                target_pid
+            );
+        }
+        ok
+    });
+
+    if restored {
+        std::thread::sleep(std::time::Duration::from_millis(75));
+    }
+    restored
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn restore_target_app_if_self_frontmost(_own_ids: &[&str]) -> bool {
+    ACTIVE_PASTE_TARGET_PID.store(0, Ordering::Release);
+    false
 }
 
 /// The app remembered by [`remember`], if any.

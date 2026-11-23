@@ -107,7 +107,7 @@ export const TrayPanel: React.FC<TrayPanelProps> = ({
           </span>
         )}
       </div>
-      {!ready && <div className="try-panel-download">{download}</div>}
+      <div className="try-panel-download empty:hidden">{download}</div>
       <button
         type="button"
         className="try-panel-row"

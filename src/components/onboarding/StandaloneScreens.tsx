@@ -6,7 +6,7 @@ import { usePermissions } from "./usePermissions";
 import { useOnboardingModels } from "./useOnboardingModels";
 import { downloadPick } from "./downloadPick";
 import { Permissions } from "./screens/Permissions";
-import { Model } from "./screens/Model";
+import { MACOS_NATIVE_SPEECH_ID, Model } from "./screens/Model";
 
 /** Onboarding screens reused later: a revoked permission, a retired model. */
 
@@ -63,6 +63,14 @@ export const ReplaceModel: React.FC<{
       models={models}
       onBack={onBack}
       onChoose={(id) => {
+        if (id === MACOS_NATIVE_SPEECH_ID) {
+          void selectModel(MACOS_NATIVE_SPEECH_ID).then((ok) => {
+            if (!ok) return;
+            clearOnboardingProgress();
+            onComplete();
+          });
+          return;
+        }
         if (!downloadPick(models, id, store.downloadId)) return;
         finishing.current = false;
         setAttempt((n) => n + 1);

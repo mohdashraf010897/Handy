@@ -1,0 +1,953 @@
+<!doctype html>
+<!--
+Mode: Read / Experience (Brand Identity & macOS Icon Baseline Specimen)
+World: Vocal Hardware (DESIGN.md) — Teenage Engineering TP-7 / Leica M11 Monochrom / Braun industrial studio specification sheet
+Register: Warm Stone (#F4F2EC) default hardware paper with live Machined Carbon (#111113) dark-mode switch; Signal Vermilion (#C0320C light / #FF6B3D dark) tactile cursor LED
+Typography: Self-hosted Bricolage Grotesque (display), Hanken Grotesk (body), Azeret Mono (tabular metrics, coordinates, contrast ratios)
+Craft-Floor Guarantees:
+- No eyebrows/kickers above headings, no 01/02/03 section numbers, no gradient text, no purple/indigo, no >1px colored border-left
+- Distinct section layouts: asymmetric hero lockup, optical Dock-to-Menu-Bar scale bench, 3-silhouette vector matrix table, live type specimen, and MCP toolchain evaluation table
+-->
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>lowyap_ — Vocal Hardware Brand &amp; macOS Icon Baseline</title>
+    <style>
+      @font-face {
+        font-family: "Bricolage Grotesque";
+        src: url("../../src/assets/fonts/bricolage-grotesque-latin.woff2") format("woff2");
+        font-weight: 400 800;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Hanken Grotesk";
+        src: url("../../src/assets/fonts/hanken-grotesk-latin.woff2") format("woff2");
+        font-weight: 400 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Azeret Mono";
+        src: url("../../src/assets/fonts/azeret-mono-latin.woff2") format("woff2");
+        font-weight: 400 600;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      :root {
+        --bg: #f4f2ec;
+        --surface: #ffffff;
+        --tray: #eae6dc;
+        --ink: #141412;
+        --ink-secondary: #52504a;
+        --ink-muted: #6e6b63;
+        --line: #dedad0;
+        --line-strong: #c6c1b4;
+        --accent: #c0320c;
+        --accent-hover: #a32807;
+        --accent-led: #ff6b3d;
+        --moss: #1f7a4c;
+        --amber: #9a5200;
+        --dock-plate: #dedad0;
+        --menubar-bg: #e7e3d9;
+        --menubar-fg: #141412;
+      }
+
+      html[data-theme="dark"] {
+        --bg: #111113;
+        --surface: #18181c;
+        --tray: #202026;
+        --ink: #f4f2ec;
+        --ink-secondary: #a6a39b;
+        --ink-muted: #8a877f;
+        --line: #2a2a31;
+        --line-strong: #3c3b44;
+        --accent: #ff6b3d;
+        --accent-hover: #ff8256;
+        --accent-led: #ff6b3d;
+        --moss: #34d399;
+        --amber: #fbbf24;
+        --dock-plate: #1d1d23;
+        --menubar-bg: #0c0c0e;
+        --menubar-fg: #f4f2ec;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 16px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .shell {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 32px 28px 88px;
+      }
+
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 16px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand-lockup {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand-word {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-weight: 700;
+        font-size: 22px;
+        letter-spacing: -0.03em;
+      }
+
+      .brand-word .cursor {
+        color: var(--accent);
+      }
+
+      .topbar-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 12px;
+      }
+
+      .spec-stamp {
+        font-family: "Azeret Mono", monospace;
+        font-size: 12px;
+        color: var(--ink-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .theme-btn {
+        appearance: none;
+        border: 1px solid var(--line-strong);
+        background: var(--surface);
+        color: var(--ink);
+        font-family: "Azeret Mono", monospace;
+        font-size: 12px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: border-color 140ms ease, background-color 140ms ease;
+      }
+
+      .theme-btn:hover {
+        border-color: var(--accent);
+      }
+
+      .theme-btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+        gap: 44px;
+        align-items: center;
+        padding: 48px 0 44px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1 {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: clamp(2.2rem, 4vw, 3.35rem);
+        line-height: 1.04;
+        letter-spacing: -0.035em;
+        margin: 0 0 16px;
+      }
+
+      .lead {
+        font-size: 18px;
+        color: var(--ink-secondary);
+        max-width: 60ch;
+        margin: 0 0 24px;
+      }
+
+      .spec-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px 28px;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+      }
+
+      .spec-pair {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .spec-pair dt {
+        font-family: "Azeret Mono", monospace;
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+
+      .spec-pair dd {
+        margin: 0;
+        font-family: "Azeret Mono", monospace;
+        font-size: 13px;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .hero-stage {
+        background: var(--tray);
+        border: 1px solid var(--line-strong);
+        border-radius: 20px;
+        padding: 32px 24px 24px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+      }
+
+      .hero-icon-frame {
+        width: 224px;
+        height: 224px;
+        display: grid;
+        place-items: center;
+      }
+
+      .hero-icon-frame img {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .hero-caption {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        font-family: "Azeret Mono", monospace;
+        font-size: 11px;
+        color: var(--ink-secondary);
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+        font-variant-numeric: tabular-nums;
+      }
+
+      section {
+        padding: 44px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      section:last-of-type {
+        border-bottom: none;
+      }
+
+      h2 {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: clamp(1.45rem, 2.3vw, 1.95rem);
+        letter-spacing: -0.025em;
+        line-height: 1.15;
+        margin: 0 0 10px;
+      }
+
+      .section-intro {
+        color: var(--ink-secondary);
+        max-width: 66ch;
+        margin: 0 0 28px;
+      }
+
+      /* Optical scale bench */
+      .scale-bench {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 24px;
+      }
+
+      .bench-panel {
+        min-width: 0;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 24px;
+      }
+
+      .bench-title {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 17px;
+        font-weight: 600;
+        margin: 0 0 16px;
+      }
+
+      .size-ladder {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 18px;
+        background: var(--dock-plate);
+        border-radius: 12px;
+      }
+
+      .size-stop {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .size-stop span {
+        font-family: "Azeret Mono", monospace;
+        font-size: 11px;
+        color: var(--ink-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .menubar-preview-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .menubar-strip {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px 12px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-family: "Azeret Mono", monospace;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .menubar-strip.light-bar {
+        background: #eae6dc;
+        color: #141412;
+        border: 1px solid #d4cfc3;
+      }
+
+      .menubar-strip.dark-bar {
+        background: #141417;
+        color: #f4f2ec;
+        border: 1px solid #2c2c33;
+      }
+
+      .tray-states {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 18px;
+      }
+
+      .tray-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* 3-silhouette comparison table */
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+      }
+
+      th,
+      td {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      th {
+        font-family: "Azeret Mono", monospace;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--ink-secondary);
+        background: var(--tray);
+      }
+
+      .mark-cell {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .status-pill {
+        display: inline-block;
+        font-family: "Azeret Mono", monospace;
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--line-strong);
+      }
+
+      .status-pill.locked {
+        color: var(--moss);
+        border-color: currentColor;
+      }
+
+      /* Palette & Type two-column */
+      .system-split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 28px;
+      }
+
+      .swatch-list {
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--surface);
+      }
+
+      .swatch-row {
+        display: grid;
+        grid-template-columns: 44px 1.1fr 0.9fr;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .swatch-row:last-child {
+        border-bottom: none;
+      }
+
+      .chip {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        border: 1px solid var(--line-strong);
+      }
+
+      .mono,
+      code {
+        font-family: "Azeret Mono", monospace;
+        font-size: 0.88em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      h1 code,
+      h2 code,
+      h3 code {
+        font-size: 0.86em;
+        font-weight: 600;
+      }
+
+      .type-stack {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .type-row {
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .type-row:last-child {
+        padding-bottom: 0;
+        border-bottom: none;
+      }
+
+      .type-sample-display {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+        margin: 4px 0 0;
+      }
+
+      .type-sample-body {
+        font-family: "Hanken Grotesk", sans-serif;
+        font-size: 16px;
+        margin: 4px 0 0;
+      }
+
+      .type-sample-mono {
+        font-family: "Azeret Mono", monospace;
+        font-size: 13px;
+        margin: 4px 0 0;
+        font-variant-numeric: tabular-nums;
+      }
+
+      @media (max-width: 860px) {
+        .shell {
+          padding: 24px 16px 64px;
+        }
+        .hero,
+        .scale-bench,
+        .system-split {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .swatch-row {
+          grid-template-columns: 36px minmax(0, 1fr);
+        }
+        .swatch-row > :last-child {
+          grid-column: 2;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <img src="./app-icon.svg" alt="lowyap Low-Frequency Terrace icon" width="34" height="34" />
+          <span class="brand-word">lowyap<span class="cursor">_</span></span>
+        </div>
+        <div class="topbar-actions">
+          <span class="spec-stamp">com.lowyap.desktop · Vocal Hardware v2.0</span>
+          <button class="theme-btn" id="themeToggle" type="button">
+            Switch to Carbon Dark
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <div class="hero">
+          <div>
+            <h1>Low-Frequency Terrace (<code>||||_</code>)</h1>
+            <p class="lead">
+              Permanent brand baseline for <strong>lowyap</strong> (“lowkey yap. it types.”).
+              An anodized Machined Carbon hardware keycap frames four asymmetric Warm Stone
+              vocal-cadence terrace bars (“lowkey yap”) stepping down onto a glowing Signal Vermilion
+              <strong>_</strong> terminal underscore (“it types”)—zero messenger chat bubble, zero
+              symmetric equalizer clone, and zero SaaS violet.
+            </p>
+            <dl class="spec-strip">
+              <div class="spec-pair">
+                <dt>Canvas</dt>
+                <dd>#F4F2EC / #111113</dd>
+              </div>
+              <div class="spec-pair">
+                <dt>Signal Accent</dt>
+                <dd>#C0320C (5.07:1) / #FF6B3D</dd>
+              </div>
+              <div class="spec-pair">
+                <dt>Apple HIG Grid</dt>
+                <dd>1024px · 824px plate · r=185</dd>
+              </div>
+              <div class="spec-pair">
+                <dt>Category Clarity</dt>
+                <dd>Vocal terrace + _ · 0 bubble</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="hero-stage">
+            <div class="hero-icon-frame">
+              <img src="./app-icon.svg" alt="lowyap 1024px Low-Frequency Terrace macOS icon" />
+            </div>
+            <svg width="176" height="48" viewBox="0 0 404 108" fill="none" role="img" aria-label="lowyap_ wordmark" style="color: var(--ink)">
+              <g stroke="currentColor" stroke-width="11.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 10V62C10 67.5 13.5 70 19 70H22" />
+                <rect x="37" y="29" width="40" height="41" rx="20" />
+                <path d="M95 30L106.5 70L121 38L135.5 70L147 30" />
+                <path d="M167 30V51C167 62 175.5 70 186.5 70C197.5 70 206 62 206 51V30M206 30V79C206 89.5 198 96 187.5 96H177" />
+                <rect x="226" y="29" width="39" height="41" rx="19.5" />
+                <path d="M265 29V70" />
+                <path d="M289 29V96" />
+                <rect x="289" y="29" width="39" height="41" rx="19.5" />
+              </g>
+              <rect x="346" y="63.5" width="44" height="12" rx="4" fill="var(--accent)" />
+            </svg>
+            <div class="hero-caption">
+              <span>design/brand/app-icon.svg</span>
+              <span>V2 · Low-Frequency Terrace</span>
+            </div>
+          </div>
+        </div>
+
+        <section>
+          <h2>Optical Scale Bench: macOS Dock to 18px Menu Bar</h2>
+          <p class="section-intro">
+            An icon only earns baseline lock if the silhouette holds from Retina Finder previews down
+            to a single-channel 18px macOS menu-bar template mask without collapsing into a hyphen or blob.
+          </p>
+
+          <div class="scale-bench">
+            <div class="bench-panel">
+              <h3 class="bench-title">macOS App Icon &amp; Dock Progression</h3>
+              <div class="size-ladder">
+                <div class="size-stop">
+                  <img src="./app-icon.svg" alt="128px preview" width="128" height="128" />
+                  <span>128px Finder</span>
+                </div>
+                <div class="size-stop">
+                  <img src="./app-icon.svg" alt="64px Dock preview" width="64" height="64" />
+                  <span>64px Dock</span>
+                </div>
+                <div class="size-stop">
+                  <img src="./app-icon.svg" alt="32px Spotlight preview" width="32" height="32" />
+                  <span>32px Spotlight</span>
+                </div>
+                <div class="size-stop">
+                  <img src="./app-icon.svg" alt="18px badge preview" width="18" height="18" />
+                  <span>18px List</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bench-panel">
+              <h3 class="bench-title">macOS 18px Menu Bar States (<code>src-tauri/resources/tray_*.png</code>)</h3>
+              <div class="menubar-preview-stack">
+                <div class="menubar-strip light-bar">
+                  <span>Light Menu Bar</span>
+                  <div class="tray-states">
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_idle_dark.png" width="18" height="18" alt="Idle dark template" />
+                      idle
+                    </span>
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_recording_dark.png" width="18" height="18" alt="Recording dark" />
+                      rec
+                    </span>
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_transcribing_dark.png" width="18" height="18" alt="Transcribing dark" />
+                      asr
+                    </span>
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_idle_warning_dark.png" width="18" height="18" alt="Warning dark" />
+                      warn
+                    </span>
+                  </div>
+                </div>
+
+                <div class="menubar-strip dark-bar">
+                  <span>Dark Menu Bar</span>
+                  <div class="tray-states">
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_idle.png" width="18" height="18" alt="Idle light template" />
+                      idle
+                    </span>
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_recording.png" width="18" height="18" alt="Recording light" />
+                      rec
+                    </span>
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_transcribing.png" width="18" height="18" alt="Transcribing light" />
+                      asr
+                    </span>
+                    <span class="tray-item">
+                      <img src="../../src-tauri/resources/tray_idle_warning.png" width="18" height="18" alt="Warning light" />
+                      warn
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Silhouette Audit: Why “Low-Frequency Terrace” Wins</h2>
+          <p class="section-intro">
+            Evaluated side-by-side in the macOS Dock between Apple Messages and Wispr Flow for instant
+            voice-to-text category clarity, 18px menu-bar sharpness, and zero messenger-bubble confusion.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Hardware Silhouette</th>
+                  <th>Literal Meaning</th>
+                  <th>18px Menu-Bar Read</th>
+                  <th>Baseline Decision</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="mark-cell">
+                      <svg width="52" height="52" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                        <rect x="3.5" y="3.5" width="57" height="57" rx="15" fill="#18181C" stroke="#3C3B44" stroke-width="2.2" />
+                        <rect x="7.5" y="7" width="49" height="46" rx="11.5" fill="#111113" />
+                        <rect x="13" y="25" width="5.2" height="18" rx="2.6" fill="#C9C5BA" />
+                        <rect x="21.4" y="15.5" width="5.2" height="27.5" rx="2.6" fill="#F4F2EC" />
+                        <rect x="29.8" y="21" width="5.2" height="22" rx="2.6" fill="#F4F2EC" />
+                        <rect x="38.2" y="30.5" width="5.2" height="12.5" rx="2.6" fill="#C9C5BA" />
+                        <rect x="38.2" y="45.6" width="12.8" height="4.4" rx="2.2" fill="#FF6B3D" />
+                        <rect x="26" y="55.5" width="12" height="2" rx="1" fill="#FF6B3D" fill-opacity="0.7" />
+                      </svg>
+                      <div>
+                        <strong>V2. Low-Frequency Terrace</strong>
+                        <div class="mono">Shipped across app + web</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    Asymmetric low-grounded vocal cadence (“lowkey yap”) stepping down onto a glowing
+                    Signal Vermilion <strong>_</strong> terminal underscore (“it types”) inside a machined keycap.
+                  </td>
+                  <td>
+                    Borderless 3-bar asymmetric terrace + right baseline <code>_</code> stays razor-sharp at 18pt alongside Wi-Fi &amp; Control Center.
+                  </td>
+                  <td><span class="status-pill locked">LOCKED BASELINE</span></td>
+                </tr>
+
+                <tr>
+                  <td>
+                    <div class="mark-cell">
+                      <svg width="52" height="52" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                        <rect x="3.5" y="3.5" width="57" height="57" rx="15" fill="#18181C" stroke="#3C3B44" stroke-width="2.2" />
+                        <rect x="8.5" y="7.5" width="47" height="44" rx="11" fill="#111113" />
+                        <path d="M16.5 15.5V23.5A7.5 7.5 0 0 0 31.5 23.5V15.5M31.5 22.5V36.5A6.5 6.5 0 0 1 25 43H19.5" stroke="#F4F2EC" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round" />
+                        <rect x="38" y="39.7" width="12.5" height="5.6" rx="2.8" fill="#FF6B3D" />
+                      </svg>
+                      <div>
+                        <strong>Prior v1. Yap Keycap (<code>y_</code>)</strong>
+                        <div class="mono">Retired CLI monogram</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    Sculpted lowercase <code>y</code> + baseline <code>_</code>; retired because it read closer to a developer CLI utility than voice-to-text.
+                  </td>
+                  <td>
+                    Legible monogram, but lacked immediate spoken-cadence signal next to audio/voice apps.
+                  </td>
+                  <td><span class="status-pill">Retired (v1)</span></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="mark-cell">
+                      <svg width="52" height="52" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                        <rect x="3.5" y="3.5" width="57" height="57" rx="15" fill="#18181C" stroke="#3C3B44" stroke-width="2.2" />
+                        <rect x="7.5" y="7" width="49" height="46" rx="11.5" fill="#111113" />
+                        <rect x="13" y="30" width="5.4" height="16" rx="2.7" fill="#C9C5BA" />
+                        <rect x="22" y="23" width="5.4" height="23" rx="2.7" fill="#F4F2EC" />
+                        <rect x="31" y="17" width="5.4" height="29" rx="2.7" fill="#F4F2EC" />
+                        <rect x="44" y="15" width="3.4" height="33" rx="1.5" fill="#FF6B3D" />
+                        <rect x="41" y="15" width="9.4" height="3" rx="1.4" fill="#FF6B3D" />
+                        <rect x="41" y="45" width="9.4" height="3" rx="1.4" fill="#FF6B3D" />
+                      </svg>
+                      <div>
+                        <strong>V1. Cadence-to-Beam</strong>
+                        <div class="mono">Reserve I-beam mark</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    Rising low-baseline vocal bars snapping into a vertical Signal Vermilion <code>I</code>-beam insertion cursor.
+                  </td>
+                  <td>
+                    Strong typing cue, kept as reserve behind <code>V2</code>’s warmer horizontal hardware underscore.
+                  </td>
+                  <td><span class="status-pill">Reserve (V1)</span></td>
+                </tr>
+
+                <tr>
+                  <td>
+                    <div class="mark-cell">
+                      <svg width="52" height="52" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                        <rect x="3.5" y="3.5" width="57" height="57" rx="15" fill="#18181C" stroke="#3C3B44" stroke-width="2.2" />
+                        <rect x="8.5" y="7.5" width="47" height="44" rx="11" fill="#111113" />
+                        <path d="M15.5 22L24.5 38L33.5 22" stroke="#F4F2EC" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round" />
+                        <rect x="37.5" y="36.5" width="12.5" height="5.6" rx="2.8" fill="#FF6B3D" />
+                      </svg>
+                      <div>
+                        <strong>C. Low-Keystroke (<code>v_</code>)</strong>
+                        <div class="mono">Reserve CLI/shortcut mark</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    Downward key-travel chevron (“lowkey”) striking the horizontal typing cursor (<code>_</code>).
+                  </td>
+                  <td>
+                    Ultra-minimal, but reads close to generic terminal/Vim prompt icons (<code>>_</code>).
+                  </td>
+                  <td><span class="status-pill">Reserve (CLI)</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section>
+          <h2>Color &amp; Typography Specification</h2>
+          <p class="section-intro">
+            Synchronized across <code>design/brand/brand.json</code>, <code>src/App.css</code>,
+            <code>src-tauri/src/brand.rs</code>, and <code>lowyap-web</code> with compile-time parity assertions.
+          </p>
+
+          <div class="system-split">
+            <div class="swatch-list">
+              <div class="swatch-row">
+                <span class="chip" style="background: #f4f2ec"></span>
+                <div>
+                  <strong>Warm Stone</strong>
+                  <div class="mono">Primary Light Canvas</div>
+                </div>
+                <div class="mono">#F4F2EC</div>
+              </div>
+              <div class="swatch-row">
+                <span class="chip" style="background: #111113"></span>
+                <div>
+                  <strong>Machined Carbon</strong>
+                  <div class="mono">Dark Canvas &amp; Keycap Skirt</div>
+                </div>
+                <div class="mono">#111113</div>
+              </div>
+              <div class="swatch-row">
+                <span class="chip" style="background: #c0320c"></span>
+                <div>
+                  <strong>Signal Vermilion (Light UI)</strong>
+                  <div class="mono">5.07:1 on #F4F2EC · WCAG AA</div>
+                </div>
+                <div class="mono">#C0320C</div>
+              </div>
+              <div class="swatch-row">
+                <span class="chip" style="background: #ff6b3d"></span>
+                <div>
+                  <strong>Signal Vermilion LED (Dark)</strong>
+                  <div class="mono">6.85:1 on #111113 · Cursor Glow</div>
+                </div>
+                <div class="mono">#FF6B3D</div>
+              </div>
+              <div class="swatch-row">
+                <span class="chip" style="background: #1f7a4c"></span>
+                <div>
+                  <strong>Calibrated Moss</strong>
+                  <div class="mono">Verified Local / Zero-Byte Egress</div>
+                </div>
+                <div class="mono">#1F7A4C</div>
+              </div>
+            </div>
+
+            <div class="type-stack">
+              <div class="type-row">
+                <div class="mono">Bricolage Grotesque · Display &amp; Wordmark (-0.03em)</div>
+                <p class="type-sample-display">lowkey yap. it types.</p>
+              </div>
+              <div class="type-row">
+                <div class="mono">Hanken Grotesk · Interface &amp; Longform Transcripts</div>
+                <p class="type-sample-body">
+                  Aur bhai, batao kya chal raha hai? Ship the release notes right where your cursor blinks.
+                </p>
+              </div>
+              <div class="type-row">
+                <div class="mono">Azeret Mono · Hardware Badges, Shortcuts &amp; Timers</div>
+                <p class="type-sample-mono">fn + space · 00:02.40 -> 0.42s Metal · 0 B uploaded</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>MCP Design Toolchain Recommendations</h2>
+          <p class="section-intro">
+            All icon rasters (<code>icon.icns</code>, 12 menu-bar PNGs, web favicons) already compile deterministically from
+            <code>design/brand/app-icon.svg</code> and <code>design/brand/build.mjs</code> via <code>@resvg/resvg-js</code>.
+            If you want interactive GUI co-editing with Copilot later, only one MCP is worth adding:
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Design Tool / MCP</th>
+                  <th>Best Use Case</th>
+                  <th>Tradeoff for Lean Startup</th>
+                  <th>Recommendation</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <strong>In-Repo SVG + <code>@resvg/resvg-js</code> + <code>tauri icon</code></strong>
+                    <div class="mono">design/brand/build.mjs (Active now)</div>
+                  </td>
+                  <td>
+                    Exact 64u/1024u Bézier control, instant <code>.icns</code> + 12 tray PNG generation, enforced by <code>cargo test --lib brand</code>.
+                  </td>
+                  <td>Code-first coordinates rather than drag-handles.</td>
+                  <td><strong>Keep as canonical source of truth</strong></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong>Figma Official Dev Mode MCP</strong>
+                    <div class="mono">http://127.0.0.1:3845/mcp (Figma Desktop)</div>
+                  </td>
+                  <td>
+                    You tweak curves, App Store screenshots, or OG social cards visually in Figma; Copilot reads live vector nodes &amp; tokens directly.
+                  </td>
+                  <td>Requires Figma Desktop open locally; read-focused.</td>
+                  <td><strong>#1 MCP to enable if you sketch in Figma</strong></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong>Penpot Official MCP Server</strong>
+                    <div class="mono">Open-source native SVG design canvas</div>
+                  </td>
+                  <td>
+                    100% open-source, native SVG/CSS standard storage, two-way token &amp; component inspection without Figma seat lock-in.
+                  </td>
+                  <td>Smaller community template ecosystem than Figma.</td>
+                  <td><strong>Best free/open-source alternative</strong></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong>Recraft Vector MCP</strong>
+                    <div class="mono">@recraft-ai/mcp-recraft-server</div>
+                  </td>
+                  <td>
+                    Generating exploratory SVG illustrations or marketing spot graphics from text prompts.
+                  </td>
+                  <td>AI-traced paths are noisy for 18px macOS menu-bar masks; paid API credits.</td>
+                  <td><strong>Skip for core brand marks</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const html = document.documentElement;
+      const btn = document.getElementById("themeToggle");
+      btn.addEventListener("click", () => {
+        const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+        html.setAttribute("data-theme", next);
+        btn.textContent =
+          next === "dark" ? "Switch to Warm Stone Light" : "Switch to Carbon Dark";
+      });
+    </script>
+  </body>
+</html>

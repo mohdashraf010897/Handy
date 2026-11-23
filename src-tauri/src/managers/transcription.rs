@@ -8,6 +8,8 @@ use crate::engine_supervisor::{
     CancelMark, DeviceInfo, DeviceSelector, EngineError, EngineSupervisor, LoadSpec, LoadedInfo,
     Unloading,
 };
+#[cfg(target_os = "macos")]
+use crate::flow::macos_speech::{self, MACOS_NATIVE_SPEECH_MODEL_ID};
 use crate::language_detection::speech::speech_head;
 use crate::language_detection::{
     IdentifyError, LanguageDecision, LanguageDetector, LanguageSource, Plan,
@@ -113,6 +115,7 @@ enum StreamCmd {
     Finalize {
         reply: mpsc::Sender<StreamFinalizeReply>,
         samples: usize,
+        timing_session: Option<u64>,
     },
     Cancel,
 }
@@ -344,7 +347,7 @@ impl TranscriptionManager {
 
                         if idle_ms > limit_ms {
                             // idle -> unload
-                            if manager_cloned.is_model_loaded() {
+                            if manager_cloned.has_loaded_model() {
                                 let unload_start = std::time::Instant::now();
                                 info!(
                                     "Model idle for {}s (limit: {}s), unloading",
@@ -376,8 +379,27 @@ impl TranscriptionManager {
     }
 
     pub fn is_model_loaded(&self) -> bool {
+        if self.has_loaded_model() {
+            return true;
+        }
+        // The shortcut also uses this as a readiness gate. Instant Voice
+        // needs no loaded worker or file before the microphone can open.
+        #[cfg(target_os = "macos")]
+        {
+            let settings = get_settings(&self.app_handle);
+            return self.should_use_native_speech(&settings);
+        }
+        #[cfg(not(target_os = "macos"))]
+        false
+    }
+
+    fn has_loaded_model(&self) -> bool {
         // A transcribe-cpp model stays loaded while it is busy, so a batch
         // run or stream in progress never reads as "unloaded".
+        #[cfg(target_os = "macos")]
+        if self.get_current_model().as_deref() == Some(MACOS_NATIVE_SPEECH_MODEL_ID) {
+            return true;
+        }
         self.engine.loaded().is_some()
     }
 
@@ -509,7 +531,7 @@ impl TranscriptionManager {
         }
         let settings = get_settings(&self.app_handle);
         if settings.model_unload_timeout == ModelUnloadTimeout::Immediately
-            && self.is_model_loaded()
+            && self.has_loaded_model()
         {
             info!("Immediately unloading model after {}", context);
             self.request_unload();
@@ -560,6 +582,24 @@ impl TranscriptionManager {
                 return Err(anyhow::anyhow!(error_msg));
             }
         };
+
+        #[cfg(target_os = "macos")]
+        if model_id == MACOS_NATIVE_SPEECH_MODEL_ID {
+            self.engine.unload().wait();
+            self.language_detector.unload();
+            *self.current_model_id.lock().unwrap() = Some(model_id.to_string());
+            self.touch_activity();
+            let _ = self.app_handle.emit(
+                "model-state-changed",
+                ModelStateEvent {
+                    event_type: "loading_completed".to_string(),
+                    model_id: Some(model_id.to_string()),
+                    model_name: Some(model_info.name),
+                    error: None,
+                },
+            );
+            return Ok(());
+        }
 
         // Every failure after loading starts must emit a terminal event so the
         // frontend can never remain in its loading state.
@@ -693,7 +733,17 @@ impl TranscriptionManager {
         }
 
         let reload_pending = self.reload_model_on_next_use.load(Ordering::Acquire);
-        if !reload_pending && self.is_model_loaded() {
+        if !reload_pending && self.has_loaded_model() {
+            return;
+        }
+
+        let settings = get_settings(&self.app_handle);
+        #[cfg(target_os = "macos")]
+        if settings.selected_model != MACOS_NATIVE_SPEECH_MODEL_ID
+            && self.should_use_native_speech(&settings)
+        {
+            // Do not load an incomplete file or persist a temporary choice.
+            // Batch can use the system recognizer immediately.
             return;
         }
 
@@ -705,7 +755,6 @@ impl TranscriptionManager {
                     .reload_model_on_next_use
                     .store(false, Ordering::Release);
             }
-            let settings = get_settings(&self_clone.app_handle);
             if let Err(e) = self_clone.load_model(&settings.selected_model) {
                 error!("Failed to load model: {}", e);
             }
@@ -808,6 +857,11 @@ impl TranscriptionManager {
                 is_loading = self.loading_condvar.wait(is_loading).unwrap();
             }
         }
+        if cancelled.load(Ordering::Acquire) {
+            self.router.clear();
+            drain_until_finalize(rx);
+            return;
+        }
 
         let model_id = self.get_current_model().unwrap_or_default();
 
@@ -856,8 +910,15 @@ impl TranscriptionManager {
                     self.touch_activity();
                     session.feed(pcm);
                 }
-                StreamCmd::Finalize { reply, samples } => {
-                    let _ = reply.send(session.finish(samples));
+                StreamCmd::Finalize {
+                    reply,
+                    samples,
+                    timing_session,
+                } => {
+                    let outcome = crate::flow::timing::with_asr_session(timing_session, || {
+                        session.finish(samples)
+                    });
+                    let _ = reply.send(outcome);
                     return;
                 }
                 // Dropping the session resets the worker's stream.
@@ -886,6 +947,7 @@ impl TranscriptionManager {
         let finalize = StreamCmd::Finalize {
             reply: reply_tx,
             samples: recorded_samples,
+            timing_session: crate::flow::timing::current_asr_session_id(),
         };
         if route.tx.send(finalize).is_err() {
             return Ok(None);
@@ -922,6 +984,13 @@ impl TranscriptionManager {
             kind: Some(kind),
         }
         .emit(&self.app_handle);
+    }
+
+    /// Emit a committed transcript snapshot (e.g. instant Stage-A text right
+    /// before Stage-B LLM polishing begins) so the user sees their transcribed
+    /// words immediately and can click `[Paste raw]` at any moment.
+    pub fn emit_stream_snapshot(&self, committed: &str) {
+        emit_stream_text(&self.app_handle, committed, "");
     }
 
     /// Transcribe a whole clip in batch: a re-transcribed history entry, or
@@ -1014,8 +1083,57 @@ impl TranscriptionManager {
         // included) stops every run of this transcription.
         let mark = self.engine.cancel_mark();
         self.touch_activity();
+        #[cfg(target_os = "macos")]
+        {
+            let settings = get_settings(&self.app_handle);
+            if self.should_use_native_speech(&settings) {
+                return self.decode_native_speech(&audio, &settings);
+            }
+        }
         let batch = self.batch_context(&audio)?;
         self.transcribe_cpp(mark, batch, audio)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn decode_native_speech(&self, audio: &[f32], settings: &AppSettings) -> Result<RunOutcome> {
+        let locale = macos_speech::resolve_locale(
+            &settings.selected_language,
+            &settings.spoken_languages,
+            macos_speech::is_available,
+        )?;
+        let text = macos_speech::transcribe_pcm_16k(audio, locale)?;
+        let language = locale.map(|locale| {
+            crate::managers::model::canonical_language_code(locale).to_ascii_lowercase()
+        });
+        let source = match language.as_deref() {
+            Some(lang)
+                if crate::managers::model::canonical_language_code(
+                    settings.selected_language.trim(),
+                )
+                .eq_ignore_ascii_case(lang) =>
+            {
+                LanguageSource::Selected
+            }
+            _ => LanguageSource::Fallback,
+        };
+        Ok(RunOutcome {
+            text,
+            model_detected_language: None,
+            setup: RunSetup {
+                run_options: RunOptions::default(),
+                languages: language.iter().cloned().collect(),
+                applied_language_hint: language.clone(),
+                language: LanguageDecision { language, source },
+                output_was_translated: false,
+                script_pref: crate::flow::multilingual::active_hindustani_script(&self.app_handle),
+                spoken_languages: settings.spoken_languages.clone(),
+                selected_language: settings.selected_language.clone(),
+                urdu_retry_options: None,
+                spoken_candidate_options: Vec::new(),
+                prior_chunk_language: None,
+                all_custom_words_prompted: false,
+            },
+        })
     }
 
     /// Waits out any model load, then reads what a batch transcription of
@@ -1029,6 +1147,12 @@ impl TranscriptionManager {
             }
         }
         let Some(info) = self.engine.loaded() else {
+            #[cfg(target_os = "macos")]
+            if self.get_current_model().as_deref() == Some(MACOS_NATIVE_SPEECH_MODEL_ID) {
+                return Err(anyhow::anyhow!(
+                    "Choose a downloaded model for background file transcription."
+                ));
+            }
             return Err(anyhow::anyhow!("Model is not loaded for transcription."));
         };
 
@@ -1162,9 +1286,13 @@ impl TranscriptionManager {
                     let transcript = self
                         .decode_chunk_for_spoken_languages(mark, audio, &mut setup, &active_model)
                         .map_err(engine_error)?;
-                    (vec![transcript], setup)
+                    (vec![(transcript, false)], setup)
                 }
             };
+        record_last_decode_chunk_count(transcripts.len() as u32);
+        if crate::flow::timing::current_asr_session_id().is_some() {
+            crate::flow::timing::record_chunk_stats(0, transcripts.len() as u32);
+        }
         let (text, model_detected_language) = join_chunks(transcripts);
         Ok(RunOutcome {
             setup,
@@ -1194,6 +1322,10 @@ impl TranscriptionManager {
             vec![0..pcm.len()]
         };
 
+        // Coalesce micro-clauses across all clips (`split_bilingual_clauses`
+        // only splits clips <= 20s, so gating on >= 25s left coalescing dead
+        // and shattered 4.5-14s live chunks into 3-4 separate 30s Whisper runs).
+        let clause_ranges = coalesce_short_clauses(clause_ranges);
         if clause_ranges.len() <= 1 {
             return self.run_clause_for_spoken_languages(mark, pcm, setup, active_model);
         }
@@ -1330,12 +1462,21 @@ impl TranscriptionManager {
                     cand.language = Some(cand_lang.clone());
                 }
                 let probs: Vec<f32> = cand.tokens.iter().map(|tok| tok.p).collect();
+                let continuity_bonus = if setup
+                    .prior_chunk_language
+                    .as_deref()
+                    .is_some_and(|prev| prev.eq_ignore_ascii_case(&cand_lang))
+                {
+                    0.25
+                } else {
+                    0.0
+                };
                 let score = crate::flow::multilingual::score_candidate_transcript(
                     &cand.text,
                     &cand_lang,
                     &probs,
                     &setup.spoken_languages,
-                );
+                ) + continuity_bonus;
                 debug!(
                     "Spoken-language candidate '{}' scored {:.3} (tokens={})",
                     cand_lang,
@@ -1365,7 +1506,24 @@ impl TranscriptionManager {
             }
         }
 
-        if let Some(urdu_options) = setup.urdu_retry_options.clone() {
+        let skip_auto_urdu_retry_for_roman_hinglish = setup.script_pref
+            == crate::flow::multilingual::HindustaniScript::Auto
+            && setup
+                .spoken_languages
+                .iter()
+                .any(|l| l.split(['-', '_']).next() == Some("en"))
+            && !setup
+                .spoken_languages
+                .iter()
+                .any(|l| l.split(['-', '_']).next() == Some("ar"))
+            && transcript.language.as_deref() == Some("hi")
+            && !lowyap_flow::contains_perso_arabic(&transcript.text);
+
+        if let Some(urdu_options) = setup
+            .urdu_retry_options
+            .clone()
+            .filter(|_| !skip_auto_urdu_retry_for_roman_hinglish)
+        {
             if crate::flow::multilingual::should_retry_chunk_as_urdu(
                 transcript.language.as_deref(),
                 &transcript.text,
@@ -1378,14 +1536,26 @@ impl TranscriptionManager {
                     transcript.language
                 );
                 let mut retried = self.run_batch(mark, retry_pcm, &urdu_options, active_model)?;
-                if retried.language.is_none() {
-                    retried.language = Some("ur".to_string());
+                let guarded = lowyap_flow::guard_transcript_text(
+                    &retried.text,
+                    &setup.spoken_languages,
+                    setup.script_pref.into(),
+                    lowyap_flow::SilenceGuardContext {
+                        output_was_translated: setup.output_was_translated,
+                        ..Default::default()
+                    },
+                );
+                if !guarded.trim().is_empty() && lowyap_flow::contains_perso_arabic(&guarded) {
+                    retried.text = guarded;
+                    if retried.language.is_none() {
+                        retried.language = Some("ur".to_string());
+                    }
+                    if setup.applied_language_hint.is_some() {
+                        setup.applied_language_hint = Some("ur".to_string());
+                        setup.language.language = Some("ur".to_string());
+                    }
+                    return Ok(retried);
                 }
-                if setup.applied_language_hint.is_some() {
-                    setup.applied_language_hint = Some("ur".to_string());
-                    setup.language.language = Some("ur".to_string());
-                }
-                return Ok(retried);
             }
         }
 
@@ -1403,6 +1573,9 @@ impl TranscriptionManager {
         active_model: &str,
     ) -> Result<Transcript, EngineError> {
         self.touch_activity();
+        if lowyap_flow::is_non_speech_energy_floor(&pcm, 16_000) {
+            return Ok(Transcript::default());
+        }
         self.engine
             .transcribe_since(mark, pcm, run_options.clone())
             .inspect_err(|e| {
@@ -1411,6 +1584,33 @@ impl TranscriptionManager {
                 }
             })
     }
+    #[cfg(target_os = "macos")]
+    fn should_use_native_speech(&self, settings: &AppSettings) -> bool {
+        if settings.selected_model == MACOS_NATIVE_SPEECH_MODEL_ID
+            || self.get_current_model().as_deref() == Some(MACOS_NATIVE_SPEECH_MODEL_ID)
+        {
+            return native_speech_ready(settings);
+        }
+        // Only fall back to Instant Voice when the selected `.gguf` model is not yet
+        // downloaded on disk (e.g., first-run zero-wait or background HD download).
+        // Downloaded `.gguf` models that unloaded on idle wait on `is_loading` in `batch_context`.
+        !self.has_loaded_model()
+            && self
+                .model_manager
+                .get_model_path(&settings.selected_model)
+                .is_err()
+            && native_speech_ready(settings)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_speech_ready(settings: &AppSettings) -> bool {
+    macos_speech::resolve_locale(
+        &settings.selected_language,
+        &settings.spoken_languages,
+        macos_speech::is_available,
+    )
+    .is_ok()
 }
 
 /// What a batch transcription runs with, read once before its first run.
@@ -1476,12 +1676,15 @@ struct RunSetup {
     selected_language: String,
     urdu_retry_options: Option<RunOptions>,
     spoken_candidate_options: Vec<(String, RunOptions)>,
+    prior_chunk_language: Option<String>,
+    all_custom_words_prompted: bool,
 }
 
 impl RunSetup {
-    /// Custom words went to the model as vocabulary; skip fuzzy correction.
+    /// Custom words went to the model as true hotword vocabulary; skip fuzzy correction
+    /// only when every custom word was sent to a non-Whisper vocabulary backend.
     fn custom_words_prompted(&self) -> bool {
-        !self.run_options.vocabulary.is_empty()
+        self.all_custom_words_prompted
     }
 
     /// The language the runs were in. When the model decided, the language
@@ -1568,7 +1771,11 @@ fn run_setup(
         language
     };
 
-    let vocabulary = vocabulary_for_model(info.supports_vocabulary, &settings.custom_words);
+    let is_whisper = info.arch.eq_ignore_ascii_case("whisper");
+    let vocabulary =
+        vocabulary_for_model(&info.arch, info.supports_vocabulary, &settings.custom_words);
+    let all_custom_words_prompted =
+        info.supports_vocabulary && !is_whisper && !settings.custom_words.is_empty();
     let prompt = crate::flow::multilingual::build_initial_prompt(
         info.supports_initial_prompt,
         info.supports_vocabulary,
@@ -1583,6 +1790,35 @@ fn run_setup(
     } else {
         TimestampKind::Auto
     };
+
+    // Whisper defaults in transcribe-cpp run a 6-tier temperature ladder
+    // (`0.0, 0.2, 0.4, 0.6, 0.8, 1.0`) where the `T=1.0` random sample wins
+    // unconditionally whenever `no_speech_prob <= 0.60`, stalling hesitation
+    // chunks for 7-10 s and spewing multilingual hallucinations. Pin Pass 1
+    // to deterministic greedy decode (`T=0.0`, `temperature_inc=0.0`) with
+    // tight compression/no-speech gating, and pin forced `<|lang|>` retries
+    // (`urdu_retry_options` / `spoken_candidate_options`) to reject mismatched
+    // language hypotheses immediately (`no_speech_thold = -1.0`, `logprob_thold = -0.85`).
+    let whisper_pass1_ext = is_whisper.then(|| {
+        RunExtension::Whisper(WhisperRunOptions {
+            temperature: Some(0.0),
+            temperature_inc: Some(0.0),
+            compression_ratio_thold: Some(2.2),
+            logprob_thold: Some(-1.0),
+            no_speech_thold: Some(0.30),
+            ..Default::default()
+        })
+    });
+    let whisper_strict_ext = is_whisper.then(|| {
+        RunExtension::Whisper(WhisperRunOptions {
+            temperature: Some(0.0),
+            temperature_inc: Some(0.0),
+            compression_ratio_thold: Some(2.2),
+            logprob_thold: Some(-0.85),
+            no_speech_thold: Some(-1.0),
+            ..Default::default()
+        })
+    });
 
     let urdu_retry_options = if !output_was_translated
         && applied_language_hint.as_deref() != Some("ur")
@@ -1602,6 +1838,7 @@ fn run_setup(
                 script_pref,
                 &settings.custom_words,
             ),
+            family: whisper_strict_ext.clone(),
             ..Default::default()
         })
     } else {
@@ -1616,19 +1853,6 @@ fn run_setup(
             .eq_ignore_ascii_case("auto")
         && !settings.spoken_languages.is_empty()
     {
-        let whisper_candidate_ext = info.arch.eq_ignore_ascii_case("whisper").then(|| {
-            // Force a single deterministic greedy decode (`T=0.0`, `temperature_inc=0.0`)
-            // and reject acoustically mismatched forced `<|lang|>` probes (`avg_logprob < -0.90`
-            // via `no_speech_thold = -1.0`) so wrong-language probes never escalate to `T=1.0`
-            // random sampling hallucinations.
-            RunExtension::Whisper(WhisperRunOptions {
-                temperature: Some(0.0),
-                temperature_inc: Some(0.0),
-                logprob_thold: Some(-0.90),
-                no_speech_thold: Some(-1.0),
-                ..Default::default()
-            })
-        });
         crate::flow::multilingual::candidate_languages_for_spoken(
             &settings.spoken_languages,
             script_pref,
@@ -1651,7 +1875,7 @@ fn run_setup(
                 target_language: None,
                 vocabulary: vocabulary.clone(),
                 prompt: cand_prompt,
-                family: whisper_candidate_ext.clone(),
+                family: whisper_strict_ext.clone(),
                 ..Default::default()
             };
             (cand_lang, opts)
@@ -1674,6 +1898,7 @@ fn run_setup(
         target_language: run_plan.target_language,
         vocabulary,
         prompt,
+        family: whisper_pass1_ext,
         ..Default::default()
     };
 
@@ -1697,6 +1922,8 @@ fn run_setup(
         selected_language: settings.selected_language.clone(),
         urdu_retry_options,
         spoken_candidate_options,
+        prior_chunk_language: None,
+        all_custom_words_prompted,
     }
 }
 
@@ -1708,24 +1935,54 @@ fn engine_error(e: EngineError) -> anyhow::Error {
     }
 }
 
+fn coalesce_short_clauses(ranges: Vec<std::ops::Range<usize>>) -> Vec<std::ops::Range<usize>> {
+    let min_samples =
+        lowyap_ports::ChunkingPolicy::live_dictation().min_bilingual_clause_ms as usize * 16;
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        if let Some(previous) = merged.last_mut() {
+            if previous.end == range.start && previous.end - previous.start < min_samples {
+                previous.end = range.end;
+                continue;
+            }
+        }
+        merged.push(range);
+    }
+    merged
+}
+
+static LAST_DECODE_CHUNK_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub(crate) fn record_last_decode_chunk_count(count: u32) {
+    LAST_DECODE_CHUNK_COUNT.store(count, Ordering::Relaxed);
+}
+
+/// Number of chunks decoded during the most recent transcription call in this process.
+pub fn last_decode_chunk_count() -> u32 {
+    LAST_DECODE_CHUNK_COUNT.load(Ordering::Relaxed)
+}
+
 /// One transcription's text from its chunks, in order, and the model's
 /// detected language (Whisper's audio-based LID, auto mode only; `None` when a
 /// language hint was passed). Chunks that disagree leave it unknown. A single
 /// transcript passes through untouched.
-fn join_chunks(transcripts: Vec<Transcript>) -> (String, Option<String>) {
-    let language = agreed_language(&transcripts);
-    let text = match <[Transcript; 1]>::try_from(transcripts) {
-        Ok([one]) => one.text,
-        Err(many) => {
-            chunking::join_transcripts(&many.iter().map(|t| t.text.as_str()).collect::<Vec<_>>())
-        }
+fn join_chunks(transcripts: Vec<(Transcript, bool)>) -> (String, Option<String>) {
+    let language = agreed_language(transcripts.iter().map(|(t, _)| t));
+    let text = match <[(Transcript, bool); 1]>::try_from(transcripts) {
+        Ok([(one, _)]) => one.text,
+        Err(many) => chunking::join_transcript_boundaries(
+            &many
+                .iter()
+                .map(|(t, ov)| (t.text.as_str(), *ov))
+                .collect::<Vec<_>>(),
+        ),
     };
     (text, language)
 }
 
 /// The language every chunk's model reported, if they all agree.
-fn agreed_language(transcripts: &[Transcript]) -> Option<String> {
-    let mut detected = transcripts.iter().map(|t| t.language.clone());
+fn agreed_language<'a>(transcripts: impl IntoIterator<Item = &'a Transcript>) -> Option<String> {
+    let mut detected = transcripts.into_iter().map(|t| t.language.clone());
     detected
         .next()
         .flatten()
@@ -1916,11 +2173,30 @@ fn with_model_detected_language(
 /// Custom words for transcribe-cpp's `vocabulary` slot, in priority order.
 /// Empty for models without Feature::Vocabulary, which would warn on every run
 /// and rely on fuzzy correction instead.
-fn vocabulary_for_model(supports_vocabulary: bool, custom_words: &[String]) -> Vec<String> {
-    if supports_vocabulary {
-        custom_words.to_vec()
+///
+/// On Whisper, `transcribe-cpp` renders `vocabulary` as `" Glossary: <terms>"`
+/// inside `<|startofprev|>`, which acts as an unpunctuated continuation prefix
+/// rather than true hotword biasing and causes Whisper to hallucinate ASCII
+/// brand tokens over unrelated spoken nouns on pause boundaries (e.g. replacing
+/// `"transcription"` with `"LOWYAP"`). ASCII custom words are therefore left to
+/// deterministic Soundex + Levenshtein n-gram post-correction (`apply_custom_words`)
+/// and Stage-B `lexicon_terms`, while non-ASCII Unicode terms still pass through.
+fn vocabulary_for_model(
+    arch: &str,
+    supports_vocabulary: bool,
+    custom_words: &[String],
+) -> Vec<String> {
+    if !supports_vocabulary {
+        return Vec::new();
+    }
+    if arch.eq_ignore_ascii_case("whisper") {
+        custom_words
+            .iter()
+            .filter(|w| !w.is_ascii())
+            .cloned()
+            .collect()
     } else {
-        Vec::new()
+        custom_words.to_vec()
     }
 }
 
@@ -2346,6 +2622,30 @@ pub fn get_available_accelerators(tm: &TranscriptionManager) -> AvailableAcceler
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_bilingual_clauses_coalesce_without_losing_ranges_or_crossing_gaps() {
+        let ranges: Vec<_> = (0..45).map(|i| i * 48_000..(i + 1) * 48_000).collect();
+        let merged = coalesce_short_clauses(ranges);
+        assert_eq!(merged.len(), 12);
+        assert_eq!(merged.first().unwrap().start, 0);
+        assert_eq!(merged.last().unwrap().end, 45 * 48_000);
+        assert!(merged.windows(2).all(|pair| pair[0].end == pair[1].start));
+        assert_eq!(
+            coalesce_short_clauses(vec![0..16_000, 32_000..48_000]),
+            vec![0..16_000, 32_000..48_000]
+        );
+        assert_eq!(
+            coalesce_short_clauses(vec![0..176_000, 176_000..192_000]),
+            vec![0..176_000, 176_000..192_000]
+        );
+        // Live chunks (~4.5s-6.5s) and sub-11s clips coalesce micro-clauses into a
+        // single ASR pass instead of running 3-4 separate 30s-padded Whisper passes.
+        assert_eq!(
+            coalesce_short_clauses(vec![0..35_200, 35_200..76_800, 76_800..104_000]),
+            vec![0..104_000]
+        );
+    }
 
     fn languages(codes: &[&str]) -> Vec<String> {
         codes.iter().map(|code| (*code).to_string()).collect()
@@ -2802,6 +3102,82 @@ mod tests {
             .prompt
             .as_deref()
             .is_some_and(|p| p.contains("اردو اور عربی")));
+        assert!(retry.family.is_some());
+    }
+
+    #[test]
+    fn whisper_vocab_supported_keeps_ascii_glossary_out_of_startofprev_and_preserves_nouns() {
+        let info = LoadedInfo {
+            arch: "whisper".to_string(),
+            variant: "large-v3".to_string(),
+            backend: "metal".to_string(),
+            device: "Apple M3".to_string(),
+            on_gpu: true,
+            capabilities: transcribe_cpp::Capabilities {
+                native_sample_rate: 16_000,
+                languages: languages(&["en", "ur", "hi"]),
+                translate_target_languages: languages(&["en"]),
+                max_timestamp_kind: transcribe_cpp::TimestampKind::Segment,
+                supports_language_detect: true,
+                supports_translate: true,
+                supports_streaming: false,
+                supports_spec_decode: false,
+                max_audio_ms: 30_000,
+            },
+            supports_initial_prompt: true,
+            supports_long_form: true,
+            supports_vocabulary: true,
+        };
+        let settings = AppSettings {
+            selected_language: "auto".to_string(),
+            spoken_languages: languages(&["en", "ur"]),
+            custom_words: vec!["LOWYAP".to_string()],
+            ..Default::default()
+        };
+
+        let setup = run_setup(
+            &info,
+            &settings,
+            LanguageDecision {
+                language: None,
+                source: LanguageSource::Model,
+            },
+            crate::flow::multilingual::HindustaniScript::Auto,
+        );
+
+        assert!(
+            setup.run_options.vocabulary.is_empty(),
+            "Whisper must not inject ASCII custom words into <|startofprev|> Glossary"
+        );
+        assert!(setup.run_options.prompt.is_none());
+        assert!(setup.run_options.family.is_some());
+        assert!(
+            !setup.custom_words_prompted(),
+            "post-ASR fuzzy custom_words must remain active on Whisper"
+        );
+
+        let evidence = OutputLanguageEvidence::ModelDetected("en".to_string());
+        let supported = languages(&["en", "ur"]);
+        assert_eq!(
+            post_process_transcription_text(
+                "But before that can you check the latest transcription".to_string(),
+                &settings,
+                setup.custom_words_prompted(),
+                &evidence,
+                &supported,
+            ),
+            "But before that can you check the latest transcription"
+        );
+        assert_eq!(
+            post_process_transcription_text(
+                "Can you check the latest loyap build".to_string(),
+                &settings,
+                setup.custom_words_prompted(),
+                &evidence,
+                &supported,
+            ),
+            "Can you check the latest LOWYAP build"
+        );
     }
 
     #[test]
@@ -2837,6 +3213,8 @@ mod tests {
             "Hello aap kya karte hain?"
         );
 
+        // Pure phrase-tiling phantom loop is dropped outright (`""`), whereas a
+        // trailing decoder loop after real speech collapses to one occurrence.
         assert_eq!(
             post_process_transcription_text_with_script(
                 "Thank you. Thank you. Thank you. Thank you. Thank you.".to_string(),
@@ -2846,7 +3224,30 @@ mod tests {
                 &supported,
                 crate::flow::multilingual::HindustaniScript::Auto,
             ),
-            "Thank you."
+            ""
+        );
+        assert_eq!(
+            post_process_transcription_text_with_script(
+                "Ship the build today. Thank you. Thank you. Thank you. Thank you. Thank you."
+                    .to_string(),
+                &settings,
+                false,
+                &OutputLanguageEvidence::ModelDetected("en".to_string()),
+                &supported,
+                crate::flow::multilingual::HindustaniScript::Auto,
+            ),
+            "Ship the build today. Thank you."
+        );
+        assert_eq!(
+            post_process_transcription_text_with_script(
+                "और भाई बताओ क्या चल रहा है?".to_string(),
+                &settings,
+                false,
+                &OutputLanguageEvidence::ModelDetected("hi".to_string()),
+                &supported,
+                crate::flow::multilingual::HindustaniScript::Auto,
+            ),
+            "Aur bhai batao kya chal raha hai?"
         );
     }
 

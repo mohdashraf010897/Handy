@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -33,11 +34,23 @@ import {
   useTranscriptionJobsStore,
   type ActiveJobStatus,
 } from "@/stores/transcriptionJobsStore";
-import { formatDateTime } from "@/utils/dateFormat";
+import { formatDate, formatDateTime } from "@/utils/dateFormat";
 import { AudioPlayer, AudioPlayerGroup } from "../../ui/AudioPlayer";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
 import { copyToClipboard } from "./clipboard";
+import { DictationTelemetryStrip } from "./DictationTelemetryStrip";
+import {
+  detectRtfConvention,
+  formatAudioDuration,
+  formatSpeedNumber,
+  formatWaitMs,
+  hasDistinctPolishedAndRaw,
+  hasEntryTelemetry,
+  resolveEntrySpeedMultiplier,
+  resolveLinguistStage,
+  type RtfConvention,
+} from "./telemetry";
 import { pickAndTranscribeFiles } from "./transcribeFiles";
 
 function normalizeDictionaryCandidate(raw: string): string {
@@ -139,8 +152,34 @@ const HeaderButton: React.FC<HeaderButtonProps> = ({
   </Button>
 );
 
-export const HistorySettings: React.FC = () => {
-  const { t } = useTranslation();
+export interface HistorySettingsProps {
+  embedded?: boolean;
+  onEntriesSummary?: (summary: {
+    loadedCount: number;
+    wordCount: number;
+  }) => void;
+  onOpenModels?: () => void;
+}
+
+function countEntryWords(entry: HistoryEntry): number {
+  const text = (entry.post_processed_text ?? entry.transcription_text).trim();
+  if (!text) return 0;
+  return text.split(/\s+/).length;
+}
+
+function toDayKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export const HistorySettings: React.FC<HistorySettingsProps> = ({
+  embedded = false,
+  onEntriesSummary,
+  onOpenModels,
+}) => {
+  const { t, i18n } = useTranslation();
   const osType = useOsType();
   const jobs = useTranscriptionJobsStore((state) => state.jobs);
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
@@ -358,6 +397,57 @@ export const HistorySettings: React.FC = () => {
     [t],
   );
 
+  const rtfConvention = useMemo(() => detectRtfConvention(entries), [entries]);
+
+  const wordCount = useMemo(
+    () => entries.reduce((sum, entry) => sum + countEntryWords(entry), 0),
+    [entries],
+  );
+
+  useEffect(() => {
+    onEntriesSummary?.({ loadedCount: entries.length, wordCount });
+  }, [entries.length, wordCount, onEntriesSummary]);
+
+  const dayGroups = useMemo(() => {
+    if (!embedded || entries.length === 0) return [];
+    const now = new Date();
+    const todayKey = toDayKey(now);
+    const yesterdayKey = toDayKey(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+    );
+    const groups: Array<{
+      key: string;
+      label: string;
+      items: HistoryEntry[];
+    }> = [];
+
+    for (const entry of entries) {
+      const tsMs =
+        entry.timestamp > 1e12 ? entry.timestamp : entry.timestamp * 1000;
+      const entryDate = new Date(tsMs);
+      const key = Number.isNaN(entryDate.getTime())
+        ? String(entry.timestamp)
+        : toDayKey(entryDate);
+      let label: string;
+      if (key === todayKey) {
+        label = t("studio.desk.dayToday", { defaultValue: "Today" });
+      } else if (key === yesterdayKey) {
+        label = t("studio.desk.dayYesterday", { defaultValue: "Yesterday" });
+      } else {
+        label = formatDate(String(Math.floor(tsMs / 1000)), i18n.language);
+      }
+
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup && lastGroup.key === key) {
+        lastGroup.items.push(entry);
+      } else {
+        groups.push({ key, label, items: [entry] });
+      }
+    }
+
+    return groups;
+  }, [embedded, entries, i18n.language, t]);
+
   let content: React.ReactNode;
 
   if (loading) {
@@ -372,6 +462,50 @@ export const HistorySettings: React.FC = () => {
         {t("settings.history.empty")}
       </div>
     );
+  } else if (embedded) {
+    content = (
+      <>
+        <AudioPlayerGroup>
+          <div className="divide-y divide-line">
+            {dayGroups.map((group) => (
+              <div key={group.key} className="divide-y divide-line">
+                <div className="px-4 py-2 bg-rail flex items-center justify-between gap-2 text-xs font-mono text-ink-2">
+                  <span className="font-medium text-text">{group.label}</span>
+                  <span className="tabular-nums text-ink-3">
+                    {t("studio.desk.dayTakesCount", {
+                      count: group.items.length,
+                    })}
+                  </span>
+                </div>
+                <div className="divide-y divide-line">
+                  {group.items.map((entry) => (
+                    <HistoryEntryComponent
+                      key={entry.id}
+                      entry={entry}
+                      job={jobs[entry.id]}
+                      rtfConvention={rtfConvention}
+                      onToggleSaved={() => toggleSaved(entry.id)}
+                      onCopyText={(text) => copyToClipboard(text)}
+                      getAudioUrl={getAudioUrl}
+                      deleteAudio={deleteAudioEntry}
+                      retryTranscription={
+                        commands.retryHistoryEntryTranscription
+                      }
+                      cancelTranscription={
+                        commands.cancelHistoryEntryTranscription
+                      }
+                      onCorrectAndSave={correctEntryAndSaveWord}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </AudioPlayerGroup>
+        {/* Sentinel for infinite scroll */}
+        <div ref={sentinelRef} className="h-1" />
+      </>
+    );
   } else {
     content = (
       <>
@@ -382,12 +516,9 @@ export const HistorySettings: React.FC = () => {
                 key={entry.id}
                 entry={entry}
                 job={jobs[entry.id]}
+                rtfConvention={rtfConvention}
                 onToggleSaved={() => toggleSaved(entry.id)}
-                onCopyText={() =>
-                  copyToClipboard(
-                    entry.post_processed_text ?? entry.transcription_text,
-                  )
-                }
+                onCopyText={(text) => copyToClipboard(text)}
                 getAudioUrl={getAudioUrl}
                 deleteAudio={deleteAudioEntry}
                 retryTranscription={commands.retryHistoryEntryTranscription}
@@ -403,8 +534,40 @@ export const HistorySettings: React.FC = () => {
     );
   }
 
+  if (embedded) {
+    return (
+      <div className="w-full space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-text tracking-tight">
+            {t("studio.desk.takesHeading", { defaultValue: "Recent Takes" })}
+          </h2>
+          <div className="flex items-center gap-2">
+            <HeaderButton
+              onClick={transcribeFile}
+              label={t("settings.history.transcribeFile")}
+              icon={FilePlus}
+            />
+            <HeaderButton
+              onClick={openRecordingsFolder}
+              label={t("settings.history.openFolder")}
+              icon={FolderOpen}
+            />
+          </div>
+        </div>
+        <DictationTelemetryStrip
+          entries={entries}
+          onOpenModels={onOpenModels}
+        />
+        <div className="rounded-card border border-line bg-surface overflow-visible">
+          {content}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
+      <DictationTelemetryStrip entries={entries} onOpenModels={onOpenModels} />
       <div className="space-y-2">
         <div className="px-4 flex items-center justify-between">
           <div>
@@ -436,8 +599,9 @@ export const HistorySettings: React.FC = () => {
 interface HistoryEntryProps {
   entry: HistoryEntry;
   job?: ActiveJobStatus;
+  rtfConvention: RtfConvention;
   onToggleSaved: () => void;
-  onCopyText: () => Promise<boolean>;
+  onCopyText: (text: string) => Promise<boolean>;
   getAudioUrl: (fileName: string) => Promise<string | null>;
   deleteAudio: (id: number) => Promise<void>;
   retryTranscription: (id: number) => Promise<void>;
@@ -452,6 +616,7 @@ interface HistoryEntryProps {
 const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   entry,
   job,
+  rtfConvention,
   onToggleSaved,
   onCopyText,
   getAudioUrl,
@@ -464,7 +629,14 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   const [showCopied, setShowCopied] = useState(false);
   // Pressed cancel: a running job stops after its current chunk.
   const [cancelling, setCancelling] = useState(false);
-  const displayedText = entry.post_processed_text ?? entry.transcription_text;
+  const canTogglePolishedRaw = hasDistinctPolishedAndRaw(entry);
+  const [transcriptView, setTranscriptView] = useState<"polished" | "raw">(
+    "polished",
+  );
+  const showingRaw = canTogglePolishedRaw && transcriptView === "raw";
+  const displayedText = showingRaw
+    ? entry.transcription_text
+    : (entry.post_processed_text ?? entry.transcription_text);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -473,8 +645,21 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   const [dictionaryWordTouched, setDictionaryWordTouched] = useState(false);
   const [savingCorrection, setSavingCorrection] = useState(false);
   const textRef = useRef<HTMLParagraphElement>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingSelectionRef = useRef("");
+
+  useLayoutEffect(() => {
+    if (!isEditing) return;
+    const container = editorContainerRef.current;
+    if (container && container.contains(document.activeElement)) return;
+    const textarea = editTextareaRef.current;
+    if (textarea) {
+      textarea.focus();
+      const len = textarea.value.length;
+      textarea.setSelectionRange(len, len);
+    }
+  }, [isEditing]);
 
   // Queued or being transcribed in the background.
   const retrying = job !== undefined;
@@ -524,14 +709,6 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
     setDictionaryWord(selectedWord);
     setDictionaryWordTouched(selectedWord.length > 0);
     setIsEditing(true);
-    requestAnimationFrame(() => {
-      const textarea = editTextareaRef.current;
-      if (textarea) {
-        textarea.focus();
-        const len = textarea.value.length;
-        textarea.setSelectionRange(len, len);
-      }
-    });
   };
 
   const handleCancelEdit = () => {
@@ -610,7 +787,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
       return;
     }
 
-    const copied = await onCopyText();
+    const copied = await onCopyText(displayedText);
     if (!copied) {
       toast.error(t("settings.history.copyError"));
       return;
@@ -630,6 +807,86 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   };
 
   const formattedDate = formatDateTime(String(entry.timestamp), i18n.language);
+
+  const showTelemetry = !retrying && hasEntryTelemetry(entry);
+  const showLedgerBar = showTelemetry || (!retrying && canTogglePolishedRaw);
+
+  const audioDurationText =
+    entry.audio_duration_s != null && entry.audio_duration_s > 0
+      ? formatAudioDuration(entry.audio_duration_s)
+      : null;
+
+  const waitMs = entry.release_to_done_ms;
+  const waitColorClass =
+    waitMs == null
+      ? "text-ink-2"
+      : waitMs < 1500
+        ? "text-moss"
+        : waitMs >= 4000
+          ? "text-warning"
+          : "text-text";
+
+  const waitBreakdownParts: string[] = [];
+  if (entry.asr_ms != null) {
+    waitBreakdownParts.push(
+      t("settings.history.telemetry.tooltipAsr", {
+        value: `${Math.round(entry.asr_ms)}ms`,
+      }),
+    );
+  }
+  if (entry.cleanup_ms != null) {
+    waitBreakdownParts.push(
+      t("settings.history.telemetry.tooltipLinguist", {
+        value: `${Math.round(entry.cleanup_ms)}ms`,
+      }),
+    );
+  }
+  if (entry.paste_ms != null) {
+    waitBreakdownParts.push(
+      t("settings.history.telemetry.tooltipPaste", {
+        value: `${Math.round(entry.paste_ms)}ms`,
+      }),
+    );
+  }
+  if (entry.asr_model_id) {
+    waitBreakdownParts.push(
+      t("settings.history.telemetry.tooltipModel", {
+        value: entry.asr_model_id,
+      }),
+    );
+  }
+  if (entry.linguist_provider_id) {
+    waitBreakdownParts.push(
+      t("settings.history.telemetry.tooltipProvider", {
+        value: entry.linguist_provider_id,
+      }),
+    );
+  }
+  const waitTooltip =
+    waitBreakdownParts.length > 0 ? waitBreakdownParts.join(" · ") : undefined;
+
+  const entrySpeedFormatted = formatSpeedNumber(
+    resolveEntrySpeedMultiplier(entry, rtfConvention),
+  );
+
+  const liveChunksCount =
+    entry.chunks_predecoded_live != null && entry.chunks_predecoded_live > 0
+      ? entry.chunks_predecoded_live
+      : null;
+
+  const stageKind = resolveLinguistStage(entry);
+  const stageLabel =
+    stageKind === "polished"
+      ? t("settings.history.telemetry.stagePolished")
+      : stageKind === "fast_polish"
+        ? t("settings.history.telemetry.stageFastPolish")
+        : t("settings.history.telemetry.stageRaw");
+  const stageClassName =
+    stageKind === "polished"
+      ? "text-moss"
+      : stageKind === "fast_polish"
+        ? "text-ink-2"
+        : "text-ink-3";
 
   let progressText = t("settings.history.transcribing");
   if (job?.state === "queued") {
@@ -721,15 +978,101 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
         </div>
       </div>
 
+      {showLedgerBar && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums">
+            {showTelemetry && (
+              <>
+                {audioDurationText && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-wash border border-line text-ink-2">
+                    {t("settings.history.telemetry.pillAudio", {
+                      duration: audioDurationText,
+                    })}
+                  </span>
+                )}
+                {waitMs != null && (
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-full bg-wash border border-line font-medium ${waitColorClass}`}
+                    title={waitTooltip}
+                  >
+                    {t("settings.history.telemetry.pillWait", {
+                      duration: formatWaitMs(waitMs),
+                    })}
+                  </span>
+                )}
+                {entrySpeedFormatted && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-wash border border-line text-ink-2">
+                    {t("settings.history.telemetry.pillThroughput", {
+                      speed: entrySpeedFormatted,
+                    })}
+                  </span>
+                )}
+                {liveChunksCount != null && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-wash border border-line text-moss">
+                    {entry.chunks_total != null && entry.chunks_total > 0
+                      ? t("settings.history.telemetry.pillLive", {
+                          live: liveChunksCount,
+                          total: entry.chunks_total,
+                        })
+                      : t("settings.history.telemetry.pillLiveCount", {
+                          live: liveChunksCount,
+                        })}
+                  </span>
+                )}
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full bg-wash border border-line font-medium ${stageClassName}`}
+                  title={entry.linguist_provider_id ?? undefined}
+                >
+                  {stageLabel}
+                </span>
+              </>
+            )}
+          </div>
+
+          {canTogglePolishedRaw && (
+            <div
+              role="group"
+              aria-label={t("settings.history.telemetry.toggleGroupLabel")}
+              className="inline-flex items-center p-0.5 rounded-md bg-wash border border-line text-[11px] font-medium shrink-0"
+            >
+              <button
+                type="button"
+                aria-pressed={!showingRaw}
+                onClick={() => setTranscriptView("polished")}
+                className={`px-2 py-0.5 rounded-[4px] transition-colors cursor-pointer ${
+                  !showingRaw
+                    ? "bg-background text-text shadow-xs"
+                    : "text-ink-3 hover:text-text"
+                }`}
+              >
+                {t("settings.history.telemetry.togglePolished")}
+              </button>
+              <button
+                type="button"
+                aria-pressed={showingRaw}
+                onClick={() => setTranscriptView("raw")}
+                className={`px-2 py-0.5 rounded-[4px] transition-colors cursor-pointer ${
+                  showingRaw
+                    ? "bg-background text-text shadow-xs"
+                    : "text-ink-3 hover:text-text"
+                }`}
+              >
+                {t("settings.history.telemetry.toggleRaw")}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-col items-start gap-1 pb-2">
         <p
           ref={textRef}
-          className={`italic text-sm w-full ${
+          className={`text-sm leading-relaxed w-full ${
             retrying
-              ? ""
+              ? "italic"
               : hasTranscription
                 ? "text-text select-text cursor-text whitespace-pre-wrap break-words"
-                : "text-ink-3"
+                : "italic text-ink-3"
           }`}
           style={
             retrying
@@ -774,6 +1117,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
         )}
         {isEditing && !retrying && (
           <div
+            ref={editorContainerRef}
             data-testid={`history-inline-editor-${entry.id}`}
             onKeyDown={handleEditorKeyDown}
             className="w-full mt-2 p-3 rounded-md border border-line bg-glass-bg/60 flex flex-col gap-2.5"

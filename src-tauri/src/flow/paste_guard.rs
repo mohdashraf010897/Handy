@@ -168,6 +168,16 @@ pub fn get_last_dictation() -> Option<String> {
     get_dictation(None)
 }
 
+/// Returns the ID of the most recently recorded dictation, if any.
+pub fn latest_dictation_id() -> Option<u32> {
+    RECENT_DICTATIONS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entries
+        .back()
+        .map(|(id, _)| *id)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Barrier;

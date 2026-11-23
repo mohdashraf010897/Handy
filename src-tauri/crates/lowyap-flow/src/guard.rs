@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::accent_asr::inspect_compression_and_confidence;
 use crate::multilingual::{
     effective_hindustani_script, has_spoken_lang, normalize_script_output,
     strip_hallucination_loops, HindustaniScript,
@@ -40,8 +41,11 @@ pub fn pcm_rms_energy(samples: &[f32]) -> f32 {
 }
 
 const SUBTITLE_ARTIFACTS: &str = concat!(
-    r"subtitles by the amara\.org community|amara\.org|",
+    r"subtitles by the amara\.org community|subtítulos realizados por la comunidad de amara\.org|",
+    r"untertitel der amara\.org-community|untertitel im auftrag des zdf|amara\.org|",
     r"Субтитры сделал DimaTorzok|Редактор субтитров|",
+    r"(?:اردو،\s*السلام\s*علیکم[۔.]?\s*)?آج\s+ہم\s+اس\s+موضوع\s+پر\s+بات\s+کریں\s+گے|",
+    r"(?:नमस्ते[,،]?\s*)?आज\s+हम\s+इस\s+विषय\s+पर\s+बात\s+करेंगे|",
     r"ご視聴ありがとうございました|시청해주셔서 감사합니다|謝謝觀看|字幕|موسیقی|موسيقى",
 );
 const BRACKETED_ARTIFACTS: &str = r"blank_audio|(?:upbeat\s+)?music|applause";
@@ -137,16 +141,28 @@ pub fn guard_transcript_text(
     if should_drop(&artifacts_removed, low_confidence, allows_japanese) {
         return String::new();
     }
+    if inspect_compression_and_confidence(
+        &artifacts_removed,
+        ctx.mean_token_prob,
+        ctx.no_speech_prob,
+    )
+    .rejected
+    {
+        return String::new();
+    }
 
     let effective = effective_hindustani_script(script_pref, spoken_languages);
     let roman_lock = effective == HindustaniScript::RomanHinglish;
     // Let the legacy leading "हे" rescue and Roman transliteration run before
-    // locking native text. Translated output must discard stray script instead.
+    // locking native text. Pass `script_pref` so `normalize_script_output` can
+    // distinguish `Auto` from an explicit `UrduPersoArabic` lock, and rescue
+    // unrequested Devanagari into Roman Hinglish instead of letting `lock_scripts`
+    // wipe Hindustani speech into empty text (e.g. `ID=68` on `["en", "ur"]`).
     let normalized = if !ctx.output_was_translated {
         Cow::Owned(normalize_script_output(
             &artifacts_removed,
             spoken_languages,
-            effective,
+            script_pref,
         ))
     } else {
         artifacts_removed
@@ -157,7 +173,8 @@ pub fn guard_transcript_text(
         roman_lock,
         ctx.output_was_translated,
     );
-    let cleaned = strip_hallucination_loops(&locked);
+    let deshrapneled = strip_stray_mixed_script_shrapnel(&locked);
+    let cleaned = strip_hallucination_loops(&deshrapneled);
     if should_drop(&cleaned, low_confidence, allows_japanese) {
         String::new()
     } else {
@@ -168,19 +185,109 @@ pub fn guard_transcript_text(
 fn should_drop(text: &str, low_confidence: bool, allows_japanese: bool) -> bool {
     // Only trim the edges: matching substrings would delete real sentences.
     let text = text.trim_matches(|c: char| !CONTENT.is_match(c.encode_utf8(&mut [0; 4])));
+    if has_perso_arabic_subword_shrapnel(text, low_confidence) {
+        return true;
+    }
     let phrase = text
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_ascii_lowercase();
+        .to_lowercase();
     match phrase.as_str() {
-        "" | "thanks for watching" | "thank you for watching" | "please subscribe" => true,
+        ""
+        | "thanks for watching"
+        | "thank you for watching"
+        | "please subscribe"
+        | "gracias por ver"
+        | "gracias por ver el video"
+        | "danke fürs zuschauen"
+        | "vielen dank fürs zuschauen" => true,
         "ん" => low_confidence || !allows_japanese,
-        "thank you" | "thank you very much" | "bye" | "you" | "شکریہ" | "شكرا" => {
-            low_confidence
-        }
+        "thank you"
+        | "thank you very much"
+        | "bye"
+        | "you"
+        | "gracias"
+        | "muchas gracias"
+        | "vielen dank"
+        | "danke"
+        | "merci"
+        | "merci beaucoup"
+        | "धन्यवाद"
+        | "शुक्रिया"
+        | "شکریہ"
+        | "شكرا" => low_confidence,
         _ => false,
     }
+}
+
+/// Detects Whisper BPE subword shrapnel emitted when forced `<|ur|>` decoding
+/// runs on breath/hesitation noise (e.g. `"جایجا لیٹزو و ٩٥ م ٹ س 15 ر ج"`),
+/// without dropping high-confidence Urdu/Arabic sentences that legitimately name
+/// two single letters (e.g. `"حرف ب اور پ لکھیں"`).
+fn has_perso_arabic_subword_shrapnel(text: &str, low_confidence: bool) -> bool {
+    let mut total_tokens = 0usize;
+    let mut isolated_letters = 0usize;
+    for tok in text.split_whitespace() {
+        total_tokens += 1;
+        let trimmed = tok.trim_matches(|c: char| !c.is_alphabetic());
+        let mut chars = trimmed.chars();
+        if let (Some(only), None) = (chars.next(), chars.next()) {
+            if is_perso_arabic_letter(only) && only != 'و' && only != 'ء' {
+                isolated_letters += 1;
+            }
+        }
+    }
+    if low_confidence {
+        isolated_letters >= 2
+    } else {
+        isolated_letters >= 4 && isolated_letters.saturating_mul(3) >= total_tokens
+    }
+}
+
+/// Strips stray 1-2 character Perso-Arabic subword fragments injected into an
+/// overwhelmingly ASCII-Latin phrase (e.g. `"سی bits come out ی league ou wool"`)
+/// while leaving genuine bilingual Urdu words (`>= 3` Perso-Arabic letters such as
+/// `"بھائی"`, `"انشاءاللہ"`, `"شکریہ"`, `"مسئلہ"`) completely intact.
+fn strip_stray_mixed_script_shrapnel(text: &str) -> Cow<'_, str> {
+    let mut latin_letters = 0usize;
+    let mut arabic_letters = 0usize;
+    for c in text.chars() {
+        if c.is_ascii_alphabetic() {
+            latin_letters += 1;
+        } else if is_perso_arabic_letter(c) {
+            arabic_letters += 1;
+        }
+    }
+    if arabic_letters == 0 || latin_letters < 10 || latin_letters < arabic_letters.saturating_mul(4)
+    {
+        return Cow::Borrowed(text);
+    }
+    let has_real_urdu_word = text
+        .split_whitespace()
+        .any(|tok| tok.chars().filter(|&c| is_perso_arabic_letter(c)).count() >= 3);
+    if has_real_urdu_word {
+        return Cow::Borrowed(text);
+    }
+    let kept: Vec<&str> = text
+        .split_whitespace()
+        .filter(|tok| !tok.chars().any(is_perso_arabic_letter))
+        .collect();
+    Cow::Owned(kept.join(" "))
+}
+
+fn is_perso_arabic_letter(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0620..=0x065F
+            | 0x066E..=0x06D5
+            | 0x06EE..=0x06EF
+            | 0x06FA..=0x06FF
+            | 0x0750..=0x077F
+            | 0x08A0..=0x08FF
+            | 0xFB50..=0xFDFF
+            | 0xFE70..=0xFEFF
+    )
 }
 
 fn lock_scripts(text: &str, langs: &[String], roman_lock: bool, translated: bool) -> String {
@@ -443,6 +550,64 @@ mod tests {
                 ""
             );
         }
+
+        // Regression tests for Take #51 (isolated BPE subword shrapnel) and
+        // Take #54 (1-2 letter Perso-Arabic shrapnel inside English hesitation),
+        // while preserving genuine bilingual Urdu words.
+        let bilingual = langs(&["en", "ur"]);
+        assert_eq!(
+            guard_transcript_text(
+                "جایجا لیٹزو و ٩٥ م ٹ س 15 ر ج و ان پندرہ ج پندرہ س ر م س اللہ",
+                &bilingual,
+                HindustaniScript::UrduPersoArabic,
+                SilenceGuardContext::default()
+            ),
+            ""
+        );
+        assert_eq!(
+            guard_transcript_text(
+                "سی bits come out ی league ou wool.",
+                &bilingual,
+                HindustaniScript::UrduPersoArabic,
+                SilenceGuardContext::default()
+            ),
+            "bits come out league ou wool."
+        );
+        assert_eq!(
+            guard_transcript_text(
+                "Sure بھائی، انشاءاللہ we will ship today.",
+                &bilingual,
+                HindustaniScript::UrduPersoArabic,
+                SilenceGuardContext::default()
+            ),
+            "Sure بھائی، انشاءاللہ we will ship today."
+        );
+        // High-confidence Urdu sentence naming two single letters must be preserved,
+        // while low-confidence noise with two isolated letters is still dropped.
+        assert_eq!(
+            guard_transcript_text(
+                "حرف ب اور پ لکھیں",
+                &langs(&["ur"]),
+                HindustaniScript::UrduPersoArabic,
+                SilenceGuardContext {
+                    mean_token_prob: Some(0.82),
+                    ..SilenceGuardContext::default()
+                }
+            ),
+            "حرف ب اور پ لکھیں"
+        );
+        assert_eq!(
+            guard_transcript_text(
+                "م س",
+                &langs(&["ur"]),
+                HindustaniScript::UrduPersoArabic,
+                SilenceGuardContext {
+                    mean_token_prob: Some(0.18),
+                    ..SilenceGuardContext::default()
+                }
+            ),
+            ""
+        );
     }
 
     #[test]
@@ -519,6 +684,28 @@ mod tests {
             ),
             "Hey, can you hear me out?"
         );
+        // Regression test for Nov 23 12:10 PM (`ID=68`): pure Devanagari
+        // Hindustani decoded under `["en", "ur"]` + `Auto` must transliterate
+        // to Roman Hinglish rather than being wiped to `""` by `lock_scripts`.
+        assert_eq!(
+            guard_transcript_text(
+                "और भाई बताओ क्या चल रहा है?",
+                &langs(&["en", "ur"]),
+                HindustaniScript::Auto,
+                SilenceGuardContext::default(),
+            ),
+            "Aur bhai batao kya chal raha hai?"
+        );
+        // Prompt-echo cliché hallucinations are stripped cleanly.
+        assert_eq!(
+            guard_transcript_text(
+                "آج ہم اس موضوع پر بات کریں گے۔",
+                &langs(&["en", "ur"]),
+                HindustaniScript::Auto,
+                SilenceGuardContext::default(),
+            ),
+            ""
+        );
     }
 
     #[test]
@@ -574,5 +761,36 @@ mod tests {
         assert_eq!(pcm_rms_energy(&[]), 0.0);
         assert_eq!(pcm_rms_energy(&[-0.25, 0.25]), 0.25);
         assert_eq!(pcm_rms_energy(&[1.0, f32::NAN, f32::INFINITY, 0.0]), 0.5);
+    }
+
+    #[test]
+    fn compression_gate_drops_multilingual_loops_while_preserving_short_code_switches() {
+        let spoken = langs(&["en", "ur"]);
+        let ctx = SilenceGuardContext::default();
+        for loop_text in [
+            "Thank you. Thank you. Thank you. Thank you.",
+            "اور اور اور اور اور",
+            "هاهاهاهاهاهاهاهاهاهاهاهاهاهاهاهاهاها",
+        ] {
+            assert_eq!(
+                guard_transcript_text(loop_text, &spoken, HindustaniScript::Auto, ctx),
+                "",
+                "expected loop rejection for: {loop_text}"
+            );
+        }
+
+        assert_eq!(
+            guard_transcript_text(
+                "Let's ship this aur bhai kal milte hain",
+                &spoken,
+                HindustaniScript::Auto,
+                ctx
+            ),
+            "Let's ship this aur bhai kal milte hain"
+        );
+        assert_eq!(
+            guard_transcript_text("یہ PR merge کر دو", &spoken, HindustaniScript::Auto, ctx),
+            "یہ PR merge کر دو"
+        );
     }
 }

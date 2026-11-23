@@ -1,37 +1,31 @@
-# lowyap brand
+# lowyap brand ("Vocal Hardware" — Low-Frequency Terrace)
 
 **lowyap** — always lowercase ("lowkey" + "yap"). Tagline: _lowkey yap. it types._
 
 ## Concept
 
-A speech bubble whose tail sits **low** (bottom-left), with a typing cursor
-(`_`) resting low inside it: you talk, it types. Original artwork, drawn on a
-64-unit grid; it shares nothing with the upstream Handy name, mascot or icons.
+An anodized Machined Carbon double-bevel hardware keycap (`#27272B -> #0E0E10` skirt, `#141417` recessed dish, tactile Signal Vermilion homing bar) framing four asymmetric Warm Stone vocal-cadence terrace bars ("lowkey yap") stepping down onto a horizontal Signal Vermilion **`_`** terminal underscore LED ("it types"). Zero chat-bubble messenger silhouette, zero centered symmetric equalizer clone, and zero SaaS purple.
 
-| State        | Mark inside the bubble                   |
-| ------------ | ---------------------------------------- |
-| idle         | cursor `_` (cut out)                     |
-| recording    | ringed "live" dot (red on Windows/Linux) |
-| transcribing | three dots `…` (cut out)                 |
-| warning      | amber badge with `!`, top-right, gap-cut |
-
-The mascot is the same bubble with two eyes and a cursor for a mouth.
-The wordmark is monoline lowercase (11-unit stroke, round caps) followed by
-the violet cursor.
+| State        | Menu-bar glyph (`tray_*.png` / `TrayIcon.tsx`)                  |
+| ------------ | --------------------------------------------------------------- |
+| idle         | 3 asymmetric terrace bars + `_` cursor (AppKit alpha template)  |
+| recording    | 3 terrace bars + live Signal Vermilion LED dot & `_` cursor     |
+| transcribing | three rhythmic dots `…` + `_` cursor (AppKit alpha template)    |
+| warning      | amber badge with `!`, top-right, cleanly gap-cut                |
 
 ## Colors (`design/brand/brand.json`)
 
-| Token         | Hex       | Use                                                         |
-| ------------- | --------- | ----------------------------------------------------------- |
-| violet        | `#7C5CFF` | brand mark accent: app icon bubble, wordmark cursor         |
-| violetUi      | `#6946E5` | interactive primary UI & light-mode overlay (WCAG AA 5.5:1) |
-| violetUiHover | `#5B38D6` | primary button hover                                        |
-| violetLight   | `#B9A8FF` | soft washes & light-mode decorative fills                   |
-| violetDark    | `#A08CFF` | dark-mode brand & overlay accent (5.4:1 on `#2c2b29`)       |
-| ink           | `#121117` | app-icon plate base (`#24222E` -> `#121117`), dark tray     |
-| paper         | `#FFFFFF` | light tray glyphs, cursor on violet                         |
-| live          | `#FF3B4E` | recording dot (`#E5203A` on light bars)                     |
-| warn          | `#FFB020` | warning badge (`#E08600` on light bars)                     |
+| Token            | Hex       | Use                                                           |
+| ---------------- | --------- | ------------------------------------------------------------- |
+| vermilion        | `#FF6B3D` | dark-mode brand & `_` cursor LED                              |
+| vermilionUi      | `#C0320C` | light-mode primary CTA & `_` cursor (`>= 5.07:1` WCAG AA)     |
+| vermilionUiHover | `#A32807` | light-mode primary hover                                      |
+| carbon           | `#111113` | dark canvas & keycap housing                                  |
+| stone            | `#F4F2EC` | light canvas & sculpted `y` legend                            |
+| ink              | `#141412` | primary light-mode text & dark tray template                  |
+| paper            | `#FFFFFF` | elevated light surface & light tray template                  |
+| live             | `#FF5A26` | recording dot (`#C0320C` on light bars)                       |
+| warn             | `#FBBF24` | warning badge (`#9A5200` on light bars)                       |
 
 ## Files
 
@@ -60,11 +54,13 @@ On macOS, `Idle` and `Transcribing` use `as_template = true` (pure AppKit alpha 
 `Recording` and `Idle + warning` switch `as_template = false` so the live coral-red dot and
 amber Secure Input `!` badge retain semantic color while still cutting out crisp alpha moats.
 
-## Paths for `TrayIcon.tsx` (64x64 viewBox, `fillRule="evenodd"`)
+## Geometry for `TrayIcon.tsx` & `tray_*.png` (`64x64` viewBox)
 
 ```text
-bubble       M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6Z
-idle         bubble + M23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z
-transcribing bubble + M14.75 26A4.75 4.75 0 1 0 24.25 26A4.75 4.75 0 1 0 14.75 26ZM27.25 26A4.75 4.75 0 1 0 36.75 26A4.75 4.75 0 1 0 27.25 26ZM39.75 26A4.75 4.75 0 1 0 49.25 26A4.75 4.75 0 1 0 39.75 26Z
-recording    bubble + M18.75 26A13.25 13.25 0 1 0 45.25 26A13.25 13.25 0 1 0 18.75 26Z (+ live #FF3B4E dot r=7.5 at 32,26)
+bar 1 (mid)     rect x=8    y=26 width=7.4  height=22  rx=3.7
+bar 2 (peak)    rect x=20   y=13 width=7.4  height=35  rx=3.7
+bar 3 (fall)    rect x=32   y=20 width=7.4  height=28  rx=3.7
+underscore `_`  rect x=43.5 y=46 width=15.5 height=7.2 rx=3.6
+recording LED   circle cx=51.25 cy=23 r=6.5 (#FF5A26 dark bar / #C0320C light bar)
+transcribing    circles cx=13,26,39 cy=31 r=4.6 + underscore `_`
 ```

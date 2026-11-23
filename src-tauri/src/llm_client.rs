@@ -455,8 +455,9 @@ pub async fn send_chat_completion_with_schema(
             report_reqwest_error("Failed to read reasoning rejection response", &e)
         });
         info!(
-            "Endpoint rejected request with reasoning disabled (status {}): {}. Retrying without reasoning fields",
-            status, error_text
+            "Endpoint rejected request with reasoning disabled (status {}, {} bytes). Retrying without reasoning fields",
+            status,
+            error_text.len()
         );
 
         request_body.reasoning = ReasoningParams::default();
@@ -489,8 +490,9 @@ pub async fn send_chat_completion_with_schema(
             .await
             .unwrap_or_else(|e| report_reqwest_error("Failed to read API error response", &e));
         return Err(format!(
-            "API request failed with status {}: {}",
-            status, error_text
+            "API request failed with status {} ({} bytes)",
+            status,
+            error_text.len()
         ));
     }
 
@@ -560,8 +562,9 @@ async fn send_anthropic_message(
             .await
             .unwrap_or_else(|e| report_reqwest_error("Failed to read API error response", &e));
         return Err(format!(
-            "API request failed with status {}: {}",
-            status, error_text
+            "Anthropic API request failed with status {} ({} bytes)",
+            status,
+            error_text.len()
         ));
     }
 

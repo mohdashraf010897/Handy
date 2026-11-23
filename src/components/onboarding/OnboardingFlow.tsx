@@ -13,7 +13,7 @@ import type { ChineseScriptChoice } from "@/lib/utils/languageSuggestions";
 import { isChinese } from "@/lib/utils/languageSuggestions";
 import { Welcome } from "./screens/Welcome";
 import { Permissions } from "./screens/Permissions";
-import { Model } from "./screens/Model";
+import { MACOS_NATIVE_SPEECH_ID, Model } from "./screens/Model";
 import { Demo } from "./screens/Demo";
 import { TryIt } from "./screens/TryIt";
 import { useOsType } from "@/hooks/useOsType";
@@ -22,7 +22,10 @@ import { useOnboardingModels } from "./useOnboardingModels";
 import { useModelStore } from "@/stores/modelStore";
 import { moveScreens } from "./screenTransitions";
 import { downloadPick } from "./downloadPick";
+import { resolveOnboardingModelReady } from "./macZeroWaitHelpers";
 import "./screenTransitions.css";
+
+export { resolveOnboardingModelReady };
 
 interface OnboardingFlowProps {
   /** Debug preview: inert (no prompts, downloads or setting writes). */
@@ -59,7 +62,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   // download interrupted by a quit. Reads the store since reset() runs first.
   useEffect(() => {
     if (preview || !models.offered.length) return;
-    const { downloadId } = useOnboardingStore.getState();
+    const { downloadId, modelId } = useOnboardingStore.getState();
+    if (modelId === MACOS_NATIVE_SPEECH_ID) return;
     if (downloadId) {
       const model = models.offered.find((m) => m.id === downloadId);
       if (model && models.downloadState(model).state === "none")
@@ -165,16 +169,56 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   };
 
   const startModel = (id: string) => {
-    if (!preview) downloadPick(models, id, store.downloadId);
+    if (id === MACOS_NATIVE_SPEECH_ID) {
+      if (!preview) {
+        useModelStore.getState().setPendingAutoSelectModelId(null);
+        const previous = models.offered.find((m) => m.id === store.downloadId);
+        const previousInfo = previous && models.infoFor(previous);
+        if (
+          previousInfo &&
+          models.downloadState(previous).state === "downloading"
+        ) {
+          void useModelStore.getState().cancelDownload(previousInfo.id);
+        }
+        void selectModel(MACOS_NATIVE_SPEECH_ID);
+      }
+      store.set({
+        modelId: MACOS_NATIVE_SPEECH_ID,
+        downloadId: null,
+        downloadFailed: false,
+      });
+      return;
+    }
+    if (!preview) {
+      downloadPick(models, id, store.downloadId);
+      const target = models.offered.find((m) => m.id === id);
+      const targetInfo = target && models.infoFor(target);
+      if (targetInfo && !targetInfo.is_downloaded) {
+        useModelStore.getState().setPendingAutoSelectModelId(targetInfo.id);
+      } else {
+        useModelStore.getState().setPendingAutoSelectModelId(null);
+      }
+      if (osType === "macos" && !targetInfo?.is_downloaded && !currentModel) {
+        void selectModel(MACOS_NATIVE_SPEECH_ID);
+      }
+    }
     store.set({
       modelId: id,
       downloadId: id,
     });
   };
-  const downloadNow = preview
-    ? ({ state: "ready" } as const)
-    : models.downloadState(downloaded);
-  const modelReady = downloadNow.state === "ready";
+  const isMacNative = store.modelId === MACOS_NATIVE_SPEECH_ID;
+  const downloadNow =
+    preview || isMacNative
+      ? ({ state: "ready" } as const)
+      : models.downloadState(downloaded);
+  const modelReady = resolveOnboardingModelReady({
+    osType,
+    preview,
+    modelId: store.modelId,
+    isDownloaded: Boolean(downloadedInfo?.is_downloaded),
+    downloadState: downloadNow.state,
+  });
 
   const saveLanguages = () => {
     if (preview) return;
@@ -209,6 +253,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       return (
         <Model
           progress={progress}
+          os={osType}
           models={models}
           onBack={store.returnTo ? () => go(store.returnTo!) : back}
           onChoose={chooseModel}
@@ -220,7 +265,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           progress={progress}
           os={osType}
           ready={modelReady}
-          downloadFailed={downloadNow.state === "failed"}
+          downloadFailed={!modelReady && downloadNow.state === "failed"}
           download={<DownloadStatus models={models} model={downloaded} />}
           onRetry={() => downloaded && startModel(downloaded.id)}
           onBack={back}

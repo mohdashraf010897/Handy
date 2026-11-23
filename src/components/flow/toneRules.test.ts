@@ -87,6 +87,10 @@ assert.deepEqual(DEFAULT_FLOW_SETTINGS, {
   app_tones: [],
   fast_path_enabled: true,
   snippets: [],
+  hindustani_script: "auto",
+  auto_boost_mic_volume: true,
+  mic_boost_target_percent: 85,
+  quiet_speech_agc_enabled: true,
 });
 assert.equal(isFlowCustomized(DEFAULT_FLOW_SETTINGS), false);
 assert.equal(isFlowCustomized(flowSettings()), false);

@@ -3473,6 +3473,7 @@ dependencies = [
 name = "lowyap-summarize"
 version = "0.1.0"
 dependencies = [
+ "lowyap-flow",
  "lowyap-ports",
  "serde",
  "serde_json",

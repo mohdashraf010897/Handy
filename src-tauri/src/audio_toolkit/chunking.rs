@@ -12,22 +12,48 @@ use std::ops::Range;
 
 use anyhow::Result;
 use log::{debug, warn};
-use once_cell::sync::Lazy;
-use regex::Regex;
 
 use super::constants;
 use super::vad::SpeechScorer;
 
 const RATE: usize = constants::WHISPER_SAMPLE_RATE as usize;
 
-const TARGET_SECONDS: f64 = 30.0;
-/// Audio up to this many samples is decoded in one piece; longer audio is cut.
-const MAX_CHUNK_SAMPLES: usize = 40 * RATE;
-const MIN_CHUNK_SAMPLES: usize = 5 * RATE;
-/// Live, a cut is only final once this much audio past its window is scored:
-/// then no cut it allows can leave a short rest, so live cuts match the plan
-/// for the whole clip.
-const LOOKAHEAD_SAMPLES: usize = MIN_CHUNK_SAMPLES;
+/// Clean pause floor (seconds): forced hard cuts or tight pauses shorter than
+/// `250 ms` retain `forced_cut_overlap` samples at the head of the next chunk
+/// so mid-syllable accented words are never sliced at chunk boundaries.
+const CLEAN_PAUSE_MIN_SECONDS: f64 = 0.25;
+
+/// Default sliding audio overlap (`1.6 s` = `25,600` samples at 16 kHz) for
+/// forced/tight cuts in live dictation (`policy.max_chunk_ms <= 20_000`).
+const FORCED_CUT_OVERLAP_SAMPLES: usize = 1600 * RATE / 1000;
+
+struct SamplePolicy {
+    target: usize,
+    max: usize,
+    min: usize,
+    lookahead: usize,
+    forced_cut_overlap: usize,
+}
+
+impl From<lowyap_ports::ChunkingPolicy> for SamplePolicy {
+    fn from(policy: lowyap_ports::ChunkingPolicy) -> Self {
+        let samples =
+            |ms: u64| usize::try_from(ms.saturating_mul(RATE as u64) / 1000).unwrap_or(usize::MAX);
+        let max = samples(policy.max_chunk_ms).max(1);
+        let forced_cut_overlap = if policy.max_chunk_ms <= 20_000 {
+            FORCED_CUT_OVERLAP_SAMPLES
+        } else {
+            0
+        };
+        Self {
+            target: samples(policy.target_chunk_ms).clamp(1, max),
+            max,
+            min: samples(policy.min_chunk_ms).clamp(1, max),
+            lookahead: samples(policy.lookahead_ms),
+            forced_cut_overlap,
+        }
+    }
+}
 
 // Silero's `get_speech_timestamps` defaults, as `VadSession::run` applies them.
 const THRESHOLD: f32 = 0.5;
@@ -117,56 +143,99 @@ fn cut_candidates(segments: &[Range<usize>], samples: usize) -> Vec<CutCandidate
     candidates
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CutPlan {
+    cut: usize,
+    overlap: usize,
+}
+
 /// Greedy, left to right from `from`: each cut is the best-scoring pause
 /// 5-40 s after the previous one, preferring long pauses near 30 s and ones
 /// that leave at least 5 s after them. With no pause, it is a hard cut at 40 s,
 /// or halfway when that would leave under 5 s. Audio of 40 s or less is never
 /// cut. `candidates` must be in order.
+#[cfg(test)]
 fn plan_cuts(candidates: &[CutCandidate], samples: usize, from: usize) -> Vec<usize> {
+    plan_cuts_with_policy(
+        candidates,
+        samples,
+        from,
+        &lowyap_ports::ChunkingPolicy::batch_clip().into(),
+    )
+    .into_iter()
+    .map(|plan| plan.cut)
+    .collect()
+}
+
+fn plan_cuts_with_policy(
+    candidates: &[CutCandidate],
+    samples: usize,
+    from: usize,
+    policy: &SamplePolicy,
+) -> Vec<CutPlan> {
     let mut cuts = Vec::new();
     let mut start = from;
     // Each window starts after the last, so earlier candidates never return.
     let mut first = 0;
-    while samples - start > MAX_CHUNK_SAMPLES {
-        while first < candidates.len() && candidates[first].cut < start + MIN_CHUNK_SAMPLES {
+    while samples - start > policy.max {
+        while first < candidates.len() && candidates[first].cut < start + policy.min {
             first += 1;
         }
         // A pause that leaves under 5 s is only used when no other pause will do.
-        let mut best: Option<(usize, f64)> = None;
-        let mut fallback: Option<(usize, f64)> = None;
-        for candidate in candidates[first..]
+        let mut best: Option<(CutCandidate, f64)> = None;
+        let mut fallback: Option<(CutCandidate, f64)> = None;
+        for &candidate in candidates[first..]
             .iter()
-            .take_while(|candidate| candidate.cut <= start + MAX_CHUNK_SAMPLES)
+            .take_while(|candidate| candidate.cut <= start + policy.max)
         {
             let position = (candidate.cut - start) as f64 / RATE as f64;
-            let off_target = if position > TARGET_SECONDS {
-                0.1 * (position - TARGET_SECONDS)
+            let target_seconds = seconds(policy.target);
+            let off_target = if position > target_seconds {
+                0.1 * (position - target_seconds)
             } else {
-                0.05 * (TARGET_SECONDS - position)
+                0.05 * (target_seconds - position)
             };
             let score = candidate.gap_seconds.min(1.0) - off_target;
-            if samples - candidate.cut >= MIN_CHUNK_SAMPLES
-                && best.is_none_or(|(_, best)| score > best)
-            {
-                best = Some((candidate.cut, score));
+            if samples - candidate.cut >= policy.min && best.is_none_or(|(_, best)| score > best) {
+                best = Some((candidate, score));
             }
             if fallback.is_none_or(|(_, fallback)| score > fallback) {
-                fallback = Some((candidate.cut, score));
+                fallback = Some((candidate, score));
             }
         }
-        let hard_cut = if samples - start < MAX_CHUNK_SAMPLES + MIN_CHUNK_SAMPLES {
+        let hard_cut = if samples - start < policy.max.saturating_add(policy.min) {
             start + (samples - start) / 2
         } else {
-            start + MAX_CHUNK_SAMPLES
+            start + policy.max
         };
-        start = best.or(fallback).map_or(hard_cut, |(cut, _)| cut);
-        cuts.push(start);
+        let (cut, is_clean_pause) = match best.or(fallback) {
+            Some((chosen, _)) => (chosen.cut, chosen.gap_seconds >= CLEAN_PAUSE_MIN_SECONDS),
+            None => (hard_cut, false),
+        };
+        let chunk_len = cut.saturating_sub(start);
+        let max_safe_overlap = chunk_len.saturating_sub(1) / 2;
+        let overlap = if is_clean_pause {
+            0
+        } else {
+            policy.forced_cut_overlap.min(max_safe_overlap)
+        };
+        cuts.push(CutPlan { cut, overlap });
+        let next_start = cut.saturating_sub(overlap);
+        start = if next_start > start { next_start } else { cut };
     }
     cuts
 }
 
 /// Makes a fresh scorer for one clip.
 pub type MakeScorer = Box<dyn Fn() -> Result<Box<dyn SpeechScorer>> + Send>;
+
+/// A chunk cut by [`Chunker`], carrying whether its audio start overlaps with
+/// the tail of the immediately preceding chunk (`plan.overlap > 0`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChunkPiece {
+    pub samples: Vec<f32>,
+    pub overlaps_with_prev: bool,
+}
 
 /// Cuts audio into chunks at pauses as it arrives, and hands each back once
 /// its cut is certain, so it can be decoded while the user is still
@@ -177,6 +246,7 @@ pub type MakeScorer = Box<dyn Fn() -> Result<Box<dyn SpeechScorer>> + Send>;
 /// more is cut and the rest is one chunk: chunking only places cuts, so the
 /// audio is still decoded, as it would be without chunking.
 pub struct Chunker {
+    policy: SamplePolicy,
     make_scorer: MakeScorer,
     /// Made the first time audio has to be scored, so a clip short enough to
     /// be one chunk never loads a VAD.
@@ -193,13 +263,38 @@ pub struct Chunker {
     probs: Vec<f32>,
     start: usize,
     len: usize,
+    next_overlaps_with_prev: bool,
 }
 
 impl Chunker {
     /// `make_scorer` must make a fresh scorer: scores carry on from what it
     /// saw before.
     pub fn new(make_scorer: MakeScorer) -> Self {
+        Self::with_policy(make_scorer, lowyap_ports::ChunkingPolicy::batch_clip())
+    }
+
+    /// Uses engine-independent cut durations, converted to 16 kHz samples.
+    pub fn with_policy(make_scorer: MakeScorer, policy: lowyap_ports::ChunkingPolicy) -> Self {
+        Self::from_sample_policy(make_scorer, policy.into())
+    }
+
+    /// Uses `policy` with an explicit sliding overlap (in milliseconds) retained
+    /// across forced hard cuts or tight pauses (`< 250 ms`).
+    pub fn with_overlap(
+        make_scorer: MakeScorer,
+        policy: lowyap_ports::ChunkingPolicy,
+        forced_cut_overlap_ms: u64,
+    ) -> Self {
+        let mut sample_policy = SamplePolicy::from(policy);
+        sample_policy.forced_cut_overlap =
+            usize::try_from(forced_cut_overlap_ms.saturating_mul(RATE as u64) / 1000)
+                .unwrap_or(usize::MAX);
+        Self::from_sample_policy(make_scorer, sample_policy)
+    }
+
+    fn from_sample_policy(make_scorer: MakeScorer, policy: SamplePolicy) -> Self {
         Self {
+            policy,
             make_scorer,
             scorer: None,
             frame_samples: 0,
@@ -208,6 +303,7 @@ impl Chunker {
             probs: Vec::new(),
             start: 0,
             len: 0,
+            next_overlaps_with_prev: false,
         }
     }
 
@@ -220,6 +316,14 @@ impl Chunker {
     /// Adds audio. Returns the chunks whose cuts this made certain, in order.
     /// A whole clip pushed at once is moved in, not copied.
     pub fn push(&mut self, pcm: impl Into<Vec<f32>>) -> Vec<Vec<f32>> {
+        self.push_pieces(pcm)
+            .into_iter()
+            .map(|piece| piece.samples)
+            .collect()
+    }
+
+    /// Adds audio and returns committed [`ChunkPiece`]s with overlap provenance.
+    pub fn push_pieces(&mut self, pcm: impl Into<Vec<f32>>) -> Vec<ChunkPiece> {
         let pcm = pcm.into();
         self.len += pcm.len();
         if self.pending.is_empty() {
@@ -227,7 +331,9 @@ impl Chunker {
         } else {
             self.pending.extend_from_slice(&pcm);
         }
-        if self.uncut || self.len - self.start <= MAX_CHUNK_SAMPLES + LOOKAHEAD_SAMPLES {
+        if self.uncut
+            || self.len - self.start <= self.policy.max.saturating_add(self.policy.lookahead)
+        {
             return Vec::new();
         }
         // Plan over whole frames only; a partial one waits for the rest.
@@ -246,13 +352,18 @@ impl Chunker {
         }
         // One plan, committed while each cut's whole window plus the lookahead
         // is scored.
-        let cuts = plan_cuts(&cut_candidates(&segments, scored), scored, self.start);
+        let cuts = plan_cuts_with_policy(
+            &cut_candidates(&segments, scored),
+            scored,
+            self.start,
+            &self.policy,
+        );
         let mut chunks = Vec::new();
-        for cut in cuts {
-            if scored - self.start <= MAX_CHUNK_SAMPLES + LOOKAHEAD_SAMPLES {
+        for plan in cuts {
+            if scored - self.start <= self.policy.max.saturating_add(self.policy.lookahead) {
                 break;
             }
-            chunks.push(self.take_until(cut));
+            chunks.push(self.take_until(plan));
         }
         chunks
     }
@@ -260,22 +371,37 @@ impl Chunker {
     /// Cuts what is left and returns the remaining chunks, in order. Nothing
     /// more is pushed after.
     pub fn finish(&mut self) -> Vec<Vec<f32>> {
+        self.finish_pieces()
+            .into_iter()
+            .map(|piece| piece.samples)
+            .collect()
+    }
+
+    /// Cuts what is left and returns remaining [`ChunkPiece`]s with overlap provenance.
+    pub fn finish_pieces(&mut self) -> Vec<ChunkPiece> {
         let mut chunks = Vec::new();
-        if !self.uncut && self.len - self.start > MAX_CHUNK_SAMPLES {
+        if !self.uncut && self.len - self.start > self.policy.max {
             match self.score(true) {
                 Ok(_) => {
                     let segments = speech_segments(&self.probs, self.frame_samples, self.len);
-                    let cuts =
-                        plan_cuts(&cut_candidates(&segments, self.len), self.len, self.start);
-                    for cut in cuts {
-                        chunks.push(self.take_until(cut));
+                    let cuts = plan_cuts_with_policy(
+                        &cut_candidates(&segments, self.len),
+                        self.len,
+                        self.start,
+                        &self.policy,
+                    );
+                    for plan in cuts {
+                        chunks.push(self.take_until(plan));
                     }
                 }
                 Err(e) => self.stop_cutting(e),
             }
         }
         if self.len > self.start {
-            chunks.push(self.take_until(self.len));
+            chunks.push(self.take_until(CutPlan {
+                cut: self.len,
+                overlap: 0,
+            }));
         }
         chunks
     }
@@ -322,47 +448,43 @@ impl Chunker {
         self.uncut = true;
     }
 
-    fn take_until(&mut self, cut: usize) -> Vec<f32> {
+    fn take_until(&mut self, plan: CutPlan) -> ChunkPiece {
         debug!(
-            "Long-form chunk: {:.1}-{:.1}s",
+            "Long-form chunk: {:.1}-{:.1}s (overlap {:.2}s)",
             seconds(self.start),
-            seconds(cut)
+            seconds(plan.cut),
+            seconds(plan.overlap)
         );
-        let chunk = self.pending.drain(..cut - self.start).collect();
-        self.start = cut;
-        chunk
-    }
-}
-
-/// Scripts written without spaces between words, and CJK punctuation.
-static UNSPACED: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"[\p{Han}\p{Hiragana}\p{Katakana}\p{Bopomofo}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}\x{3000}-\x{303f}\x{ff00}-\x{ffef}]",
-    )
-    .unwrap()
-});
-
-fn is_unspaced(c: char) -> bool {
-    UNSPACED.is_match(c.encode_utf8(&mut [0; 4]))
-}
-
-/// Chunk texts in order: a space between two chunks unless either side is
-/// unspaced script.
-pub fn join_transcripts<S: AsRef<str>>(texts: &[S]) -> String {
-    let mut joined = String::new();
-    let mut last: Option<char> = None;
-    for text in texts {
-        let text = text.as_ref().trim();
-        let Some(first) = text.chars().next() else {
-            continue;
+        let overlaps_with_prev = self.next_overlaps_with_prev;
+        let chunk_len = plan.cut - self.start;
+        let next_start = plan.cut.saturating_sub(plan.overlap).max(self.start);
+        let drain_len = next_start - self.start;
+        let samples = if plan.overlap == 0 {
+            self.pending.drain(..chunk_len).collect()
+        } else {
+            let out = self.pending[..chunk_len].to_vec();
+            self.pending.drain(..drain_len);
+            out
         };
-        if last.is_some_and(|last| !is_unspaced(last) && !is_unspaced(first)) {
-            joined.push(' ');
+        self.next_overlaps_with_prev = plan.overlap > 0 && next_start < plan.cut;
+        self.start = next_start;
+        ChunkPiece {
+            samples,
+            overlaps_with_prev,
         }
-        joined.push_str(text);
-        last = text.chars().last();
     }
-    joined
+}
+
+/// Chunk texts in order across sliding-overlap boundaries.
+pub fn join_transcripts<S: AsRef<str>>(texts: &[S]) -> String {
+    lowyap_flow::stitch_overlapping_transcripts(texts)
+}
+
+/// Chunk texts in order with explicit per-chunk overlap provenance (`overlaps_with_prev`),
+/// deduplicating only sliding-overlap boundaries while preserving intentional
+/// repeated words spoken across clean silence cuts.
+pub fn join_transcript_boundaries<S: AsRef<str>>(segments: &[(S, bool)]) -> String {
+    lowyap_flow::stitch_transcript_boundaries(segments)
 }
 
 fn seconds(samples: usize) -> f64 {
@@ -612,5 +734,112 @@ mod tests {
         chunks.extend(chunker.finish());
         assert_eq!(cuts(&chunks), vec![29.5]);
         assert_eq!(chunks.concat(), pcm, "no audio lost");
+    }
+
+    #[test]
+    fn live_policy_predecodes_shorter_chunks_and_preserves_every_sample() {
+        let pcm = clip(&probs_with_pauses(
+            34.0,
+            &[(7.5, 8.5), (15.5, 16.5), (23.5, 24.5)],
+        ));
+        let (batch, _) = chunker();
+        let make_scorer = batch.make_scorer;
+        let mut live =
+            Chunker::with_policy(make_scorer, lowyap_ports::ChunkingPolicy::live_dictation());
+        let mut chunks = Vec::new();
+        for piece in pcm.chunks(FRAME * 3 + 7) {
+            chunks.extend(live.push(piece));
+        }
+        assert!(
+            chunks.len() >= 3,
+            "multiple chunks finish while still recording"
+        );
+        chunks.extend(live.finish());
+        assert_eq!(&cuts(&chunks)[..3], &[8.0, 16.0, 24.0]);
+        assert_eq!(chunks.concat(), pcm);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= s(12.0)));
+    }
+
+    #[test]
+    fn live_policy_waits_for_lookahead_and_short_takes_skip_vad() {
+        let (batch, counts) = chunker();
+        let mut live = Chunker::with_policy(
+            batch.make_scorer,
+            lowyap_ports::ChunkingPolicy::live_dictation(),
+        );
+        assert!(live.push(vec![1.0; s(12.0)]).is_empty());
+        assert_eq!(live.finish().len(), 1);
+        assert_eq!(counts.made.load(Ordering::Relaxed), 0);
+
+        let (batch, _) = chunker();
+        let mut live = Chunker::with_policy(
+            batch.make_scorer,
+            lowyap_ports::ChunkingPolicy::live_dictation(),
+        );
+        assert!(live.push(vec![1.0; s(12.7)]).is_empty());
+        assert_eq!(live.push(vec![1.0; FRAME]).len(), 1);
+    }
+
+    #[test]
+    fn live_policy_forced_and_tight_cuts_carry_1_6s_sliding_overlap() {
+        // 1. Forced hard cut (no pauses at all over 22s continuous speech).
+        let continuous_pcm = clip(&probs_with_pauses(22.0, &[]));
+        let (batch, _) = chunker();
+        let mut live = Chunker::with_policy(
+            batch.make_scorer,
+            lowyap_ports::ChunkingPolicy::live_dictation(),
+        );
+        let mut chunks = Vec::new();
+        for piece in continuous_pcm.chunks(FRAME * 2) {
+            chunks.extend(live.push(piece));
+        }
+        chunks.extend(live.finish());
+        assert!(
+            chunks.len() >= 2,
+            "expected forced cut on 22s continuous speech"
+        );
+        assert_eq!(live.samples(), continuous_pcm.len());
+        let expected_overlap = FORCED_CUT_OVERLAP_SAMPLES;
+        assert_eq!(expected_overlap, 25_600);
+        assert_eq!(
+            &chunks[0][chunks[0].len() - expected_overlap..],
+            &chunks[1][..expected_overlap],
+            "forced cut must carry 1.6s (25,600 samples) trailing overlap into next chunk"
+        );
+
+        // 2. Tight pause (< 250ms, e.g. 160ms raw pause -> ~100ms post-pad) also retains 1.6s overlap.
+        let tight_pcm = clip(&probs_with_pauses(20.0, &[(8.0, 8.16)]));
+        let (batch, _) = chunker();
+        let mut tight_live = Chunker::with_overlap(
+            batch.make_scorer,
+            lowyap_ports::ChunkingPolicy::live_dictation(),
+            1_600,
+        );
+        let mut tight_chunks = tight_live.push(tight_pcm);
+        tight_chunks.extend(tight_live.finish());
+        assert!(tight_chunks.len() >= 2);
+        assert_eq!(
+            &tight_chunks[0][tight_chunks[0].len() - 25_600..],
+            &tight_chunks[1][..25_600],
+            "tight pause (< 0.25s) must also carry 1.6s overlap"
+        );
+    }
+
+    #[test]
+    fn join_transcripts_stitches_overlapping_boundaries_across_scripts() {
+        assert_eq!(
+            join_transcripts(&["we are testing the live", "the live transcription engine"]),
+            "we are testing the live transcription engine"
+        );
+        assert_eq!(
+            join_transcripts(&["transcription", "transcription works"]),
+            "transcription works"
+        );
+        assert_eq!(join_transcripts(&["hello", "hello"]), "hello hello");
+        assert_eq!(join_transcripts(&["very", "very"]), "very very");
+        assert_eq!(
+            join_transcripts(&["live trans-", "transcription works"]),
+            "live transcription works"
+        );
     }
 }

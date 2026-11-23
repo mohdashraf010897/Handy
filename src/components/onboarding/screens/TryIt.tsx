@@ -194,7 +194,14 @@ export const TryIt: React.FC<TryItProps> = ({
   useEffect(() => {
     if (silent) refreshAudioDevices();
   }, [silent, refreshAudioDevices]);
-  const name = model?.name ?? "";
+  const isMac = os === "macos";
+  const name =
+    model?.name ??
+    (isMac
+      ? t("onboarding.model.consumer.nativeShortName", {
+          defaultValue: "Built-in macOS Voice",
+        })
+      : "");
 
   const seconds = (s: number) =>
     t("onboarding.try.seconds", {
@@ -500,7 +507,7 @@ export const TryIt: React.FC<TryItProps> = ({
   ) : !anyDone && os === "linux" ? (
     <LinuxGuide i18nKey="onboarding.linux.tryIt" />
   ) : (
-    ""
+    download ?? ""
   );
   const primary = after ? (
     <Button variant="primary" size="lg" onClick={onDone}>
@@ -515,8 +522,6 @@ export const TryIt: React.FC<TryItProps> = ({
       {t(anyDone ? "onboarding.try.finish" : "onboarding.try.skip")}
     </Button>
   );
-
-  const isMac = os === "macos";
 
   return (
     <OnboardingShell

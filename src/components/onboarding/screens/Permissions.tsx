@@ -7,6 +7,7 @@ import { Spinner } from "../../ui/Spinner";
 import { TextLink } from "../../ui/TextLink";
 import { DoneMark } from "../../shared/DoneMark";
 import { OnboardingShell, ScreenHeader, ScreenMain } from "../OnboardingShell";
+import { OnboardingWalkthrough } from "../OnboardingWalkthrough";
 import { useOnboardingStore } from "../onboardingStore";
 import type { Permissions as PermissionsState } from "../usePermissions";
 
@@ -20,6 +21,7 @@ interface PermissionRowProps {
   action: string;
   /** While waiting, what to do in the OS, in place of `why`. */
   instruction?: string;
+  compact?: boolean;
   onRequest: () => void;
 }
 
@@ -32,14 +34,19 @@ const PermissionRow: React.FC<PermissionRowProps> = ({
   next,
   action,
   instruction,
+  compact = false,
   onRequest,
 }) => {
   const { t } = useTranslation();
   const waiting = status === "waiting";
   return (
-    <div className="grid grid-cols-[46px_1fr_minmax(112px,auto)] items-center gap-[18px] py-[18px] [&+&]:border-t [&+&]:border-line">
+    <div
+      className={`grid grid-cols-[42px_1fr_minmax(112px,auto)] items-center gap-[14px] ${
+        compact ? "py-[10px]" : "py-[18px]"
+      } [&+&]:border-t [&+&]:border-line`}
+    >
       {/* A label, not a key: neutral, and "Allowed" alone shows the grant. */}
-      <span className="grid size-[46px] place-items-center rounded-[11px] bg-wash text-ink-2">
+      <span className="grid size-[40px] place-items-center rounded-[10px] bg-wash text-ink-2">
         {icon}
       </span>
       <div>
@@ -144,6 +151,7 @@ export const Permissions: React.FC<PermissionsProps> = ({
       }
     >
       <ScreenMain
+        layout={isMac ? "top" : "center"}
         header={
           <ScreenHeader
             above={
@@ -167,13 +175,14 @@ export const Permissions: React.FC<PermissionsProps> = ({
           />
         }
       >
-        <div className="flex w-full flex-col rounded-panel border border-line-strong px-[22px] py-[4px] text-start">
+        <div className="flex w-full flex-col rounded-panel border border-line-strong px-[20px] py-[2px] text-start">
           <PermissionRow
-            icon={<Mic size={20} aria-hidden="true" />}
+            icon={<Mic size={19} aria-hidden="true" />}
             title={t("onboarding.permissions.microphone.name")}
             why={t("onboarding.permissions.microphone.why")}
             status={permissions.microphone}
             next={next === "microphone"}
+            compact={isMac}
             action={t(
               permissions.microphoneAsked && isMac
                 ? "onboarding.permissions.openSettings"
@@ -187,23 +196,31 @@ export const Permissions: React.FC<PermissionsProps> = ({
           />
           {isMac && (
             <PermissionRow
-              icon={<Keyboard size={20} aria-hidden="true" />}
+              icon={<Keyboard size={19} aria-hidden="true" />}
               title={t("onboarding.permissions.accessibility.name")}
               why={t("onboarding.permissions.accessibility.why")}
               status={permissions.accessibility}
               next={next === "accessibility"}
+              compact={isMac}
               action={t("onboarding.permissions.allow")}
               instruction={turnOn}
               onRequest={permissions.requestAccessibility}
             />
           )}
         </div>
-        <p className="mt-[12px] mb-0 inline-flex items-center justify-center gap-[6px] text-small text-ink-3">
+        {isMac && (
+          <OnboardingWalkthrough
+            microphone={permissions.microphone}
+            accessibility={permissions.accessibility}
+            allGranted={permissions.allGranted}
+          />
+        )}
+        <p className="mt-[8px] mb-0 inline-flex items-center justify-center gap-[6px] text-label text-ink-3">
           <ShieldCheck size={14} className="shrink-0" aria-hidden="true" />
           <span>{t("onboarding.permissions.localPrivacyNote")}</span>
         </p>
         <p
-          className={`mt-[10px] mb-0 text-small text-ink-3 ${
+          className={`mt-[4px] mb-0 text-label text-ink-3 ${
             isMac && permissions.accessibility !== "needed"
               ? "visible"
               : "invisible"

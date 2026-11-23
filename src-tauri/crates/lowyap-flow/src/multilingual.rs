@@ -139,14 +139,14 @@ fn initial_prompt_steering(
             if allow_perso_arabic_prompt && has_spoken_lang(spoken_languages, "ar") {
                 Some("اردو اور عربی: السلام علیکم۔ لم يَفْعَلْ، لن يَفْعَلَ، ماضٍ ومضارع۔")
             } else if allow_perso_arabic_prompt {
-                Some("اردو، السلام علیکم۔ آج ہم اس موضوع پر بات کریں گے۔")
+                // Keep the script anchor lexical rather than a full conversational
+                // sentence so Whisper does not echo filler sentences during pauses.
+                Some("اردو تحریر:")
             } else {
                 None
             }
         }
-        HindustaniScript::Devanagari if lang == Some("hi") => {
-            Some("नमस्ते, आज हम इस विषय पर बात करेंगे।")
-        }
+        HindustaniScript::Devanagari if lang == Some("hi") => Some("हिन्दी:"),
         _ => None,
     }
 }
@@ -340,15 +340,16 @@ pub fn should_retry_chunk_as_urdu_with_context(
     }
     // Never force `language = "ur"` on a predominantly English utterance
     // (such as `"Hey, can you hear me out?"` or `"हे, can you hear me out?"`),
-    // even if Whisper's acoustic detector tagged the clip `"hi"`, because
-    // re-decoding English audio with `<|ur|>` translates it into Urdu.
+    // nor on empty/punctuation/non-Devanagari pause noise where Whisper's
+    // acoustic LID happened to guess `Some("hi")`. Re-decoding non-Hindustani
+    // or hesitation audio with forced `<|ur|>` + an Urdu prompt causes severe
+    // Perso-Arabic hallucinations. Require genuine Devanagari word output.
     if has_spoken_lang(spoken_languages, "en") && is_predominantly_ascii_latin(text) {
         return false;
     }
-    let detected_hi = model_detected_lang
-        .map(base_lang)
-        .is_some_and(|lang| lang.eq_ignore_ascii_case("hi"));
-    contains_devanagari(text) || (detected_hi && !is_predominantly_ascii_latin(text))
+    let devanagari_words = text.chars().filter(|&c| is_devanagari_word_char(c)).count();
+    let _ = model_detected_lang;
+    devanagari_words >= 2
 }
 
 /// Normalizes script output according to the user's effective Hindustani script
@@ -361,7 +362,8 @@ pub fn normalize_script_output(
     if !contains_devanagari(text) {
         return text.to_string();
     }
-    match effective_hindustani_script(script_pref, spoken_languages) {
+    let effective = effective_hindustani_script(script_pref, spoken_languages);
+    match effective {
         HindustaniScript::RomanHinglish => devanagari_to_roman_hinglish(text),
         HindustaniScript::UrduPersoArabic | HindustaniScript::Auto => {
             if let Some((prefix, rest)) = split_spurious_leading_he(text, spoken_languages) {
@@ -370,10 +372,15 @@ pub fn normalize_script_output(
                 out.push_str("Hey");
                 out.push_str(rest);
                 out
-            } else if has_spoken_lang(spoken_languages, "en")
-                && !has_spoken_lang(spoken_languages, "hi")
-                && is_predominantly_ascii_latin(text)
+            } else if !has_spoken_lang(spoken_languages, "hi")
+                && (has_spoken_lang(spoken_languages, "ur")
+                    || (has_spoken_lang(spoken_languages, "en")
+                        && is_predominantly_ascii_latin(text)))
             {
+                // When `"ur"` is configured without `"hi"`, any Devanagari that
+                // survived candidate/retry resolution is spoken Hindustani that
+                // `lock_scripts` would otherwise wipe to `""`. Transliterating to
+                // colloquial Roman Hinglish preserves 100% of the utterance.
                 devanagari_to_roman_hinglish(text)
             } else {
                 text.to_string()
@@ -381,6 +388,65 @@ pub fn normalize_script_output(
         }
         HindustaniScript::Devanagari => text.to_string(),
     }
+}
+
+/// Converts any Hindustani script spans (both Devanagari and Perso-Arabic Urdu)
+/// into colloquial Roman Hinglish while leaving English/Latin, numbers, and
+/// punctuation untouched. Useful for Latin-only downstream consumers (e.g.
+/// Apple Intelligence summarization) and cross-channel echo deduplication.
+pub fn hindustani_to_roman_hinglish(text: &str) -> String {
+    let after_dev = devanagari_to_roman_hinglish(text);
+    perso_arabic_to_roman_hinglish(&after_dev)
+}
+
+/// Deterministic Perso-Arabic Urdu to colloquial Roman Hinglish transliterator.
+/// Combines a high-frequency conversational Urdu/Hinglish word table (needed
+/// because Perso-Arabic omits short vowels) with a phonetic grapheme fallback.
+pub fn perso_arabic_to_roman_hinglish(text: &str) -> String {
+    if !contains_perso_arabic(text) {
+        return text.to_string();
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut at_sentence_start = true;
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if is_perso_arabic_word_char(ch) {
+            while chars
+                .peek()
+                .is_some_and(|&(_, c)| is_perso_arabic_word_char(c))
+            {
+                chars.next();
+            }
+            let end = chars.peek().map_or(text.len(), |&(index, _)| index);
+            let word = &text[start..end];
+            let roman = transliterate_perso_arabic_word(word);
+            if at_sentence_start {
+                push_capitalized_ascii(&mut out, &roman);
+            } else {
+                out.push_str(&roman);
+            }
+            at_sentence_start = false;
+        } else if ch == '۔' {
+            out.push('.');
+            at_sentence_start = true;
+        } else if ch == '؟' {
+            out.push('?');
+            at_sentence_start = true;
+        } else if matches!(ch, '،' | '؛') {
+            out.push(if ch == '،' { ',' } else { ';' });
+            at_sentence_start = false;
+        } else {
+            out.push(ch);
+            if matches!(ch, '.' | '!' | '?' | '\n') {
+                at_sentence_start = true;
+            } else if !ch.is_whitespace() && !matches!(ch, '"' | '\'' | '“' | '‘' | '(' | '[' | '{')
+            {
+                at_sentence_start = false;
+            }
+        }
+    }
+    out
 }
 
 /// Deterministic, zero-latency Devanagari-to-colloquial Roman Hinglish
@@ -501,6 +567,61 @@ fn irregular_hinglish_word(word: &str) -> Option<&'static str> {
         "फिर" => Some("phir"),
         "लेकिन" => Some("lekin"),
         "अरे" => Some("arey"),
+        "भाई" | "भाइ" => Some("bhai"),
+        "बताओ" => Some("batao"),
+        "बताइए" | "बताइये" => Some("bataiye"),
+        "बता" => Some("bata"),
+        "चल" => Some("chal"),
+        "चलो" => Some("chalo"),
+        "रहा" => Some("raha"),
+        "रही" => Some("rahi"),
+        "रहे" => Some("rahe"),
+        "गया" => Some("gaya"),
+        "गई" | "गयी" => Some("gayi"),
+        "गए" | "गये" => Some("gaye"),
+        "हुआ" => Some("hua"),
+        "हुई" => Some("hui"),
+        "हुए" => Some("hue"),
+        "छुट्टी" => Some("chhutti"),
+        "जयंती" => Some("jayanti"),
+        "गुरु" => Some("guru"),
+        "नानक" => Some("nanak"),
+        "मेरे" => Some("mere"),
+        "मेरा" => Some("mera"),
+        "मेरी" => Some("meri"),
+        "को" => Some("ko"),
+        "से" => Some("se"),
+        "पर" => Some("par"),
+        "पे" => Some("pe"),
+        "का" => Some("ka"),
+        "की" => Some("ki"),
+        "के" => Some("ke"),
+        "भी" => Some("bhi"),
+        "अभी" => Some("abhi"),
+        "तभी" => Some("tabhi"),
+        "कभी" => Some("kabhi"),
+        "सभी" => Some("sabhi"),
+        "कल" => Some("kal"),
+        "आज" => Some("aaj"),
+        "पता" => Some("pata"),
+        "चला" => Some("chala"),
+        "एक" => Some("ek"),
+        "काम" => Some("kaam"),
+        "बार" => Some("baar"),
+        "बात" => Some("baat"),
+        "लो" => Some("lo"),
+        "दो" => Some("do"),
+        "यार" => Some("yaar"),
+        "मतलब" => Some("matlab"),
+        "सही" => Some("sahi"),
+        "बस" => Some("bas"),
+        "अगर" => Some("agar"),
+        "मगर" => Some("magar"),
+        "पास" => Some("paas"),
+        "साथ" => Some("saath"),
+        "वाला" => Some("wala"),
+        "वाली" => Some("wali"),
+        "वाले" => Some("wale"),
         _ => None,
     }
 }
@@ -551,20 +672,48 @@ fn transliterate_devanagari_word(word: &str) -> String {
                 prev_was_virama = true;
             } else if let Some(&m) = chars.get(i).filter(|&&m| is_matra(m)) {
                 i += 1;
-                let at_word_end = is_word_tail_only_modifiers(&chars, i);
+                let next_is_vowel_glide = chars
+                    .get(i)
+                    .is_some_and(|c| matches!(c, 'इ' | 'ई' | 'ए' | 'ऐ' | 'ओ' | 'औ'));
+                let at_word_end = is_word_tail_only_modifiers(&chars, i) || next_is_vowel_glide;
                 out.push_str(matra_roman(m, at_word_end && consonant_count > 0));
                 prev_was_virama = false;
             } else {
                 let at_word_end = is_word_tail_only_modifiers(&chars, i);
-                if !at_word_end || prev_was_virama || (consonant_count == 0 && i == chars.len()) {
+                let keep_final_cluster_schwa =
+                    at_word_end && prev_was_virama && matches!(ch, 'र' | 'य');
+                let has_prior_vowel = out
+                    .bytes()
+                    .any(|b| matches!(b, b'a' | b'e' | b'i' | b'o' | b'u'));
+                let next_is_cv_with_matra = {
+                    let next_idx = i;
+                    chars.get(next_idx).is_some_and(|&nc| is_consonant(nc)) && {
+                        let after_cons = if chars.get(next_idx + 1) == Some(&'\u{093C}') {
+                            next_idx + 2
+                        } else {
+                            next_idx + 1
+                        };
+                        chars.get(after_cons).is_some_and(|&m| is_matra(m))
+                    }
+                };
+                let medial_schwa_deleted =
+                    !at_word_end && !prev_was_virama && has_prior_vowel && next_is_cv_with_matra;
+
+                if (!at_word_end && !medial_schwa_deleted)
+                    || keep_final_cluster_schwa
+                    || (consonant_count == 0 && i == chars.len())
+                {
                     out.push('a');
                 }
                 prev_was_virama = false;
             }
             consonant_count += 1;
         } else if let Some(vowel) = independent_vowel_roman(ch) {
+            let prev_ends_vowel = out.ends_with(['a', 'e', 'i', 'o', 'u']);
             if ch == 'ए' && out.ends_with('i') {
                 out.push_str("ye");
+            } else if ch == 'ई' && prev_ends_vowel && is_word_tail_only_modifiers(&chars, i + 1) {
+                out.push('i');
             } else {
                 out.push_str(vowel);
             }
@@ -594,6 +743,215 @@ fn is_word_tail_only_modifiers(chars: &[char], idx: usize) -> bool {
     chars[idx..]
         .iter()
         .all(|c| matches!(c, '\u{0901}' | '\u{0902}' | '\u{0903}'))
+}
+
+fn is_perso_arabic_word_char(c: char) -> bool {
+    is_perso_arabic_char(c) && !matches!(c, '،' | '؛' | '؟' | '۔' | '٪' | '٫' | '٬')
+}
+
+fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
+    match word {
+        "اور" => Some("aur"),
+        "بھائی" | "بھائ" => Some("bhai"),
+        "بتاؤ" | "بتاو" => Some("batao"),
+        "بتائیے" => Some("bataiye"),
+        "کیا" => Some("kya"),
+        "چل" => Some("chal"),
+        "رہا" => Some("raha"),
+        "رہی" => Some("rahi"),
+        "رہے" => Some("rahe"),
+        "ہے" => Some("hai"),
+        "ہیں" => Some("hain"),
+        "ہوں" => Some("hoon"),
+        "تھا" => Some("tha"),
+        "تھی" => Some("thi"),
+        "تھے" => Some("the"),
+        "میں" => Some("main"),
+        "نہیں" => Some("nahi"),
+        "ہاں" => Some("haan"),
+        "جی" => Some("ji"),
+        "آپ" => Some("aap"),
+        "ہم" => Some("hum"),
+        "تم" => Some("tum"),
+        "مجھے" => Some("mujhe"),
+        "ہمیں" => Some("humein"),
+        "یہ" => Some("yeh"),
+        "وہ" => Some("woh"),
+        "اس" => Some("is"),
+        "ان" => Some("in"),
+        "تو" => Some("toh"),
+        "بھی" => Some("bhi"),
+        "ابھی" => Some("abhi"),
+        "کل" => Some("kal"),
+        "آج" => Some("aaj"),
+        "پتہ" | "پتا" => Some("pata"),
+        "چلا" => Some("chala"),
+        "چھٹی" => Some("chhutti"),
+        "گورنانک" => Some("gurunanak"),
+        "گرو" => Some("guru"),
+        "نانک" => Some("nanak"),
+        "جینتی" => Some("jayanti"),
+        "میرے" => Some("mere"),
+        "میرا" => Some("mera"),
+        "میری" => Some("meri"),
+        "اپنی" => Some("apni"),
+        "اپنا" => Some("apna"),
+        "اپنے" => Some("apne"),
+        "کو" => Some("ko"),
+        "سے" => Some("se"),
+        "پر" => Some("par"),
+        "پہ" => Some("pe"),
+        "کا" => Some("ka"),
+        "کی" => Some("ki"),
+        "کے" => Some("ke"),
+        "ایک" => Some("ek"),
+        "کام" => Some("kaam"),
+        "بار" => Some("baar"),
+        "بات" => Some("baat"),
+        "کرو" => Some("karo"),
+        "کر" => Some("kar"),
+        "کرلو" => Some("karlo"),
+        "کرتے" => Some("karte"),
+        "کرنا" => Some("karna"),
+        "لو" => Some("lo"),
+        "دو" => Some("do"),
+        "آشو" => Some("ashu"),
+        "اگر" => Some("agar"),
+        "پاس" => Some("paas"),
+        "جاکے" => Some("jaake"),
+        "جا" => Some("ja"),
+        "ساری" => Some("saari"),
+        "رہتی" => Some("rehti"),
+        "میٹنگ" => Some("meeting"),
+        "میٹنگز" => Some("meetings"),
+        "سلاک" | "سلیک" => Some("slack"),
+        "ٹھیک" => Some("theek"),
+        "اچھا" => Some("accha"),
+        "بہت" => Some("bahut"),
+        "کچھ" => Some("kuch"),
+        "کوئی" => Some("koi"),
+        "کیوں" => Some("kyun"),
+        "کیونکہ" => Some("kyunki"),
+        "کیسے" => Some("kaise"),
+        "کہاں" => Some("kahan"),
+        "یہاں" => Some("yahan"),
+        "وہاں" => Some("wahan"),
+        "کون" => Some("kaun"),
+        "شکریہ" => Some("shukriya"),
+        "السلام" => Some("assalam"),
+        "علیکم" => Some("alaikum"),
+        "انشاءاللہ" => Some("inshallah"),
+        "ماشاءاللہ" => Some("mashallah"),
+        _ => None,
+    }
+}
+
+fn transliterate_perso_arabic_word(word: &str) -> String {
+    let cleaned: String = word
+        .chars()
+        .filter(|&c| !matches!(c, '\u{064B}'..='\u{065F}' | '\u{0670}' | '\u{0640}'))
+        .collect();
+    if let Some(mapped) = irregular_perso_arabic_word(&cleaned) {
+        return mapped.to_string();
+    }
+
+    let chars: Vec<char> = cleaned.chars().collect();
+    let mut out = String::with_capacity(chars.len() * 2);
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        let next = chars.get(i + 1).copied();
+        // Aspirated Urdu digraphs with do-chashmi he ('ھ').
+        if next == Some('ھ') {
+            let digraph = match ch {
+                'ب' => Some("bh"),
+                'پ' => Some("ph"),
+                'ت' | 'ٹ' => Some("th"),
+                'ج' => Some("jh"),
+                'چ' => Some("chh"),
+                'د' | 'ڈ' => Some("dh"),
+                'ڑ' => Some("rh"),
+                'ک' => Some("kh"),
+                'گ' => Some("gh"),
+                _ => None,
+            };
+            if let Some(d) = digraph {
+                out.push_str(d);
+                i += 2;
+                if i < chars.len() && !matches!(chars[i], 'ا' | 'و' | 'ی' | 'ے' | 'آ') {
+                    out.push('a');
+                }
+                continue;
+            }
+        }
+
+        let piece = match ch {
+            'آ' => "aa",
+            'ا' => {
+                if i == 0 {
+                    "a"
+                } else {
+                    "a"
+                }
+            }
+            'أ' | 'إ' | 'ع' | 'ء' => "a",
+            'ؤ' => "u",
+            'ئ' => "i",
+            'ب' => "b",
+            'پ' => "p",
+            'ت' | 'ط' | 'ٹ' => "t",
+            'ث' | 'س' | 'ص' => "s",
+            'ج' => "j",
+            'چ' => "ch",
+            'ح' | 'ہ' | 'ھ' | 'ه' => {
+                if i + 1 == chars.len() && i > 0 {
+                    "a"
+                } else {
+                    "h"
+                }
+            }
+            'خ' => "kh",
+            'د' | 'ڈ' => "d",
+            'ذ' | 'ز' | 'ض' | 'ظ' | 'ژ' => "z",
+            'ر' | 'ڑ' => "r",
+            'ش' => "sh",
+            'غ' => "gh",
+            'ف' => "f",
+            'ق' => "q",
+            'ک' | 'ك' => "k",
+            'گ' => "g",
+            'ل' => "l",
+            'م' => "m",
+            'ن' => "n",
+            'ں' => "n",
+            'و' => {
+                if i == 0 {
+                    "w"
+                } else {
+                    "o"
+                }
+            }
+            'ی' | 'ي' => {
+                if i == 0 {
+                    "y"
+                } else {
+                    "i"
+                }
+            }
+            'ے' => "e",
+            'ة' => "a",
+            _ => "",
+        };
+        out.push_str(piece);
+        let is_vowel_carrier = matches!(ch, 'آ' | 'ا' | 'و' | 'ی' | 'ي' | 'ے' | 'ں');
+        let next_is_vowel_carrier =
+            next.is_some_and(|n| matches!(n, 'آ' | 'ا' | 'و' | 'ی' | 'ي' | 'ے' | 'ہ' | 'ھ'));
+        if !piece.is_empty() && !is_vowel_carrier && !next_is_vowel_carrier && i + 1 < chars.len() {
+            out.push('a');
+        }
+        i += 1;
+    }
+    out
 }
 
 fn is_consonant(c: char) -> bool {
@@ -979,13 +1337,48 @@ pub fn split_bilingual_clauses(
     spoken_languages: &[String],
     selected_language: &str,
 ) -> Vec<Range<usize>> {
+    split_bilingual_ranges(pcm, spoken_languages, selected_language, false)
+}
+
+/// Finds bilingual breath pauses in 16 kHz PCM, including long recordings,
+/// and merges adjacent ranges until they reach `min_clause_ms`.
+///
+/// Only the final tail can be shorter. Fixed-language or monolingual input
+/// stays intact, and a pause-free recording is never split mid-word.
+pub fn split_bilingual_clauses_with_min_ms(
+    pcm_16k: &[f32],
+    spoken_languages: &[String],
+    selected_language: &str,
+    min_clause_ms: u64,
+) -> Vec<Range<usize>> {
+    let min_samples = min_clause_ms
+        .saturating_mul((BILINGUAL_SAMPLE_RATE / 1000) as u64)
+        .min(pcm_16k.len() as u64) as usize;
+    let mut start = 0;
+    let mut coalesced = Vec::new();
+    for range in split_bilingual_ranges(pcm_16k, spoken_languages, selected_language, true) {
+        if range.end - start >= min_samples || range.end == pcm_16k.len() {
+            coalesced.push(start..range.end);
+            start = range.end;
+        }
+    }
+    coalesced
+}
+
+fn split_bilingual_ranges(
+    pcm: &[f32],
+    spoken_languages: &[String],
+    selected_language: &str,
+    long_form: bool,
+) -> Vec<Range<usize>> {
     let len = pcm.len();
     if len == 0 {
         return Vec::new();
     }
     if !selected_language.trim().eq_ignore_ascii_case("auto")
         || distinct_spoken_language_count(spoken_languages) < 2
-        || !(MIN_BILINGUAL_SPLIT_SAMPLES..=MAX_BILINGUAL_CLIP_SAMPLES).contains(&len)
+        || len < MIN_BILINGUAL_SPLIT_SAMPLES
+        || (!long_form && len > MAX_BILINGUAL_CLIP_SAMPLES)
     {
         return std::iter::once(0..len).collect();
     }
@@ -1029,13 +1422,13 @@ pub fn split_bilingual_clauses(
 
     let mut ranges = Vec::new();
     let mut start = 0usize;
+    let mut search_lo = MIN_BILINGUAL_CLAUSE_SAMPLES;
 
     while len.saturating_sub(start) >= MIN_BILINGUAL_SPLIT_SAMPLES
-        && ranges.len() + 1 < MAX_BILINGUAL_CLAUSES
+        && (long_form || ranges.len() + 1 < MAX_BILINGUAL_CLAUSES)
     {
-        let search_lo = start + MIN_BILINGUAL_CLAUSE_SAMPLES;
-        let search_hi =
-            (start + MAX_BILINGUAL_CLAUSE_SAMPLES).min(len - MIN_BILINGUAL_CLAUSE_SAMPLES);
+        let search_hi = (search_lo + MAX_BILINGUAL_CLAUSE_SAMPLES - MIN_BILINGUAL_CLAUSE_SAMPLES)
+            .min(len - MIN_BILINGUAL_CLAUSE_SAMPLES);
         if search_lo >= search_hi {
             break;
         }
@@ -1091,6 +1484,11 @@ pub fn split_bilingual_clauses(
         }
 
         let Some((cut, _)) = best_valley_cut else {
+            if long_form {
+                // This window had no safe cut. Keep looking without cutting the speech.
+                search_lo = search_hi;
+                continue;
+            }
             break;
         };
         if cut <= start || cut >= len {
@@ -1098,6 +1496,7 @@ pub fn split_bilingual_clauses(
         }
         ranges.push(start..cut);
         start = cut;
+        search_lo = start + MIN_BILINGUAL_CLAUSE_SAMPLES;
     }
 
     if start < len {
@@ -1441,7 +1840,23 @@ fn score_candidate(
         0.35 * diversity
     };
 
-    // A forced Urdu decode can translate English greetings into Arabic.
+    // A forced Urdu decode can translate English greetings into Arabic or emit
+    // fragmented single-letter Perso-Arabic subword shrapnel on hesitation noise.
+    let isolated_arabic_shrapnel = trimmed
+        .split_whitespace()
+        .filter(|tok| {
+            let mut chars = tok.trim_matches(|c: char| !c.is_alphabetic()).chars();
+            match (chars.next(), chars.next()) {
+                (Some(only), None) => is_perso_arabic_char(only) && only != 'و',
+                _ => false,
+            }
+        })
+        .count();
+    let shrapnel_penalty = if isolated_arabic_shrapnel >= 2 {
+        -2.5
+    } else {
+        0.0
+    };
     let cross_translate_penalty = if lang
         .is_some_and(|lang| base_lang(lang).eq_ignore_ascii_case("ur"))
         && !has_spoken_lang(spoken_languages, "ar")
@@ -1452,7 +1867,7 @@ fn score_candidate(
         0.0
     };
 
-    acoustic + script_score + repetition_term + cross_translate_penalty
+    acoustic + script_score + repetition_term + cross_translate_penalty + shrapnel_penalty
 }
 
 fn candidate_script_score(
@@ -1471,6 +1886,10 @@ fn candidate_script_score(
                 let ratio = arabic_letters as f32 / total_letters as f32;
                 if arabic_letters == 0 {
                     -0.9
+                } else if latin_letters > arabic_letters {
+                    // Forced `<|ur|>` decode emitted mostly Latin words sprinkled
+                    // with stray Perso-Arabic subwords (e.g. "سی bits come out ی").
+                    -1.2
                 } else {
                     0.55 * ratio
                 }
@@ -1529,6 +1948,28 @@ mod tests {
                 "auto"
             ),
             "100% ASCII English tagged Some(\"hi\") by Whisper must never force <|ur|> re-decode"
+        );
+        for noise in ["", "   ", "...", "700", "♪"] {
+            assert!(
+                !should_retry_chunk_as_urdu_with_context(
+                    Some("hi"),
+                    noise,
+                    &spoken,
+                    HindustaniScript::Auto,
+                    "auto"
+                ),
+                "non-Devanagari hesitation/noise {noise:?} tagged Some(\"hi\") must never force <|ur|> re-decode"
+            );
+        }
+        assert!(
+            should_retry_chunk_as_urdu_with_context(
+                Some("hi"),
+                "آپ कैसे हैं",
+                &spoken,
+                HindustaniScript::Auto,
+                "auto"
+            ),
+            "genuine Devanagari words must still retry as Urdu"
         );
     }
 
@@ -1768,6 +2209,31 @@ mod tests {
     }
 
     #[test]
+    fn coalesces_long_form_ranges_without_dropping_the_short_tail() {
+        let mut pcm = Vec::new();
+        for _ in 0..53 {
+            pcm.extend(std::iter::repeat_n(0.18, 16_000 * 3));
+            pcm.extend(std::iter::repeat_n(0.0, 9_600));
+        }
+        pcm.extend(std::iter::repeat_n(0.18, 16_000));
+        let languages = langs(&["en", "ur"]);
+        let unmerged = split_bilingual_clauses_with_min_ms(&pcm, &languages, "auto", 0);
+        let ranges = split_bilingual_clauses_with_min_ms(&pcm, &languages, "auto", 11_000);
+        assert!(ranges.len() > 4 && ranges.len() < unmerged.len());
+        assert_eq!(ranges[0].start, 0);
+        assert_eq!(ranges.last().map(|range| range.end), Some(pcm.len()));
+        for adjacent in ranges.windows(2) {
+            assert_eq!(adjacent[0].end, adjacent[1].start);
+            assert!(adjacent[0].len() >= 11 * 16_000);
+        }
+        assert!(ranges.last().is_some_and(|range| range.len() < 11 * 16_000));
+        assert_eq!(
+            split_bilingual_clauses_with_min_ms(&pcm, &languages, "en", 11_000),
+            std::iter::once(0..pcm.len()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn detects_out_of_profile_or_repetitive_hallucinations_for_disambiguation() {
         let spoken = langs(&["en", "ur"]);
         // Out-of-profile Greek / Korean hallucinations must trigger disambiguation.
@@ -1916,6 +2382,18 @@ mod tests {
         assert!(
             score_candidate_transcript("The meeting starts soon", &[0.9])
                 > score_candidate_transcript("starts soon starts soon", &[0.9])
+        );
+    }
+
+    #[test]
+    fn applies_indo_aryan_medial_and_final_cluster_schwa_deletion() {
+        assert_eq!(
+            devanagari_to_roman_hinglish("उनके मीटिंग्स कनेक्ट रहते हैं"),
+            "Unke meetings kanekt rahte hain"
+        );
+        assert_eq!(
+            devanagari_to_roman_hinglish("समझा लड़का कमरा दोस्त मित्र"),
+            "Samjha ladka kamra dost mitra"
         );
     }
 }

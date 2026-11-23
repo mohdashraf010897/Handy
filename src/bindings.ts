@@ -1044,6 +1044,14 @@ async getHistoryEntries(cursor: number | null, limit: number | null) : Promise<R
     else return { status: "error", error: e  as any };
 }
 },
+async getDictationTelemetrySummary(limit: number | null) : Promise<Result<DictationTelemetrySummaryDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_dictation_telemetry_summary", { limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async toggleHistoryEntrySaved(id: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("toggle_history_entry_saved", { id }) };
@@ -1285,6 +1293,18 @@ export type ChineseScript =
 "traditional_hk"
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
+export type DictationTelemetrySummaryDto = {
+  sample_count: number;
+  total_audio_s: number;
+  p50_release_to_done_ms: number | null;
+  p95_release_to_done_ms: number | null;
+  p50_asr_ms: number | null;
+  p95_cleanup_ms: number | null;
+  median_rtf: number | null;
+  live_predecoded_ratio: number | null;
+  polished_count: number;
+  bottleneck: string;
+};
 export type FlowSettings = { 
 /**
  * Adjust the cleanup prompt to the frontmost app. Off by default (opt-in,
@@ -1338,7 +1358,18 @@ language: string | null;
 /**
  * How that language was chosen; `None` before it was recorded.
  */
-language_source: LanguageSource | null }
+language_source: LanguageSource | null;
+audio_duration_s?: number | null;
+asr_ms?: number | null;
+cleanup_ms?: number | null;
+paste_ms?: number | null;
+release_to_done_ms?: number | null;
+real_time_factor?: number | null;
+chunks_predecoded_live?: number | null;
+chunks_total?: number | null;
+asr_model_id?: string | null;
+linguist_provider_id?: string | null;
+linguist_stage?: string | null }
 export type HistoryUpdatePayload = { action: "added"; entry: HistoryEntry } | { action: "updated"; entry: HistoryEntry } | { action: "deleted"; id: number } | { action: "toggled"; id: number }
 /**
  * Result of changing keyboard implementation

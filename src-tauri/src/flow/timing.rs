@@ -11,11 +11,13 @@
 //! The line holds durations and flags only — never transcript text or the
 //! identity of the frontmost app, which is not logged at any level.
 
+use std::cell::Cell;
 use std::future::Future;
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};
 use std::time::{Duration, Instant};
 
 use log::{debug, info, warn};
+use lowyap_ports::{DictationTelemetryRecord, LinguistStageKind};
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -52,6 +54,12 @@ struct Session {
     app: Option<AppContext>,
     app_capture_us: Option<u64>,
     tone: Option<Tone>,
+    chunks_predecoded_live: u32,
+    chunks_total: u32,
+    linguist_stage: LinguistStageKind,
+    linguist_provider_id: Option<String>,
+    real_time_factor: Option<f64>,
+    done_at: Option<Instant>,
 }
 
 #[derive(Debug)]
@@ -59,6 +67,7 @@ struct Tracker {
     next_id: u64,
     recording: Option<Session>,
     inflight: Vec<Session>,
+    completed: Vec<Session>,
 }
 
 impl Tracker {
@@ -67,6 +76,7 @@ impl Tracker {
             next_id: 1,
             recording: None,
             inflight: Vec::new(),
+            completed: Vec::new(),
         }
     }
 
@@ -135,6 +145,59 @@ impl Tracker {
         self.inflight.iter_mut().find(|s| s.id == id)
     }
 
+    fn telemetry_session(
+        &mut self,
+        active_asr: Option<u64>,
+        task: Option<TaskId>,
+        cleanup: bool,
+    ) -> Option<&mut Session> {
+        let index = if let Some(id) = active_asr {
+            self.inflight.iter().position(|s| s.id == id)
+        } else if let Some(task) = task {
+            self.inflight.iter().rposition(|s| s.task == Some(task))
+        } else {
+            self.inflight.iter().rposition(|s| {
+                if cleanup {
+                    s.cleanup_start.is_some() && s.cleanup_end.is_none()
+                } else {
+                    s.asr_start.is_some() && s.asr_end.is_none()
+                }
+            })
+        }?;
+        self.inflight.get_mut(index)
+    }
+
+    fn snapshot(
+        &mut self,
+        id: u64,
+        audio_s: f64,
+        model_id: Option<String>,
+    ) -> Option<DictationTelemetryRecord> {
+        let session = self
+            .inflight
+            .iter_mut()
+            .chain(self.completed.iter_mut())
+            .chain(self.recording.iter_mut())
+            .find(|s| s.id == id)?;
+        session.real_time_factor = span_ms(session.asr_start, session.asr_end)
+            .and_then(|ms| DictationTelemetryRecord::compute_rtf(audio_s, ms));
+        Some(DictationTelemetryRecord {
+            audio_duration_s: audio_s,
+            press_to_mic_ready_ms: span_ms(session.pressed_at, session.mic_ready_at),
+            release_to_asr_start_ms: span_ms(session.released_at, session.asr_start),
+            asr_ms: span_ms(session.asr_start, session.asr_end),
+            cleanup_ms: span_ms(session.cleanup_start, session.cleanup_end),
+            paste_ms: span_ms(session.paste_start, session.paste_end),
+            release_to_done_ms: span_ms(session.released_at, session.done_at.or(session.paste_end)),
+            real_time_factor: session.real_time_factor,
+            chunks_predecoded_live: session.chunks_predecoded_live,
+            chunks_total: session.chunks_total,
+            asr_engine_id: model_id,
+            linguist_provider_id: session.linguist_provider_id.clone(),
+            linguist_stage: session.linguist_stage,
+        })
+    }
+
     fn asr_start(&mut self, id: u64, now: Instant, task: Option<TaskId>) -> bool {
         if !self.inflight.iter().any(|s| s.id == id) {
             return false;
@@ -165,9 +228,14 @@ impl Tracker {
     /// `None` outside a dictation task (e.g. a retry from history).
     fn awaiting_cleanup(&mut self, task: Option<TaskId>) -> Option<&mut Session> {
         let task = task?;
-        self.inflight
+        let matched = self
+            .inflight
             .iter_mut()
-            .find(|s| s.task == Some(task) && s.asr_end.is_some() && s.cleanup_start.is_none())
+            .find(|s| s.task == Some(task) && s.asr_end.is_some() && s.cleanup_start.is_none());
+        if matched.is_none() {
+            debug!("flow_timing: no inflight session matched task {task:?} for cleanup");
+        }
+        matched
     }
 
     fn choose_tone(
@@ -207,7 +275,17 @@ impl Tracker {
             .filter(|(_, s)| s.released_at.is_some_and(|released| released <= cutoff))
             .max_by_key(|(_, s)| s.released_at)
             .map(|(index, _)| index)?;
-        Some(self.inflight.remove(index))
+        let mut session = self.inflight.remove(index);
+        session.done_at = Some(now);
+        self.completed.retain(|s| {
+            s.done_at
+                .is_some_and(|done| now.saturating_duration_since(done) < STALE_AFTER)
+        });
+        if self.completed.len() >= MAX_INFLIGHT {
+            self.completed.remove(0);
+        }
+        self.completed.push(session.clone());
+        Some(session)
     }
 }
 
@@ -228,6 +306,11 @@ struct TimingReport {
     paste_ms: Option<f64>,
     release_to_pasted_ms: Option<f64>,
     release_to_done_ms: Option<f64>,
+    chunks_predecoded_live: u32,
+    chunks_total: u32,
+    linguist_stage: LinguistStageKind,
+    linguist_provider_id: Option<String>,
+    real_time_factor: Option<f64>,
 }
 
 impl TimingReport {
@@ -258,6 +341,12 @@ impl TimingReport {
             paste_ms: span_ms(session.paste_start, session.paste_end),
             release_to_pasted_ms: span_ms(session.released_at, pasted_at),
             release_to_done_ms: span_ms(session.released_at, Some(done_at)),
+            chunks_predecoded_live: session.chunks_predecoded_live,
+            chunks_total: session.chunks_total,
+            linguist_stage: session.linguist_stage,
+            linguist_provider_id: session.linguist_provider_id.clone(),
+            real_time_factor: span_ms(session.asr_start, session.asr_end)
+                .and_then(|ms| DictationTelemetryRecord::compute_rtf(audio_seconds, ms)),
         }
     }
 }
@@ -270,6 +359,18 @@ fn span_ms(from: Option<Instant>, to: Option<Instant>) -> Option<f64> {
 
 static TRACKER: Mutex<Tracker> = Mutex::new(Tracker::new());
 static LISTENER: Once = Once::new();
+
+thread_local! {
+    static ACTIVE_ASR: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+struct AsrScope(Option<u64>);
+
+impl Drop for AsrScope {
+    fn drop(&mut self) {
+        ACTIVE_ASR.set(self.0);
+    }
+}
 
 fn tracker() -> MutexGuard<'static, Tracker> {
     TRACKER.lock().unwrap_or_else(PoisonError::into_inner)
@@ -302,11 +403,59 @@ pub fn release() -> u64 {
 /// current async task, so its cleanup can be found without guessing.
 pub fn asr<T>(session: u64, transcribe: impl FnOnce() -> T) -> T {
     let started = tracker().asr_start(session, Instant::now(), tokio::task::try_id());
+    let _scope = AsrScope(ACTIVE_ASR.replace(started.then_some(session)));
     let output = transcribe();
     if started {
         tracker().asr_end(session, Instant::now());
     }
     output
+}
+
+/// Records successful live predecodes and the final chunk count for this ASR.
+pub fn record_chunk_stats(predecoded_live: u32, total: u32) {
+    if let Some(session) =
+        tracker().telemetry_session(ACTIVE_ASR.get(), tokio::task::try_id(), false)
+    {
+        session.chunks_predecoded_live = predecoded_live.min(total);
+        session.chunks_total = total;
+    }
+}
+
+/// Carries the ASR session across the live decoder's worker-thread boundary.
+pub(crate) fn current_asr_session_id() -> Option<u64> {
+    ACTIVE_ASR.get()
+}
+
+/// Returns the hotkey-release timestamp of the active ASR session, if known.
+pub(crate) fn active_asr_released_at() -> Option<Instant> {
+    let mut guard = tracker();
+    let session = guard.telemetry_session(ACTIVE_ASR.get(), tokio::task::try_id(), false)?;
+    session.released_at
+}
+
+pub(crate) fn with_asr_session<T>(session: Option<u64>, work: impl FnOnce() -> T) -> T {
+    let _scope = AsrScope(ACTIVE_ASR.replace(session));
+    work()
+}
+
+/// Records the cleanup result without transcript text or application identity.
+pub fn record_linguist_outcome(stage: LinguistStageKind, provider_id: Option<String>) {
+    if let Some(session) =
+        tracker().telemetry_session(ACTIVE_ASR.get(), tokio::task::try_id(), true)
+    {
+        session.linguist_stage = stage;
+        session.linguist_provider_id = provider_id;
+    }
+}
+
+/// Returns exact telemetry before paste, after paste, or after completion.
+/// Completed sessions remain in a bounded cache for late history updates.
+pub fn snapshot_for_session(
+    session_id: u64,
+    audio_s: f64,
+    model_id: Option<String>,
+) -> Option<DictationTelemetryRecord> {
+    tracker().snapshot(session_id, audio_s, model_id)
 }
 
 /// Picks the cleanup tone from the app captured for the dictation being
@@ -698,12 +847,17 @@ mod tests {
                 "app_captured",
                 "asr_ms",
                 "audio_s",
+                "chunks_predecoded_live",
+                "chunks_total",
                 "cleanup_ms",
                 "cleanup_ran",
+                "linguist_provider_id",
+                "linguist_stage",
                 "model",
                 "outcome",
                 "paste_ms",
                 "press_to_mic_ready_ms",
+                "real_time_factor",
                 "release_to_asr_start_ms",
                 "release_to_done_ms",
                 "release_to_pasted_ms",
@@ -860,5 +1014,66 @@ mod tests {
         let end = base + Duration::from_micros(12_345);
         assert_eq!(span_ms(Some(base), Some(end)), Some(12.3));
         assert_eq!(span_ms(Some(end), Some(base)), None);
+    }
+
+    #[test]
+    fn telemetry_preserves_stages_before_and_after_paste_and_completion() {
+        let base = Instant::now();
+        let mut tracker = Tracker::new();
+        let id = transcribed(&mut tracker, base, 0, 1000, None);
+        let session = tracker.by_id(id).unwrap();
+        session.chunks_predecoded_live = 8;
+        session.chunks_total = 9;
+        session.linguist_stage = LinguistStageKind::ModelPolished;
+        session.linguist_provider_id = Some("local-rewriter".into());
+        session.cleanup_start = Some(at(base, 1210));
+        session.cleanup_end = Some(at(base, 1250));
+        let before = tracker.snapshot(id, 90.0, Some("any-asr".into())).unwrap();
+        assert_eq!(before.asr_ms, Some(200.0));
+        assert_eq!(before.cleanup_ms, Some(40.0));
+        assert_eq!(before.real_time_factor, Some(450.0));
+        assert_eq!(before.paste_ms, None);
+        assert_eq!(before.release_to_done_ms, None);
+        assert_eq!(before.chunks_predecoded_live, 8);
+        assert_eq!(before.chunks_total, 9);
+        assert_eq!(before.linguist_stage, LinguistStageKind::ModelPolished);
+        tracker.paste_start(id, at(base, 1250));
+        tracker.paste_end(id, at(base, 1300));
+        let pasted = tracker.snapshot(id, 90.0, None).unwrap();
+        assert_eq!(pasted.paste_ms, Some(50.0));
+        assert_eq!(pasted.release_to_done_ms, Some(300.0));
+        tracker
+            .complete(at(base, 1310), Duration::from_millis(310))
+            .unwrap();
+        let completed = tracker.snapshot(id, 90.0, None).unwrap();
+        assert_eq!(completed.release_to_done_ms, Some(310.0));
+        assert_eq!(
+            completed.linguist_provider_id.as_deref(),
+            Some("local-rewriter")
+        );
+        assert!(tracker.snapshot(id + 1, 90.0, None).is_none());
+    }
+
+    #[test]
+    fn telemetry_hooks_prefer_the_active_session_over_a_newer_release() {
+        let base = Instant::now();
+        let mut tracker = Tracker::new();
+        let task = task_ids(1)[0];
+        let a = transcribed(&mut tracker, base, 0, 1000, Some(task));
+        let b = tracker.release(at(base, 1200));
+        assert_eq!(
+            tracker.telemetry_session(Some(a), None, false).unwrap().id,
+            a
+        );
+        assert_eq!(
+            tracker
+                .telemetry_session(None, Some(task), true)
+                .unwrap()
+                .id,
+            a
+        );
+        assert!(tracker.telemetry_session(None, None, false).is_none());
+        tracker.asr_start(b, at(base, 1250), None);
+        assert_eq!(tracker.telemetry_session(None, None, false).unwrap().id, b);
     }
 }

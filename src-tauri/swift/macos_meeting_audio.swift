@@ -1,6 +1,7 @@
 import AppKit
 import AudioToolbox
 import CoreAudio
+import EventKit
 import Foundation
 
 private let lowyapTapRingCapacity = 30 * 16_000
@@ -830,4 +831,182 @@ public func lowyap_system_tap_stop(_ handle: UnsafeMutableRawPointer?) {
 
     let context = Unmanaged<SystemTapContext>.fromOpaque(handle).takeRetainedValue()
     context.stop()
+}
+
+// MARK: - Local Apple Calendar (EventKit) Context Bridge (SV-94, D-19 zero-egress)
+
+@_cdecl("lowyap_calendar_auth_status")
+public func lowyap_calendar_auth_status() -> Int32 {
+    let status = EKEventStore.authorizationStatus(for: .event)
+    if #available(macOS 14.0, *) {
+        switch status {
+        case .notDetermined:
+            return 0
+        case .fullAccess, .authorized:
+            return 1
+        case .denied, .restricted, .writeOnly:
+            return 2
+        @unknown default:
+            return 2
+        }
+    } else {
+        switch status {
+        case .notDetermined:
+            return 0
+        case .authorized:
+            return 1
+        case .denied, .restricted:
+            return 2
+        @unknown default:
+            return 2
+        }
+    }
+}
+
+@_cdecl("lowyap_request_calendar_access")
+public func lowyap_request_calendar_access() -> Int32 {
+    let current = lowyap_calendar_auth_status()
+    if current != 0 {
+        return current
+    }
+
+    let store = EKEventStore()
+    let sem = DispatchSemaphore(value: 0)
+    if #available(macOS 14.0, *) {
+        store.requestFullAccessToEvents { _, _ in
+            sem.signal()
+        }
+    } else {
+        store.requestAccess(to: .event) { _, _ in
+            sem.signal()
+        }
+    }
+    _ = sem.wait(timeout: .now() + .seconds(30))
+    return lowyap_calendar_auth_status()
+}
+
+private func sanitizeAttendeeDisplayName(_ raw: String?) -> String? {
+    guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+        return nil
+    }
+    if let angleIdx = text.firstIndex(of: "<") {
+        text = String(text[..<angleIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    text = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"'()[]"))
+    if text.contains("@") {
+        guard let localPart = text.split(separator: "@", maxSplits: 1).first else {
+            return nil
+        }
+        let words = localPart
+            .split(whereSeparator: { $0 == "." || $0 == "_" || $0 == "-" || $0 == "+" })
+            .map { part -> String in
+                let lettersOnly = part.filter { $0.isLetter }
+                guard lettersOnly.count >= 2 else { return "" }
+                return lettersOnly.prefix(1).uppercased() + lettersOnly.dropFirst().lowercased()
+            }
+            .filter { !$0.isEmpty }
+        guard !words.isEmpty else { return nil }
+        text = words.prefix(2).joined(separator: " ")
+    }
+    let collapsed = text
+        .components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+    guard collapsed.count >= 2, collapsed.count <= 48 else {
+        return nil
+    }
+    return collapsed
+}
+
+@_cdecl("lowyap_active_calendar_meeting_json")
+public func lowyap_active_calendar_meeting_json(
+    _ out_json: UnsafeMutablePointer<CChar>?,
+    cap: Int32
+) -> Int32 {
+    guard lowyap_calendar_auth_status() == 1 else {
+        writeCString("", into: out_json, cap: cap)
+        return 0
+    }
+
+    let store = EKEventStore()
+    let now = Date()
+    let windowStart = now.addingTimeInterval(-15 * 60)
+    let windowEnd = now.addingTimeInterval(20 * 60)
+    let predicate = store.predicateForEvents(withStart: windowStart, end: windowEnd, calendars: nil)
+    let candidates = store.events(matching: predicate).filter { event in
+        guard !event.isAllDay else { return false }
+        if event.status == .canceled { return false }
+        let duration = event.endDate.timeIntervalSince(event.startDate)
+        // Skip multi-day or > 6h out-of-office / focus blocks unless nothing else matches
+        guard duration > 0 && duration <= 6 * 3600 else { return false }
+        let title = (event.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return !title.isEmpty
+    }
+
+    guard !candidates.isEmpty else {
+        writeCString("", into: out_json, cap: cap)
+        return 0
+    }
+
+    let best = candidates.min { lhs, rhs in
+        let lhsActive = lhs.startDate <= now && lhs.endDate >= now
+        let rhsActive = rhs.startDate <= now && rhs.endDate >= now
+        if lhsActive != rhsActive {
+            return lhsActive && !rhsActive
+        }
+        let lhsHasPeople = (lhs.attendees?.contains(where: { !$0.isCurrentUser }) ?? false)
+        let rhsHasPeople = (rhs.attendees?.contains(where: { !$0.isCurrentUser }) ?? false)
+        if lhsHasPeople != rhsHasPeople {
+            return lhsHasPeople && !rhsHasPeople
+        }
+        let lhsDist = abs(lhs.startDate.timeIntervalSince(now))
+        let rhsDist = abs(rhs.startDate.timeIntervalSince(now))
+        if abs(lhsDist - rhsDist) > 60 {
+            return lhsDist < rhsDist
+        }
+        return lhs.endDate.timeIntervalSince(lhs.startDate) < rhs.endDate.timeIntervalSince(rhs.startDate)
+    }
+
+    guard let chosen = best else {
+        writeCString("", into: out_json, cap: cap)
+        return 0
+    }
+
+    let cleanTitle = (chosen.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    var seenLower = Set<String>()
+    var attendeeNames: [String] = []
+    if let participants = chosen.attendees {
+        for participant in participants {
+            if participant.isCurrentUser { continue }
+            if participant.participantStatus == .declined { continue }
+            if participant.participantType == .room || participant.participantType == .resource {
+                continue
+            }
+            guard let cleanName = sanitizeAttendeeDisplayName(participant.name) else {
+                continue
+            }
+            let key = cleanName.lowercased()
+            if seenLower.insert(key).inserted {
+                attendeeNames.append(cleanName)
+                if attendeeNames.count >= 24 {
+                    break
+                }
+            }
+        }
+    }
+
+    let payload: [String: Any] = [
+        "title": cleanTitle,
+        "attendees": attendeeNames,
+    ]
+    guard
+        let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+        let jsonString = String(data: data, encoding: .utf8)
+    else {
+        writeCString("", into: out_json, cap: cap)
+        return 0
+    }
+
+    writeCString(jsonString, into: out_json, cap: cap)
+    return 1
 }

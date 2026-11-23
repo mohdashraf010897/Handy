@@ -281,6 +281,39 @@ export async function delete_meeting(meetingId: string): Promise<boolean> {
   });
 }
 
+export type CalendarAccessStatus =
+  | "not_determined"
+  | "authorized"
+  | "denied"
+  | "unsupported";
+
+export interface ActiveCalendarMeeting {
+  title: string;
+  attendees: string[];
+}
+
+export async function get_calendar_access_status(): Promise<CalendarAccessStatus> {
+  try {
+    return await invoke<CalendarAccessStatus>("get_calendar_access_status");
+  } catch {
+    return "unsupported";
+  }
+}
+
+export async function connect_calendar_access(): Promise<CalendarAccessStatus> {
+  return await invoke<CalendarAccessStatus>("connect_calendar_access");
+}
+
+export async function get_active_calendar_meeting(): Promise<ActiveCalendarMeeting | null> {
+  try {
+    return await invoke<ActiveCalendarMeeting | null>(
+      "get_active_calendar_meeting",
+    );
+  } catch {
+    return null;
+  }
+}
+
 export const meetingApi = {
   getLiveState: get_meeting_live_state,
   startNotes: start_meeting_notes,
@@ -297,4 +330,7 @@ export const meetingApi = {
   exportMeetingMarkdown: export_meeting_markdown,
   copyMeetingMarkdown: copy_meeting_markdown,
   deleteMeeting: delete_meeting,
+  getCalendarAccessStatus: get_calendar_access_status,
+  connectCalendarAccess: connect_calendar_access,
+  getActiveCalendarMeeting: get_active_calendar_meeting,
 };

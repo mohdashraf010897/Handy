@@ -84,7 +84,23 @@
       "hintMicrophone": "Erlaube das Mikrofon, um fortzufahren",
       "welcomeBack": "Willkommen zurück. Es geht dort weiter, wo du aufgehört hast.",
       "relaunch": "Tastenkürzel reagiert danach nicht? <relaunch>lowyap neu starten</relaunch> und du landest direkt wieder hier.",
-      "localPrivacyNote": "Audio und eingefügter Text bleiben auf deinem Mac — sie werden nie auf lowyap-Server hochgeladen."
+      "localPrivacyNote": "Audio und eingefügter Text bleiben auf deinem Mac — sie werden nie auf lowyap-Server hochgeladen.",
+      "walkthrough": {
+        "ariaLabel": "Visuelle Anleitung für macOS-Berechtigungen",
+        "stepsGroupLabel": "Schritte zur Berechtigungseinrichtung",
+        "step1Pill": "1. Mikrofon erlauben",
+        "step2Pill": "2. lowyap unter Bedienungshilfen aktivieren",
+        "step1Badge": "macOS-Dialog",
+        "step2Badge": "Datenschutz & Sicherheit › Bedienungshilfen",
+        "livePollingBadge": "Live-Auto-Erkennung",
+        "autoAdvanceHint": "Schalter in den Systemeinstellungen umlegen — diese Ansicht aktualisiert sich automatisch",
+        "allGrantedCue": "Beide Berechtigungen erteilt ✓ — unten auf Weiter klicken",
+        "videoLabel": "8-sekündige visuelle Anleitung: Auf „Erlauben“ beim Mikrofon-Dialog klicken und den Schalter für lowyap in den Systemeinstellungen unter Datenschutz & Sicherheit › Bedienungshilfen aktivieren.",
+        "staticStep1Title": "Schritt 1: Auf „Erlauben“ klicken, wenn macOS nach Mikrofonzugriff fragt",
+        "staticStep2Title": "Schritt 2: In Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen lowyap aktivieren",
+        "staticSub": "Sobald beide Schalter aktiv sind, leuchten die grünen Häkchen automatisch auf.",
+        "posterAlt": "macOS-Systemeinstellungen mit aktiviertem lowyap unter Bedienungshilfen"
+      }
     },
     "shell": {
       "back": "Zurück",
@@ -156,6 +172,24 @@
         "multilingualDesc": "Wechsle frei zwischen Urdu, Hindi/Hinglish, Arabisch und Englisch direkt auf dem Gerät.",
         "advancedToggleShow": "Einzelne Modelle vergleichen ({{count}})",
         "advancedToggleHide": "Modellvergleich ausblenden"
+      },
+      "consumer": {
+        "heading": "Sofort losdiktieren — ohne Wartezeit",
+        "recommendedBadge": "Empfohlen",
+        "instantHdTitle": "Sofort starten + HD-Offline-Sprachmodell im Hintergrund laden",
+        "instantHdDescEnglish": "Nutze ⌥ Leertaste sofort mit der integrierten macOS-Spracherkennung, während lowyap im Hintergrund dein präzises englisches Sprachpaket vorbereitet.",
+        "instantHdDescMultilingual": "Nutze ⌥ Leertaste sofort mit der integrierten macOS-Spracherkennung, während lowyap im Hintergrund dein HD-Sprachpaket für 100+ Sprachen vorbereitet.",
+        "instantHdTag": "0 Sek. Wartezeit · Automatisches Upgrade",
+        "zeroMbBadge": "0 MB Download",
+        "nativeOnlyTitle": "Nur integrierte macOS-Stimme (0 MB Download)",
+        "nativeOnlyDesc": "Nutzt Apples integrierte On-Device-Spracherkennung ohne zusätzlichen Speicherplatz und ohne Downloads. 100 % privat auf deinem Mac.",
+        "nativeOnlyTag": "0 MB Speicherplatz · 100 % auf dem Gerät",
+        "nativeShortName": "Integrierte macOS-Stimme",
+        "advancedShow": "Bestimmte Sprach-Engine wählen (Erweitert)",
+        "advancedHide": "Erweiterte Sprach-Engines ausblenden",
+        "startInstantlyCta": "Sofort starten",
+        "nativeHint": "0 MB Download · 100 % lokale macOS-Spracherkennung",
+        "hdBackgroundHint": "Sofort diktieren · HD-Modell wird im Hintergrund vorbereitet"
       }
     },
     "demo": {
@@ -769,7 +803,53 @@
       "correctionAndWordSaved": "Korrektur gespeichert und „{{word}}“ zum Wörterbuch hinzugefügt.",
       "correctionSaved": "Transkriptionskorrektur gespeichert.",
       "correctionSaveError": "Korrektur konnte nicht gespeichert werden. Bitte erneut versuchen.",
-      "correctionEmptyError": "Die Transkription darf nicht leer sein."
+      "correctionEmptyError": "Die Transkription darf nicht leer sein.",
+      "telemetry": {
+        "sectionTitle": "Speed & Cleanup",
+        "recentTakes_one": "{{count}} recent take",
+        "recentTakes_other": "{{count}} recent takes",
+        "totalAudio": "{{duration}} audio",
+        "medianWaitLabel": "Typical Wait",
+        "medianWaitSub": "Speech to text: {{duration}}",
+        "medianWaitFallbackSub": "After you stop speaking",
+        "tailWaitLabel": "Longer Dictations",
+        "tailWaitSub": "Text cleanup: {{duration}}",
+        "tailWaitFallbackSub": "Wait on longer takes",
+        "asrSpeedLabel": "Speech Engine",
+        "asrSpeedValue": "{{speed}}× faster than speech",
+        "asrSpeedLiveRatio": "{{percent}}% transcribed while you talk",
+        "asrSpeedFallbackSub": "On-device speed",
+        "linguistCoverageLabel": "Smart Cleanup",
+        "linguistCoverageUnit": "cleaned",
+        "linguistCoverageSub": "{{percent}}% had fillers & punctuation fixed",
+        "pillAudio": "{{duration}} audio",
+        "pillWait": "{{duration}} wait",
+        "pillThroughput": "{{speed}}× speed",
+        "pillLive": "Live {{live}}/{{total}}",
+        "pillLiveCount": "Live {{live}}",
+        "stagePolished": "Polished",
+        "stageFastPolish": "Instant Clean",
+        "stageRaw": "Word-for-word",
+        "toggleGroupLabel": "Transcript view",
+        "togglePolished": "Polished",
+        "toggleRaw": "Original",
+        "tooltipAsr": "Speech to text: {{value}}",
+        "tooltipLinguist": "Text cleanup: {{value}}",
+        "tooltipPaste": "Paste: {{value}}",
+        "tooltipModel": "Model: {{value}}",
+        "tooltipProvider": "Cleanup: {{value}}",
+        "actions": {
+          "useInstantCleanup": "Use Instant Cleanup",
+          "chooseFasterModel": "Choose Faster Model",
+          "turnOnCleanup": "Turn On Smart Cleanup"
+        },
+        "bottlenecks": {
+          "post_stop_batch_decode": "A long dictation took extra time after you let go. Keep speaking naturally — lowyap transcribes pauses while you talk.",
+          "compute_bound_asr": "Your current speech model is heavy for this Mac. Switch to a faster model so words appear right away.",
+          "slow_linguist_provider": "AI sentence rewriting slowed down a recent dictation. Switch to Instant Cleanup to fix filler words and punctuation with zero wait.",
+          "unpolished_takes": "Smart Cleanup is off, so dictations paste word-for-word. Turn it on to remove filler words and punctuate automatically."
+        }
+      }
     },
     "debug": {
       "title": "Debug",
@@ -1003,6 +1083,8 @@
     "modelLoadFailedUnknown": "unbekanntes Modell",
     "pasteFailedTitle": "Text konnte nicht eingefügt werden",
     "pasteFailed": "Der Text konnte nicht in die aktive Anwendung eingefügt werden.",
+    "pasteCopiedFallbackTitle": "Ready to Paste (⌘V)",
+    "pasteCopiedFallback": "No text cursor was active when lowyap finished, so your words are copied to the clipboard. Click where you want them and press ⌘V.",
     "copyLastDictation": "Text kopieren",
     "copiedLastDictation": "Letztes Diktat in die Zwischenablage kopiert",
     "transcriptionFailedTitle": "Transkription fehlgeschlagen"
@@ -1032,6 +1114,7 @@
     "noticeNoSpeech": "Keine Stimme erkannt — Mikrofonlautstärke erhöhen",
     "noticeMicPermission": "Mikrofonzugriff nötig — lowyap öffnen",
     "noticeNoMic": "Kein Mikrofon gefunden — Eingang prüfen",
+    "noticeCopiedToClipboard": "Copied — press ⌘V to paste",
     "paused": "Paused",
     "pause": "Pause recording",
     "resume": "Resume recording",
@@ -1052,7 +1135,9 @@
     "resumeMeeting": "Fortsetzen",
     "stopMeeting": "Stopp",
     "openMeetingNotes": "Meeting-Notizen öffnen",
-    "minimizeMeetingPill": "In die Menüleiste minimieren"
+    "minimizeMeetingPill": "In die Menüleiste minimieren",
+    "meetingStopped": "Notizen gestoppt",
+    "dismissMeetingStopped": "Speichern & schließen"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} blockiert möglicherweise 1 Tastenkürzel",
@@ -1066,6 +1151,93 @@
     "dismiss": "Ausblenden"
   },
   "flow": {
+    "sidebar": "Per-app Tone",
+    "title": "Per-app tone",
+    "loading": "Loading…",
+    "loadError": "Couldn't load per-app tone settings.",
+    "retry": "Try again",
+    "enable": {
+      "label": "Match tone to the app",
+      "description": "Adjust the style of cleaned-up text to the app you dictate into, such as casual in chat and formal in email."
+    },
+    "notice": {
+      "linuxAppDetection": "App-based tone needs app detection (not supported on Linux yet).",
+      "postProcessOff": "Per-app tone only takes effect when AI post-processing is on. Turn it on below, then choose a provider in the Post Process section.",
+      "postProcessOn": "Applied during AI post-processing (configured in the Post Process section).",
+      "postProcessHint": "Tone is applied as part of AI post-processing.",
+      "privacy": "Only a short style instruction is added to the prompt. The app's name or ID is never sent to the AI provider."
+    },
+    "lastApp": {
+      "title": "Last dictated app",
+      "description": "The app in front the last time you dictated. Kept on this device only and forgotten when lowyap quits.",
+      "empty": "Dictate into any app, then come back here to set its tone in one click.",
+      "refresh": "Refresh",
+      "noRule": "No rule matches, so it uses {{tone}}.",
+      "userRule": "Uses {{tone}} from your rule “{{rule}}”.",
+      "builtinRule": "Uses {{tone}} from the built-in rule “{{rule}}”.",
+      "add": "Set a tone for this app:",
+      "change": "Change its tone:",
+      "pickerLabel": "Tone for {{app}}"
+    },
+    "rules": {
+      "title": "Your rules",
+      "description": "Checked top to bottom before the built-in presets. The first match wins.",
+      "appIdFor": "App ID for rule {{index}}",
+      "toneFor": "Tone for {{app}}",
+      "remove": "Remove rule for {{app}}",
+      "empty": "No custom rules yet. Built-in presets still apply.",
+      "add": {
+        "label": "Add an app",
+        "placeholder": "com.tinyspeck.slackmacgap or slack.exe",
+        "toneLabel": "Tone for the new rule",
+        "button": "Add rule",
+        "hint": "Use a macOS bundle ID or a Windows executable name. End with * to match a prefix, such as com.jetbrains.*"
+      },
+      "errors": {
+        "empty": "Enter an app ID.",
+        "wildcardOnly": "A rule can't match every app. Add a prefix before *.",
+        "duplicate": "There's already a rule for this app."
+      }
+    },
+    "reset": {
+      "hint": "Defaults: per-app tone off, no custom rules.",
+      "button": "Reset to defaults",
+      "confirmTitle": "Reset per-app tone?",
+      "confirmBody": "This removes all your rules and turns per-app tone off.",
+      "confirmDetail": "Built-in presets are kept. This can't be undone.",
+      "cancel": "Cancel",
+      "confirm": "Reset"
+    },
+    "builtins": {
+      "title": "Built-in presets",
+      "description": "Shipped with lowyap. Add your own rule to override one.",
+      "summary": "Show {{count}} built-in rules",
+      "overridden": "Overridden: {{tone}}",
+      "override": "Override",
+      "overrideFor": "Override built-in rule for {{app}}"
+    },
+    "tones": {
+      "title": "Tones",
+      "default": {
+        "label": "Default",
+        "description": "No extra style instruction. The post-processing prompt is used as is."
+      },
+      "casual": {
+        "label": "Casual",
+        "description": "Conversational and concise, for chat apps."
+      },
+      "formal": {
+        "label": "Formal",
+        "description": "Complete sentences and a professional register, for email and documents."
+      },
+      "code": {
+        "label": "Code",
+        "description": "Keeps identifiers, commands and paths exactly as spoken, for editors and terminals."
+      }
+    },
+    "about": {
+      "privacySummary": "Speech recognition runs offline on your device after downloading a model. Optional AI post-processing stays local with Apple Intelligence or Ollama, or sends transcript text only to your chosen provider."
+    },
     "fastPath": {
       "title": "Sofort-Schnellpfad",
       "description": "KI-Wartezeit bei kurzen, klaren Sätzen überspringen, damit einfache Antworten in unter 0,4 s eingefügt werden."
@@ -1090,6 +1262,10 @@
     "title": "Meeting-Notizen",
     "subtitle": "Bot-free local capture + hybrid rough bullets & transcript summaries",
     "privacyConsentBar": "100 % lokal & ohne Bot · Bitte informiere die Teilnehmenden, dass du Notizen machst.",
+    "calendar": {
+      "connect": "Connect Apple Calendar",
+      "matchedEvent": "Calendar: {{title}} ({{count}})"
+    },
     "autoDetect": {
       "label": "Auto-detect active calls",
       "description": "Show a subtle non-intrusive prompt when Zoom, Meet, Teams, FaceTime, or Slack Huddles activate your mic."
@@ -1102,6 +1278,7 @@
     },
     "idle": {
       "titlePlaceholder": "Optional meeting title (e.g. Weekly Product Sync)",
+      "calendarTitlePlaceholder": "Auto-title from Calendar: {{title}}",
       "titleAriaLabel": "Meeting title",
       "templateLabel": "Template",
       "templateAriaLabel": "Meeting note template",
@@ -1178,6 +1355,82 @@
         "notes": "Notes",
         "bullets": "Your Bullets",
         "transcript": "Transcript"
+      }
+    }
+  },
+  "studio": {
+    "sidebar": {
+      "navAria": "Studio navigation",
+      "desk": "Studio",
+      "lexicon": "Lexikon",
+      "voice": "Stimme & Stil",
+      "settings": "Einstellungen",
+      "tagline": "lowkey yap. it types.",
+      "vaultLabel": "SQLite Vault",
+      "zeroSent": "0 B sent",
+      "cloudMode": "Cloud ASR",
+      "vaultSub": "Privates On-Device-Studio",
+      "cloudLlmMode": "Cloud-LLM",
+      "vaultSubCloud": "Lokaler Tresor · Cloud aktiv"
+    },
+    "desk": {
+      "title": "Studio",
+      "takesHeading": "Letzte Aufnahmen",
+      "dayToday": "Heute",
+      "dayYesterday": "Gestern",
+      "vaultSummaryCounts": "{{count}} takes · {{words}} words",
+      "zeroEgress": "Private on your Mac",
+      "cloudAsrSelected": "Cloud ASR selected",
+      "triggerStripAria": "Dictation trigger status",
+      "holdToYap": "Hold to yap · release to type anywhere",
+      "triggerStatus": "Ready · {{mic}} · {{model}}",
+      "systemDefaultMic": "System default mic",
+      "localModel": "Local ASR",
+      "onDeviceSeal": "Stays on this Mac",
+      "cloudSeal": "Cloud ASR active",
+      "shortcutAndMic": "Shortcut & Mic",
+      "turboHintLead": "Heavy speech model active",
+      "turboHintBody": "— switch to Whisper Large v3 Turbo or Parakeet for 3–5× faster live typing.",
+      "switchEngineButton": "Choose Faster Model →",
+      "tapeBarAria": "Dual-channel studio tape status",
+      "tapeBadge": "NO BOTS",
+      "meetingIdleHint": "Ready for calls & lectures — records cleanly on your Mac with zero bots",
+      "openMeetings": "Meetings öffnen",
+      "meetingRecordingBadge": "LIVE TAPE",
+      "meetingPausedBadge": "PAUSED",
+      "untitledMeeting": "Untitled session",
+      "openLiveTape": "Open Live Tape",
+      "dayTakesCount_one": "{{count}} Aufnahme",
+      "dayTakesCount_other": "{{count}} Aufnahmen",
+      "cloudLlmSelected": "Cloud-LLM aktiv",
+      "cloudLlmSeal": "Cloud-LLM aktiv"
+    },
+    "lexicon": {
+      "title": "Lexikon",
+      "subtitle": "Custom vocabulary · spoken languages · script rules",
+      "vocabularyGroup": "Eigenes Vokabular",
+      "languagesGroup": "Gesprochene Sprachen & Schriftsperre",
+      "hindustaniSupported": "Urdu-/Hindi-Schriftsperre aktiv über {{model}}"
+    },
+    "voice": {
+      "title": "Stimme & Stil",
+      "subtitle": "Linguist polish · per-app tone · voice snippets",
+      "pipelineGroup": "Linguist Pipeline",
+      "stageANotice": "Instant cleanup is always on (removes filler words, fixes punctuation, and uses your dictionary). Turn on AI Rewriting below if you also want full sentence polishing.",
+      "tabs": {
+        "toneAndSnippets": "App-Tonfall & Snippets",
+        "linguistEngine": "Linguist-Engine & Prompts"
+      }
+    },
+    "settings": {
+      "title": "Einstellungen",
+      "appearanceGroup": "Oberfläche & Darstellung",
+      "tabs": {
+        "shortcuts": "Kurzbefehle & Audio",
+        "models": "Engines & Modelle",
+        "system": "System & Tresor",
+        "about": "Über",
+        "debug": "Debug"
       }
     }
   }

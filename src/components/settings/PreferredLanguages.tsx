@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SettingContainer } from "../ui/SettingContainer";
 import {
@@ -8,6 +9,11 @@ import {
 } from "../shared/LanguagePicker";
 import { suggestedLanguages } from "@/lib/utils/languageSuggestions";
 import { isWeakLanguage } from "@/lib/models/catalog";
+import {
+  partitionSpokenLanguageSupport,
+  type ActiveModelCapabilityInput,
+} from "@/lib/models/languageCapability";
+import { useModelStore } from "@/stores/modelStore";
 import { useSettings } from "../../hooks/useSettings";
 import { languageList } from "../../lib/constants/languages";
 
@@ -62,7 +68,18 @@ export const PreferredLanguages: React.FC<PreferredLanguagesProps> = ({
     if (!picker.onKeyDown(e) && e.key === "Escape") inputRef.current?.blur();
   };
 
-  const weak = languages.filter(isWeakLanguage);
+  const { currentModel, models } = useModelStore();
+  const activeModel: ActiveModelCapabilityInput | null =
+    models.find((m) => m.id === currentModel) ??
+    (currentModel
+      ? { id: currentModel, name: currentModel, supported_languages: [] }
+      : null);
+  const activeModelName = activeModel?.name || activeModel?.id || "";
+  const { adapterSupported, weak } = partitionSpokenLanguageSupport({
+    languages,
+    activeModel,
+    isWeak: isWeakLanguage,
+  });
 
   return (
     <SettingContainer
@@ -126,6 +143,22 @@ export const PreferredLanguages: React.FC<PreferredLanguagesProps> = ({
           </div>
         </div>
       </div>
+
+      {adapterSupported.length > 0 && (
+        <div
+          role="status"
+          data-testid="hindustani-capability-pill"
+          className="bg-moss-wash text-moss rounded-chip px-2.5 py-1 text-xs font-medium mt-1.5 inline-flex items-center gap-1.5"
+        >
+          <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>
+            {t("studio.lexicon.hindustaniSupported", {
+              model: activeModelName,
+              defaultValue: "Urdu / Hindi script-lock active via {{model}}",
+            })}
+          </span>
+        </div>
+      )}
 
       {weak.length > 0 && (
         <p className="mt-[4px] mb-0 text-small text-ink-3">

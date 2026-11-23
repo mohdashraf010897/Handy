@@ -30,13 +30,16 @@ use crate::managers::model_capabilities::{CapabilityProbe, Compatibility};
 const SCHEMA: u32 = 2;
 
 /// Base URL tried when the Hugging Face download fails, set at build time via
-/// `MODEL_MIRROR`; none by default (upstream's mirror is the Handy project's
-/// own hosting). The full file URL is `{mirror}/{repo_id}/{revision}/{filename}`
+/// `LOWYAP_MODEL_MIRROR` (takes precedence) or `MODEL_MIRROR`; none by default.
+/// The full file URL is `{mirror}/{repo_id}/{revision}/{filename}`
 /// — the same three values that form the HF resolve URL, so a mirror is a
 /// plain static host. `scripts/mirror_models.py` populates it from this catalog.
-const MIRRORS: &[&str] = match option_env!("MODEL_MIRROR") {
-    Some(url) => &[url],
-    None => &[],
+const MIRRORS: &[&str] = match (
+    option_env!("LOWYAP_MODEL_MIRROR"),
+    option_env!("MODEL_MIRROR"),
+) {
+    (Some(url), _) | (None, Some(url)) => &[url],
+    (None, None) => &[],
 };
 
 /// Handy's list order and onboarding set, keyed by catalog id. Kept from the

@@ -8,12 +8,16 @@
 #![forbid(unsafe_code)]
 
 pub mod domain;
+pub mod linguist;
 pub mod ports;
 pub mod session_bus;
+pub mod telemetry;
 
 pub use domain::*;
+pub use linguist::*;
 pub use ports::*;
 pub use session_bus::*;
+pub use telemetry::*;
 
 #[cfg(test)]
 mod test_support {

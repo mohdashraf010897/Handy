@@ -42,3 +42,24 @@ public func lowyap_system_tap_drain(
 
 @_cdecl("lowyap_system_tap_stop")
 public func lowyap_system_tap_stop(_ handle: UnsafeMutableRawPointer?) {}
+
+@_cdecl("lowyap_calendar_auth_status")
+public func lowyap_calendar_auth_status() -> Int32 {
+    2
+}
+
+@_cdecl("lowyap_request_calendar_access")
+public func lowyap_request_calendar_access() -> Int32 {
+    2
+}
+
+@_cdecl("lowyap_active_calendar_meeting_json")
+public func lowyap_active_calendar_meeting_json(
+    _ out_json: UnsafeMutablePointer<CChar>?,
+    cap: Int32
+) -> Int32 {
+    if let out_json, cap > 0 {
+        out_json[0] = 0
+    }
+    return 0
+}

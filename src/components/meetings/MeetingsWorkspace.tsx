@@ -77,7 +77,8 @@ export const MeetingsWorkspace: React.FC = () => {
           currentLive.active_meeting_id !== null);
       const startedNewMeeting =
         (snapshot.meeting.phase === "recording" ||
-          snapshot.meeting.phase === "paused") &&
+          snapshot.meeting.phase === "paused" ||
+          snapshot.meeting.phase === "soft_stopped") &&
         currentLive.active_meeting_id !== snapshot.meeting.meeting_id;
 
       setLiveState((prev) => {
@@ -139,7 +140,8 @@ export const MeetingsWorkspace: React.FC = () => {
               detected_call: nextDetectedCall,
             };
           }
-          case "paused": {
+          case "paused":
+          case "soft_stopped": {
             return {
               ...prev,
               status: "paused",

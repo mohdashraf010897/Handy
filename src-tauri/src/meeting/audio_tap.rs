@@ -11,6 +11,10 @@ use std::sync::{Arc, Mutex};
 const SAMPLE_RATE_16K: usize = 16_000;
 const RING_CAPACITY_SAMPLES: usize = 30 * SAMPLE_RATE_16K;
 const MAX_DRAIN_SAMPLES: usize = RING_CAPACITY_SAMPLES;
+/// Maximum transient callback jitter tolerated before synthesizing zero-padding
+/// for an idle side. Prevents 120 ms polling ticks from splicing zeros into live
+/// audio and breaking phase lock in `WebRtcAec3EchoCanceller`.
+const DUAL_CLOCK_SLACK_SAMPLES: usize = 3_200; // 200 ms @ 16 kHz
 
 #[derive(Debug, Default)]
 struct BoundedPcmRingBuffer {
@@ -46,6 +50,10 @@ impl BoundedPcmRingBuffer {
             self.samples.drain(..overflow);
         }
         self.samples.extend(chunk.iter().copied());
+    }
+
+    fn available_len(&self) -> usize {
+        self.samples.len()
     }
 
     fn drain_up_to(&mut self, max_samples: usize) -> Vec<f32> {
@@ -163,6 +171,53 @@ impl ActiveSystemDualCapture {
             }
         }
     }
+    fn drain_paired_dual_rings(&mut self, flush_all: bool) -> (Vec<f32>, Vec<f32>) {
+        self.drain_tap_into_ring();
+        let mut mic_guard = match self.mic_ring.lock() {
+            Ok(ring) => ring,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let mic_avail = mic_guard.available_len();
+        let others_avail = self.others_ring.available_len();
+
+        if flush_all {
+            let me_16k = mic_guard.drain_up_to(MAX_DRAIN_SAMPLES);
+            drop(mic_guard);
+            let others_16k = self.others_ring.drain_up_to(MAX_DRAIN_SAMPLES);
+            return align_dual_channels(me_16k, others_16k);
+        }
+
+        if mic_avail > 0 && others_avail > 0 {
+            // Both hardware callbacks are active: drain the matched prefix so
+            // neither stream receives synthetic zero-filled dropouts on poll
+            // boundaries. If hardware clock skew ever pushes one side far ahead,
+            // trim only the excess beyond `DUAL_CLOCK_SLACK_SAMPLES`.
+            let paired = mic_avail.min(others_avail).min(MAX_DRAIN_SAMPLES);
+            let me_16k = mic_guard.drain_up_to(paired);
+            if mic_guard.available_len() > DUAL_CLOCK_SLACK_SAMPLES * 2 {
+                let trim = mic_guard.available_len() - DUAL_CLOCK_SLACK_SAMPLES;
+                let _ = mic_guard.drain_up_to(trim);
+            }
+            drop(mic_guard);
+            let others_16k = self.others_ring.drain_up_to(paired);
+            if self.others_ring.available_len() > DUAL_CLOCK_SLACK_SAMPLES * 2 {
+                let trim = self.others_ring.available_len() - DUAL_CLOCK_SLACK_SAMPLES;
+                let _ = self.others_ring.drain_up_to(trim);
+            }
+            return (me_16k, others_16k);
+        }
+
+        // One side has 0 samples: wait out brief (<200 ms) callback phase skew,
+        // then pad the genuinely silent side so single-sided speech never stalls.
+        if mic_avail > DUAL_CLOCK_SLACK_SAMPLES || others_avail > DUAL_CLOCK_SLACK_SAMPLES {
+            let me_16k = mic_guard.drain_up_to(MAX_DRAIN_SAMPLES);
+            drop(mic_guard);
+            let others_16k = self.others_ring.drain_up_to(MAX_DRAIN_SAMPLES);
+            return align_dual_channels(me_16k, others_16k);
+        }
+
+        (Vec::new(), Vec::new())
+    }
 }
 
 impl ActiveDualCapture for ActiveSystemDualCapture {
@@ -178,18 +233,17 @@ impl ActiveDualCapture for ActiveSystemDualCapture {
         let route = macos_bridge::detect_output_route();
         self.output_route = route;
 
-        let me_16k = self.drain_mic_ring();
-
         if self.capture_mode == AudioCaptureMode::DualStream {
-            self.drain_tap_into_ring();
-            let others_16k = self.others_ring.drain_up_to(MAX_DRAIN_SAMPLES);
-            let (me_aligned, others_aligned) = align_dual_channels(me_16k, others_16k);
+            let stopped = self.mic_recorder.is_none();
+            let (me_aligned, others_aligned) = self.drain_paired_dual_rings(stopped);
             return DualPcmChunk {
                 me_16k: me_aligned,
                 others_16k: others_aligned,
                 output_route: route,
             };
         }
+
+        let me_16k = self.drain_mic_ring();
 
         DualPcmChunk {
             me_16k,

@@ -1,5 +1,5 @@
 //! Long-form chunked decoding, shared by a live recording and a batch clip:
-//! both cut the same audio at the same pauses and decode it the same way.
+//! live recording uses shorter windows; batch clips retain their original cuts.
 
 use std::time::Instant;
 
@@ -7,7 +7,7 @@ use log::info;
 use transcribe_cpp::Transcript;
 
 use super::{RunSetup, TranscriptionManager};
-use crate::audio_toolkit::chunking::Chunker;
+use crate::audio_toolkit::chunking::{ChunkPiece, Chunker};
 use crate::engine_supervisor::{CancelMark, EngineError, LoadedInfo};
 use crate::language_detection::Plan;
 use crate::managers::audio::create_detector;
@@ -114,7 +114,10 @@ pub(super) struct ChunkedDecode<'a> {
     last_setup: Option<Box<RunSetup>>,
     model_id: String,
     chunker: Chunker,
-    transcripts: Vec<Transcript>,
+    live_preview: bool,
+    prior_chunk_language: Option<String>,
+    transcripts: Vec<(Transcript, bool)>,
+    completed_at: Vec<Instant>,
     /// The first run that failed or was cancelled; nothing more is decoded
     /// after it.
     failure: Option<EngineError>,
@@ -128,6 +131,43 @@ impl<'a> ChunkedDecode<'a> {
         model_id: &str,
         backend: VadBackend,
     ) -> Self {
+        Self::with_policy(
+            tm,
+            mark,
+            setup,
+            model_id,
+            backend,
+            lowyap_ports::ChunkingPolicy::batch_clip(),
+        )
+    }
+
+    pub(super) fn new_live(
+        tm: &'a TranscriptionManager,
+        mark: CancelMark,
+        setup: ChunkSetup,
+        model_id: &str,
+        backend: VadBackend,
+    ) -> Self {
+        let mut decode = Self::with_policy(
+            tm,
+            mark,
+            setup,
+            model_id,
+            backend,
+            lowyap_ports::ChunkingPolicy::live_dictation(),
+        );
+        decode.live_preview = true;
+        decode
+    }
+
+    fn with_policy(
+        tm: &'a TranscriptionManager,
+        mark: CancelMark,
+        setup: ChunkSetup,
+        model_id: &str,
+        backend: VadBackend,
+        policy: lowyap_ports::ChunkingPolicy,
+    ) -> Self {
         // The VAD is only loaded if the audio turns out long enough to cut.
         let app_handle = tm.app_handle.clone();
         Self {
@@ -136,8 +176,14 @@ impl<'a> ChunkedDecode<'a> {
             setup,
             last_setup: None,
             model_id: model_id.to_string(),
-            chunker: Chunker::new(Box::new(move || create_detector(backend, &app_handle))),
+            chunker: Chunker::with_policy(
+                Box::new(move || create_detector(backend, &app_handle)),
+                policy,
+            ),
+            live_preview: false,
+            prior_chunk_language: None,
             transcripts: Vec::new(),
+            completed_at: Vec::new(),
             failure: None,
         }
     }
@@ -150,7 +196,7 @@ impl<'a> ChunkedDecode<'a> {
         audio: Vec<f32>,
         model_id: &str,
         backend: VadBackend,
-    ) -> Result<(Vec<Transcript>, RunSetup), EngineError> {
+    ) -> Result<(Vec<(Transcript, bool)>, RunSetup), EngineError> {
         let mut decode = Self::new(tm, mark, setup, model_id, backend);
         decode.push(audio);
         decode.finish()
@@ -159,6 +205,11 @@ impl<'a> ChunkedDecode<'a> {
     /// Samples pushed so far.
     pub(super) fn samples(&self) -> usize {
         self.chunker.samples()
+    }
+
+    /// Chunks whose decode completed on or before `cutoff`.
+    pub(super) fn decoded_before(&self, cutoff: Instant) -> usize {
+        self.completed_at.iter().filter(|&&t| t <= cutoff).count()
     }
 
     /// Chunks decoded so far.
@@ -177,15 +228,15 @@ impl<'a> ChunkedDecode<'a> {
         if self.failure.is_some() {
             return;
         }
-        let chunks = self.chunker.push(pcm);
+        let chunks = self.chunker.push_pieces(pcm);
         self.decode(chunks);
     }
 
     /// Decodes what is left. Every chunk's transcript in order and the setup
     /// they ran with, or the run that failed or was cancelled.
-    pub(super) fn finish(mut self) -> Result<(Vec<Transcript>, RunSetup), EngineError> {
+    pub(super) fn finish(mut self) -> Result<(Vec<(Transcript, bool)>, RunSetup), EngineError> {
         if self.failure.is_none() {
-            let chunks = self.chunker.finish();
+            let chunks = self.chunker.finish_pieces();
             self.decode(chunks);
         }
         if let Some(failure) = self.failure {
@@ -203,19 +254,54 @@ impl<'a> ChunkedDecode<'a> {
         Ok((self.transcripts, setup))
     }
 
-    fn decode(&mut self, chunks: Vec<Vec<f32>>) {
+    fn decode(&mut self, chunks: Vec<ChunkPiece>) {
         let tm = self.tm;
         let mark = self.mark;
-        for chunk in chunks {
+        for ChunkPiece {
+            samples: mut chunk,
+            overlaps_with_prev,
+        } in chunks
+        {
             if self.failure.is_some() {
                 return;
             }
             let setup = self.setup.resolve_mut(&mut self.last_setup, tm, &chunk);
+            if let Some(prev_lang) = &self.prior_chunk_language {
+                setup.prior_chunk_language = Some(prev_lang.clone());
+            }
+            lowyap_flow::mask_interior_silence_collars(&mut chunk);
             let audio_secs = chunk.len() as f64 / 16_000.0;
             let started = Instant::now();
             match tm.decode_chunk_for_spoken_languages(mark, chunk, setup, &self.model_id) {
                 Ok(transcript) => {
-                    self.transcripts.push(transcript);
+                    let alpha_chars = transcript
+                        .text
+                        .chars()
+                        .filter(|c| c.is_alphabetic())
+                        .count();
+                    if alpha_chars >= 16 {
+                        if let Some(lang) = transcript.language.as_deref() {
+                            if setup
+                                .spoken_languages
+                                .iter()
+                                .any(|s| s.split(['-', '_']).next() == Some(lang))
+                            {
+                                self.prior_chunk_language = Some(lang.to_string());
+                            }
+                        }
+                    }
+                    self.transcripts.push((transcript, overlaps_with_prev));
+                    self.completed_at.push(Instant::now());
+                    if self.live_preview {
+                        let texts: Vec<(&str, bool)> = self
+                            .transcripts
+                            .iter()
+                            .map(|(t, ov)| (t.text.as_str(), *ov))
+                            .collect();
+                        let committed =
+                            crate::audio_toolkit::chunking::join_transcript_boundaries(&texts);
+                        super::emit_stream_text(&tm.app_handle, &committed, "");
+                    }
                     // Real-time factor: audio seconds decoded per second of
                     // wall clock. Floored so a near-instant decode reports a
                     // large factor instead of infinity.
@@ -377,5 +463,23 @@ mod tests {
 
         assert_eq!(calls.get(), 1);
         assert!(matches!(chunk_setup, ChunkSetup::Ready(_)));
+    }
+
+    #[test]
+    fn silence_collar_masking_softens_interior_chunk_pauses_without_touching_speech() {
+        let mut chunk = Vec::with_capacity(16_000 * 3);
+        chunk.extend(std::iter::repeat_n(0.22_f32, 16_000)); // 1.0s speech
+        chunk.extend(std::iter::repeat_n(0.0015_f32, 16_000)); // 1.0s interior pause (>= 350ms)
+        chunk.extend(std::iter::repeat_n(-0.18_f32, 16_000)); // 1.0s speech
+
+        let masked_spans = lowyap_flow::mask_interior_silence_collars(&mut chunk);
+        assert_eq!(masked_spans, 1);
+        assert!(chunk[..16_000 + 480]
+            .iter()
+            .all(|&s| (s - 0.22).abs() < 1e-6 || (s - 0.0015).abs() < 1e-6));
+        assert!(chunk[16_000 + 800..32_000 - 800]
+            .iter()
+            .all(|&s| s != 0.0 && (s - 0.0015 * 0.004).abs() < 1e-7));
+        assert!(chunk[32_000..].iter().all(|&s| (s + 0.18).abs() < 1e-6));
     }
 }

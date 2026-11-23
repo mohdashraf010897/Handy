@@ -1,0 +1,125 @@
+# SV-98 Real-Human Global Accent & Multilingual Benchmark Corpus
+# Every speech WAV is a genuine human recording converted via ffmpeg to 16 kHz mono 16-bit PCM.
+# See PROVENANCE.md in this directory for dataset URLs, permissive licenses (CC-BY-4.0 / CC0-1.0), speaker IDs, and SHA-256 checksums.
+
+[[clips]]
+clip_id = "en_us_clean_01"
+wav = "en_us_clean_01.wav"
+category = "clean_english"
+language_hint = "en"
+reference_text = "Congratulations were poured in upon the princess everywhere during her journey"
+
+[[clips]]
+clip_id = "en_us_clean_02"
+wav = "en_us_clean_02.wav"
+category = "clean_english"
+language_hint = "en"
+reference_text = "After proceeding a few miles the progress of hawkeye who led the advance became more deliberate and watchful"
+
+[[clips]]
+clip_id = "en_us_fleurs_03"
+wav = "en_us_fleurs_03.wav"
+category = "clean_english"
+language_hint = "en"
+reference_text = "All nouns, alongside the word Sie for you, always begin with a capital letter, even in the middle of a sentence."
+
+[[clips]]
+clip_id = "en_us_long_chunked_04"
+wav = "en_us_long_chunked_04.wav"
+category = "clean_english"
+language_hint = "en"
+reference_text = "Eleven o'clock had struck it was a fine clear night they were the only persons on the road and they sauntered leisurely along to avoid paying the price of fatigue for the recreation provided for the toledans in their valley or on the banks of their river"
+
+[[clips]]
+clip_id = "en_in_south_asian_01"
+wav = "en_in_south_asian_01.wav"
+category = "accented_english"
+language_hint = "en"
+reference_text = "they are distributed by walt disney pictures unless otherwise noted."
+
+[[clips]]
+clip_id = "en_scot_uk_02"
+wav = "en_scot_uk_02.wav"
+category = "accented_english"
+language_hint = "en"
+reference_text = "numerous stories are associated with the time preceding her death."
+
+[[clips]]
+clip_id = "en_ie_irish_03"
+wav = "en_ie_irish_03.wav"
+category = "accented_english"
+language_hint = "en"
+reference_text = "the town of java is on the western border of wyoming county."
+
+[[clips]]
+clip_id = "en_l2_german_04"
+wav = "en_l2_german_04.wav"
+category = "accented_english"
+language_hint = "en"
+reference_text = "it occurs further north in northern mexico, and into western texas."
+
+[[clips]]
+clip_id = "en_in_long_chunked_05"
+wav = "en_in_long_chunked_05.wav"
+category = "accented_english"
+language_hint = "en"
+reference_text = "love is a fluid concept, and i'm not sure if androids get that. i would give a good review of the new tv i bought a week ago. at the airport, the woman threw herself into revision for college so she could experience university. after a tragic accident with a chainsaw he has become a paraplegic."
+
+[[clips]]
+clip_id = "hi_in_fleurs_01"
+wav = "hi_in_fleurs_01.wav"
+category = "multilingual"
+language_hint = "hi"
+reference_text = "कुछ अणुओं में अस्थिर केंद्रक होता है, जिसका मतलब यह है कि उनमें थोड़े या बिना किसी झटके से टूटने की प्रवृत्ति होती है,"
+
+[[clips]]
+clip_id = "hi_in_fleurs_02"
+wav = "hi_in_fleurs_02.wav"
+category = "multilingual"
+language_hint = "hi"
+reference_text = "अपनी सरकार के अलावा आप अन्य देशों की सरकारों की सलाह ले सकते हैं. हालाँकि, उनकी सलाह उनके नागरिकों को ध्यान में रखकर दी जाती हैं."
+
+[[clips]]
+clip_id = "ur_pk_fleurs_01"
+wav = "ur_pk_fleurs_01.wav"
+category = "multilingual"
+language_hint = "ur"
+reference_text = "فلپائنی فوٹوگرافروں کے ساتھ چھےاغوا شدگان کو جلد رہا کر دیا گیا تھا، جِن میں بچّے اور بُوڑھے شامل تھے۔"
+
+[[clips]]
+clip_id = "ur_pk_fleurs_02"
+wav = "ur_pk_fleurs_02.wav"
+category = "multilingual"
+language_hint = "ur"
+reference_text = "اس سائٹ کے ساختوں پر نشان لگا کر یا گرافیٹی کھرچ کر اسے مسخ نہ کریں۔"
+
+[[clips]]
+clip_id = "es_419_fleurs_01"
+wav = "es_419_fleurs_01.wav"
+category = "multilingual"
+language_hint = "es"
+reference_text = "Fue tanta la cantidad de gente que se concentró, que no todos pudieron acceder al funeral en la Plaza de San Pedro."
+
+[[clips]]
+clip_id = "de_de_fleurs_01"
+wav = "de_de_fleurs_01.wav"
+category = "multilingual"
+language_hint = "de"
+reference_text = "Es leben noch viele Männer und Frauen, die ihre Zeit hier überlebt haben, und viele weitere mit Angehörigen, die dort ermordet wurden oder sich zu Tode arbeiteten, Juden und Nichtjuden gleichermaßen."
+
+[[clips]]
+clip_id = "de_de_fleurs_02"
+wav = "de_de_fleurs_02.wav"
+category = "multilingual"
+language_hint = "de"
+reference_text = "Die Höhle befindet sich auf der Spitze eines der Berge nördlich von Mekka und ist vom Rest der Welt völlig isoliert."
+
+[[clips]]
+clip_id = "silence_room_tone_01"
+wav = "silence_room_tone_01.wav"
+category = "silence_breath"
+
+[[clips]]
+clip_id = "silence_breath_puff_02"
+wav = "silence_breath_puff_02.wav"
+category = "silence_breath"

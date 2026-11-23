@@ -1173,4 +1173,311 @@ test.describe("Wave 4A — Floating Overlay UX Controls (Headless)", () => {
       page.getByTestId("overlay-meeting-summarizing-pill"),
     ).toContainText("جارٍ حفظ الملاحظات…");
   });
+
+  test("7. Cancel -> Undo preserves elapsed timer (00:10 stays >= 00:10, never resets to 00:00) even when show-overlay & recording-ready fire", async ({
+    page,
+  }) => {
+    await installTauriWave4Mock(page);
+    // Speed up only the 1s recording timer check cleanly by advancing real ticks or installing fake clock before goto
+    await page.clock.install();
+    await page.goto("/src/overlay/index.html");
+
+    // 1. Start locked dictation take 501 and emit native show-overlay + recording-ready
+    await page.evaluate((idleTray) => {
+      const now = Date.now();
+      window.__wave4Emit("show-overlay", "streaming");
+      window.__wave4SetSnapshot({
+        seq: 1,
+        server_now_ms: now,
+        dictation: {
+          phase: "recording",
+          take_id: 501,
+          started_at_ms: now,
+          locked: true,
+          paused: false,
+        },
+        meeting: { phase: "idle" },
+        detected_call: null,
+        transient_notice: null,
+        overlay: {
+          mode: "dictation_recording",
+          take_id: 501,
+          locked: true,
+          paused: false,
+        },
+        tray_meeting: idleTray,
+      });
+      window.__wave4Emit("recording-ready", null);
+      window.__wave4Emit("stream-text-event", {
+        committed: "Testing ten seconds of speech ",
+        tentative: "before undo",
+      });
+    }, IDLE_TRAY);
+
+    // Speak for 10 seconds -> timer reaches 00:10
+    await page.clock.runFor(10_200);
+    await expect(page.locator(".stimer").first()).toHaveText("00:10");
+    await expect(page.locator(".stext")).toContainText(
+      "Testing ten seconds of speech",
+    );
+
+    // 2. User presses Cancel (Esc) -> enters soft_cancelled for 2 seconds
+    await page.evaluate((idleTray) => {
+      const now = Date.now();
+      window.__wave4SetSnapshot({
+        seq: 2,
+        server_now_ms: now,
+        dictation: {
+          phase: "soft_cancelled",
+          take_id: 501,
+          cancelled_at_ms: now,
+          expires_at_ms: now + 5_000,
+          grace_ms: 5_000,
+        },
+        meeting: { phase: "idle" },
+        detected_call: null,
+        transient_notice: null,
+        overlay: {
+          mode: "dictation_soft_cancelled",
+          take_id: 501,
+          cancelled_at_ms: now,
+          expires_at_ms: now + 5_000,
+          grace_ms: 5_000,
+        },
+        tray_meeting: idleTray,
+      });
+      window.__wave4Emit("show-overlay", "soft_cancelled");
+    }, IDLE_TRAY);
+
+    await expect(page.getByTestId("overlay-soft-cancel-pill")).toBeVisible();
+    await page.clock.runFor(1_500);
+
+    // 3. User clicks Undo -> backend emits resumed SessionBus snapshot + show-overlay + TWO recording-ready events (main thread + audio thread)
+    await page.getByTestId("overlay-undo-cancel-btn").click();
+    await page.evaluate((idleTray) => {
+      const now = Date.now();
+      window.__wave4SetSnapshot({
+        seq: 3,
+        server_now_ms: now,
+        dictation: {
+          phase: "recording",
+          take_id: 501,
+          started_at_ms: now,
+          locked: true,
+          paused: false,
+        },
+        meeting: { phase: "idle" },
+        detected_call: null,
+        transient_notice: null,
+        overlay: {
+          mode: "dictation_recording",
+          take_id: 501,
+          locked: true,
+          paused: false,
+        },
+        tray_meeting: idleTray,
+      });
+      window.__wave4Emit("show-overlay", "streaming");
+      window.__wave4Emit("recording-ready", null);
+    }, IDLE_TRAY);
+
+    // Simulate audio callback emitting a second recording-ready 30ms later
+    await page.clock.runFor(35);
+    await page.evaluate(() => {
+      window.__wave4Emit("recording-ready", null);
+    });
+
+    // Timer MUST remain 00:10 (never reset to 00:00) AND live preview text MUST remain intact!
+    await expect(page.locator(".stimer").first()).toHaveText("00:10");
+    await expect(page.locator(".stext")).toContainText(
+      "Testing ten seconds of speech",
+    );
+
+    // Advancing 2 more seconds ticks cleanly from 00:10 -> 00:12
+    await page.clock.runFor(2_050);
+    await expect(page.locator(".stimer").first()).toHaveText("00:12");
+  });
+
+  test("8. Active Meeting Pill stays a subtle compact micro-capsule (< 210px wide, <= 36px tall)", async ({
+    page,
+  }) => {
+    await installTauriWave4Mock(page);
+    await page.setViewportSize({ width: 400, height: 50 });
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const now = Date.now();
+      window.__wave4SetSnapshot({
+        seq: 1,
+        server_now_ms: now,
+        dictation: { phase: "idle" },
+        meeting: {
+          phase: "recording",
+          meeting_id: "mtg-compact-1",
+          title: "Standup",
+          started_at_ms: now - 66_000,
+          accumulated_paused_ms: 0,
+          capture_mode: "mic_and_system_audio",
+          app_name: "zoom.us",
+        },
+        detected_call: null,
+        transient_notice: null,
+        overlay: {
+          mode: "meeting_active",
+          meeting_id: "mtg-compact-1",
+          title: "Standup",
+          paused: false,
+          elapsed_ms: 66_000,
+          started_at_ms: now - 66_000,
+          accumulated_paused_ms: 0,
+          paused_at_ms: null,
+          app_name: "zoom.us",
+        },
+        tray_meeting: {
+          active: true,
+          meeting_id: "mtg-compact-1",
+          title: "Standup",
+          paused: false,
+          summarizing: false,
+          elapsed_ms: 66_000,
+        },
+      });
+    });
+
+    const pill = page.getByTestId("overlay-meeting-active-pill");
+    await expect(pill).toBeVisible();
+    const box = await pill.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeLessThan(210);
+    expect(box!.height).toBeLessThanOrEqual(36);
+  });
+
+  test("9. Call-End Auto-Stop -> Notetaker stopped · Resume [×] countdown pill", async ({
+    page,
+  }) => {
+    await installTauriWave4Mock(page);
+    await page.goto("/src/overlay/index.html");
+
+    // 1. Call hangup detected -> backend emits meeting_soft_stopped with 8s grace window
+    await page.evaluate(() => {
+      const now = Date.now();
+      window.__wave4SetSnapshot({
+        seq: 1,
+        server_now_ms: now,
+        dictation: { phase: "idle" },
+        meeting: {
+          phase: "soft_stopped",
+          meeting_id: "mtg-live-1",
+          title: "Design Sync",
+          started_at_ms: now - 252_000,
+          stopped_at_ms: now,
+          expires_at_ms: now + 8_000,
+          grace_ms: 8_000,
+          accumulated_paused_ms: 0,
+          capture_mode: "mic_and_system_audio",
+          app_name: "Microsoft Teams",
+        },
+        detected_call: null,
+        transient_notice: null,
+        overlay: {
+          mode: "meeting_soft_stopped",
+          meeting_id: "mtg-live-1",
+          title: "Design Sync",
+          stopped_at_ms: now,
+          expires_at_ms: now + 8_000,
+          grace_ms: 8_000,
+          app_name: "Microsoft Teams",
+        },
+        tray_meeting: {
+          active: true,
+          meeting_id: "mtg-live-1",
+          title: "Design Sync",
+          paused: true,
+          summarizing: false,
+          elapsed_ms: 252_000,
+        },
+      });
+    });
+
+    const pill = page.getByTestId("overlay-meeting-soft-stopped-pill");
+    await expect(pill).toBeVisible();
+    await expect(pill).toContainText("Notetaker stopped");
+
+    const progress = page.getByTestId("overlay-meeting-soft-stop-progress");
+    await expect(progress).toHaveAttribute("role", "progressbar");
+    const initialNow = Number(await progress.getAttribute("aria-valuenow"));
+    expect(initialNow).toBeGreaterThan(70);
+
+    // Countdown progress drains smoothly
+    await expect
+      .poll(async () => Number(await progress.getAttribute("aria-valuenow")), {
+        timeout: 2_000,
+      })
+      .toBeLessThan(initialNow);
+
+    // 2. Clicking [Resume] restores active meeting recording without ending notes
+    const resumeBtn = page.getByTestId("overlay-meeting-resume-stopped-btn");
+    await expect(resumeBtn).toContainText("Resume");
+    await resumeBtn.click();
+
+    expect(
+      await page.evaluate(() =>
+        window.__wave4Calls.some((c) => c.cmd === "resume_meeting_notes"),
+      ),
+    ).toBe(true);
+    await expect(pill).toHaveCount(0);
+    await expect(page.getByTestId("overlay-meeting-active-pill")).toBeVisible();
+
+    // 3. Re-emit meeting_soft_stopped and click [×] -> finalizes immediately via stop_meeting_notes
+    await page.evaluate(() => {
+      const now = Date.now();
+      window.__wave4SetSnapshot({
+        seq: 5,
+        server_now_ms: now,
+        dictation: { phase: "idle" },
+        meeting: {
+          phase: "soft_stopped",
+          meeting_id: "mtg-live-1",
+          title: "Design Sync",
+          started_at_ms: now - 260_000,
+          stopped_at_ms: now,
+          expires_at_ms: now + 8_000,
+          grace_ms: 8_000,
+          accumulated_paused_ms: 2_000,
+          capture_mode: "mic_and_system_audio",
+          app_name: "Microsoft Teams",
+        },
+        detected_call: null,
+        transient_notice: null,
+        overlay: {
+          mode: "meeting_soft_stopped",
+          meeting_id: "mtg-live-1",
+          title: "Design Sync",
+          stopped_at_ms: now,
+          expires_at_ms: now + 8_000,
+          grace_ms: 8_000,
+          app_name: "Microsoft Teams",
+        },
+        tray_meeting: {
+          active: true,
+          meeting_id: "mtg-live-1",
+          title: "Design Sync",
+          paused: true,
+          summarizing: false,
+          elapsed_ms: 258_000,
+        },
+      });
+    });
+
+    await expect(pill).toBeVisible();
+    await page.getByTestId("overlay-meeting-confirm-stop-btn").click();
+    expect(
+      await page.evaluate(() =>
+        window.__wave4Calls.some((c) => c.cmd === "stop_meeting_notes"),
+      ),
+    ).toBe(true);
+    await expect(
+      page.getByTestId("overlay-meeting-summarizing-pill"),
+    ).toBeVisible();
+  });
 });

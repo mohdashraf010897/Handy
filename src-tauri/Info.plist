@@ -4,7 +4,13 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Request microphone access to transcribe audio locally</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>lowyap uses on-device macOS Speech Recognition so you can dictate immediately with zero model download. Audio never leaves your Mac.</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>lowyap captures system audio locally on your Mac during meetings so remote participants can be transcribed without a meeting bot.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>lowyap reads active calendar event titles and attendee names locally on your Mac to title meeting notes and match speaker names without sending calendar data anywhere.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>lowyap reads active calendar event titles and attendee names locally on your Mac to title meeting notes and match speaker names without sending calendar data anywhere.</string>
 </dict>
 </plist>

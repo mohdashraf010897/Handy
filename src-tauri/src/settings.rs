@@ -513,10 +513,10 @@ pub struct AppSettings {
     pub paste_delay_ms: u64,
     #[serde(default = "default_paste_delay_after_ms")]
     pub paste_delay_after_ms: u64,
-    /// Debug-gated ("beta") receipt-sequenced paste: restore the clipboard only
-    /// after the target app actually reads the transcript, instead of after a
-    /// fixed delay. See `paste_tx`. macOS and Windows only.
-    #[serde(default)]
+    /// Receipt-sequenced paste: restore the clipboard only after the target app
+    /// actually reads the transcript (or keep it on clipboard with a clear notice
+    /// if no text cursor read `Cmd+V`), instead of blindly restoring after 60ms.
+    #[serde(default = "default_reliable_paste")]
     pub reliable_paste: bool,
     #[serde(default = "default_typing_tool")]
     pub typing_tool: TypingTool,
@@ -563,13 +563,22 @@ pub struct AppSettings {
     /// `overlay_position` (position `none` → style `None`).
     #[serde(default = "default_overlay_style")]
     pub overlay_style: OverlayStyle,
+    /// One-time migration marker moving legacy `OverlayStyle::Live` defaults to
+    /// `OverlayStyle::Minimal` (calm waveform pill) while preserving explicit
+    /// `OverlayStyle::None` and later manual re-selection of `Live`.
+    #[serde(default)]
+    pub calm_pill_default_migrated: bool,
 }
 
 fn default_model() -> String {
     "".to_string()
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 2;
+const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 3;
+
+fn default_reliable_paste() -> bool {
+    cfg!(any(target_os = "macos", target_os = "windows"))
+}
 
 fn default_settings_schema_version() -> u32 {
     CURRENT_SETTINGS_SCHEMA_VERSION
@@ -622,12 +631,13 @@ fn default_overlay_position() -> OverlayPosition {
 }
 
 fn default_overlay_style() -> OverlayStyle {
-    // Linux hides the overlay by default; other platforms show the live overlay.
+    // Linux hides the overlay by default; macOS and Windows default to the calm
+    // Minimal waveform pill so chunked dictation never flashes lagging raw text.
     // Position is independent and only selects top vs. bottom placement.
     #[cfg(target_os = "linux")]
     return OverlayStyle::None;
     #[cfg(not(target_os = "linux"))]
-    return OverlayStyle::Live;
+    return OverlayStyle::Minimal;
 }
 
 fn default_vad_enabled() -> bool {
@@ -1050,7 +1060,7 @@ pub fn get_default_settings() -> AppSettings {
         show_tray_icon: default_show_tray_icon(),
         paste_delay_ms: default_paste_delay_ms(),
         paste_delay_after_ms: default_paste_delay_after_ms(),
-        reliable_paste: false,
+        reliable_paste: default_reliable_paste(),
         typing_tool: default_typing_tool(),
         external_script_path: None,
         filler_word_removal_enabled: default_filler_word_removal_enabled(),
@@ -1065,6 +1075,7 @@ pub fn get_default_settings() -> AppSettings {
         language_detection: LanguageDetectionMode::default(),
         language_detection_window_secs: default_language_detection_window_secs(),
         overlay_style: default_overlay_style(),
+        calm_pill_default_migrated: true,
     }
 }
 
@@ -1173,7 +1184,34 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
+    if let Some(lang) = cli_language_override() {
+        settings.translate_to_english = false;
+        if lang.eq_ignore_ascii_case("auto") {
+            settings.selected_language = "auto".to_string();
+            settings.spoken_languages.clear();
+        } else {
+            settings.selected_language = lang.to_string();
+            settings.spoken_languages = vec![lang.to_string()];
+        }
+    }
+
     settings
+}
+
+static CLI_LANGUAGE_OVERRIDE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Sets an in-memory-only language override for headless `--transcribe-file` runs
+/// without writing to `settings_store.json`.
+pub fn set_cli_language_override(language: Option<String>) {
+    let cleaned = language
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let _ = CLI_LANGUAGE_OVERRIDE.set(cleaned);
+}
+
+/// Active headless CLI language override, if set via `--transcribe-file --language`.
+pub fn cli_language_override() -> Option<&'static str> {
+    CLI_LANGUAGE_OVERRIDE.get().and_then(Option::as_deref)
 }
 
 /// Rebuilds settings from a store value that failed to deserialize as a whole.
@@ -1189,6 +1227,9 @@ fn salvage_settings(stored: &serde_json::Value) -> AppSettings {
 
     let mut merged = serde_json::to_value(get_default_settings())
         .expect("default settings serialize to a JSON object");
+    if !stored_map.contains_key("calm_pill_default_migrated") {
+        merged["calm_pill_default_migrated"] = serde_json::Value::Bool(false);
+    }
 
     for (key, value) in stored_map {
         let previous = merged
@@ -1324,6 +1365,12 @@ fn apply_settings_migrations(
         // transcribe.cpp 0.2 replaced integer registry indices with opaque
         // process-local handles. Clear every old index once.
         settings.transcribe_gpu_device = default_transcribe_gpu_device();
+        updated = true;
+    }
+    if stored_schema_version < 3 {
+        // Schema 3 enables receipt-sequenced paste by default on macOS & Windows
+        // so unread cursor pastes are detected, kept on clipboard, and surfaced.
+        settings.reliable_paste = default_reliable_paste();
         settings.settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION;
         updated = true;
     }
@@ -1339,9 +1386,10 @@ fn apply_settings_migrations(
 
     // One-time overlay migration (only while the new key is absent): the retired
     // overlay_position `none` meant "hide the overlay" → OverlayStyle::None; any
-    // other position had it visible → Live. The position enum no longer has a
-    // `none` variant (legacy "none" deserializes to Bottom via a serde alias), so
-    // read the raw stored string to recover the old intent.
+    // other position had it visible → Minimal (the calm waveform pill default).
+    // The position enum no longer has a `none` variant (legacy "none"
+    // deserializes to Bottom via a serde alias), so read the raw stored string
+    // to recover the old intent.
     if settings_value.get("overlay_style").is_none() {
         let was_hidden = settings_value
             .get("overlay_position")
@@ -1350,8 +1398,20 @@ fn apply_settings_migrations(
         settings.overlay_style = if was_hidden {
             OverlayStyle::None
         } else {
-            OverlayStyle::Live
+            OverlayStyle::Minimal
         };
+        updated = true;
+    }
+
+    // One-time calm-pill default migration: move existing `OverlayStyle::Live`
+    // stores to `OverlayStyle::Minimal` once so chunked dictation doesn't show
+    // raw text lagging behind speech, while preserving `OverlayStyle::None` and
+    // allowing explicit user re-selection of `OverlayStyle::Live` afterward.
+    if !settings.calm_pill_default_migrated {
+        if settings.overlay_style == OverlayStyle::Live {
+            settings.overlay_style = OverlayStyle::Minimal;
+        }
+        settings.calm_pill_default_migrated = true;
         updated = true;
     }
 
@@ -1775,23 +1835,41 @@ mod tests {
 
     #[cfg(not(target_os = "linux"))]
     #[test]
-    fn default_overlay_style_is_live_when_overlay_defaults_on() {
+    fn default_overlay_style_is_minimal_when_overlay_defaults_on() {
         let settings = get_default_settings();
-        assert_eq!(settings.overlay_style, OverlayStyle::Live);
+        assert_eq!(settings.overlay_style, OverlayStyle::Minimal);
+        assert!(settings.calm_pill_default_migrated);
     }
 
     #[test]
     fn overlay_migration_keeps_disabled_overlay_off() {
-        let mut settings = get_default_settings();
-
         // Legacy store: overlay was hidden via the retired position "none".
-        let raw = serde_json::json!({
+        let legacy_raw = serde_json::json!({
             "selected_model": "",
             "overlay_position": "none"
         });
+        let mut legacy_settings: AppSettings = serde_json::from_value(legacy_raw.clone()).unwrap();
 
-        assert!(apply_settings_migrations(&mut settings, &raw));
-        assert_eq!(settings.overlay_style, OverlayStyle::None);
+        assert!(apply_settings_migrations(&mut legacy_settings, &legacy_raw));
+        assert_eq!(legacy_settings.overlay_style, OverlayStyle::None);
+        assert!(legacy_settings.calm_pill_default_migrated);
+
+        // Pre-calm-pill store with explicit `overlay_style: "none"` stays hidden.
+        let hidden_raw = serde_json::json!({
+            "settings_schema_version": CURRENT_SETTINGS_SCHEMA_VERSION,
+            "onboarding_completed": true,
+            "whats_new_last_seen_version": default_whats_new_last_seen_version(),
+            "spoken_languages": ["en"],
+            "chinese_script": "as_transcribed",
+            "custom_words": ["lowyap"],
+            "brand_custom_words_seeded": true,
+            "overlay_style": "none"
+        });
+        let mut hidden_settings: AppSettings = serde_json::from_value(hidden_raw.clone()).unwrap();
+        assert!(!hidden_settings.calm_pill_default_migrated);
+        assert!(apply_settings_migrations(&mut hidden_settings, &hidden_raw));
+        assert_eq!(hidden_settings.overlay_style, OverlayStyle::None);
+        assert!(hidden_settings.calm_pill_default_migrated);
     }
 
     #[test]
@@ -1806,19 +1884,53 @@ mod tests {
     }
 
     #[test]
-    fn overlay_migration_promotes_enabled_overlay_to_live() {
-        let mut settings = get_default_settings();
-        settings.overlay_position = OverlayPosition::Top;
-        settings.overlay_style = OverlayStyle::Minimal;
-
-        let raw = serde_json::json!({
+    fn overlay_migration_migrates_legacy_and_live_overlay_to_minimal() {
+        // 1. Pre-overlay_style store with visible position migrates to Minimal.
+        let legacy_raw = serde_json::json!({
             "selected_model": "",
             "overlay_position": "top"
         });
+        let mut legacy_settings: AppSettings = serde_json::from_value(legacy_raw.clone()).unwrap();
 
-        assert!(apply_settings_migrations(&mut settings, &raw));
-        assert_eq!(settings.overlay_style, OverlayStyle::Live);
-        assert_eq!(settings.overlay_position, OverlayPosition::Top);
+        assert!(apply_settings_migrations(&mut legacy_settings, &legacy_raw));
+        assert_eq!(legacy_settings.overlay_style, OverlayStyle::Minimal);
+        assert_eq!(legacy_settings.overlay_position, OverlayPosition::Top);
+        assert!(legacy_settings.calm_pill_default_migrated);
+
+        // 2. Existing store with `overlay_style: "live"` before calm-pill migration
+        // moves once to `OverlayStyle::Minimal`.
+        let live_raw = serde_json::json!({
+            "settings_schema_version": CURRENT_SETTINGS_SCHEMA_VERSION,
+            "onboarding_completed": true,
+            "whats_new_last_seen_version": default_whats_new_last_seen_version(),
+            "spoken_languages": ["en"],
+            "chinese_script": "as_transcribed",
+            "custom_words": ["lowyap"],
+            "brand_custom_words_seeded": true,
+            "overlay_style": "live"
+        });
+        let mut live_settings: AppSettings = serde_json::from_value(live_raw.clone()).unwrap();
+        assert!(!live_settings.calm_pill_default_migrated);
+        assert!(apply_settings_migrations(&mut live_settings, &live_raw));
+        assert_eq!(live_settings.overlay_style, OverlayStyle::Minimal);
+        assert!(live_settings.calm_pill_default_migrated);
+    }
+
+    #[test]
+    fn explicit_live_overlay_selection_persists_after_calm_pill_migration() {
+        let mut settings = get_default_settings();
+        settings.onboarding_completed = true;
+        settings.spoken_languages = vec!["en".to_string()];
+        assert!(settings.calm_pill_default_migrated);
+
+        // User explicitly opts back into "Live" in Settings after migration.
+        settings.overlay_style = OverlayStyle::Live;
+        let persisted_raw = serde_json::to_value(&settings).unwrap();
+
+        let mut reloaded: AppSettings = serde_json::from_value(persisted_raw.clone()).unwrap();
+        assert!(!apply_settings_migrations(&mut reloaded, &persisted_raw));
+        assert_eq!(reloaded.overlay_style, OverlayStyle::Live);
+        assert!(reloaded.calm_pill_default_migrated);
     }
 
     #[test]

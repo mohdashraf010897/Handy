@@ -1,6 +1,8 @@
 use super::model_capabilities::{
     CapabilityProbe, CapabilityProber, Compatibility, GgufHeaderProber,
 };
+#[cfg(target_os = "macos")]
+use crate::flow::macos_speech::{self, MACOS_NATIVE_SPEECH_MODEL_ID};
 use crate::settings::{get_settings, write_settings};
 use anyhow::Result;
 use hf_hub::api::tokio::{ApiBuilder, CancellationToken, Progress};
@@ -36,8 +38,7 @@ pub enum ModelSource {
     /// HF cache (so other tools reuse it). The file within the repo is
     /// [`ModelInfo::filename`].
     HuggingFace { repo_id: String, revision: String },
-    /// Already present on disk — a user-provided custom model, or one discovered
-    /// in a shared cache. Nothing to download.
+    /// Built into the OS or already present on disk. Nothing to download.
     Local,
 }
 
@@ -895,6 +896,34 @@ impl ModelManager {
 
         let mut available_models = HashMap::new();
 
+        #[cfg(target_os = "macos")]
+        available_models.insert(
+            MACOS_NATIVE_SPEECH_MODEL_ID.to_string(),
+            ModelInfo {
+                id: MACOS_NATIVE_SPEECH_MODEL_ID.to_string(),
+                name: "macOS Instant Voice (Built-in)".to_string(),
+                description: "Ready out of the box with 0 MB download. Uses Apple on-device speech strictly on your Mac.".to_string(),
+                filename: MACOS_NATIVE_SPEECH_MODEL_ID.to_string(),
+                source: ModelSource::Local,
+                size_mb: 0,
+                is_downloaded: macos_speech::is_available(None),
+                is_downloading: false,
+                partial_size: 0,
+                accuracy_score: 0.78,
+                speed_score: 0.95,
+                supports_translation: false,
+                is_recommended: true,
+                supported_languages: [
+                    "en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh", "ar", "hi", "ru",
+                    "yue", "nl", "sv", "da", "fi", "nb", "pl", "tr", "th", "id", "he", "vi",
+                ].into_iter().map(String::from).collect(),
+                supports_language_selection: true,
+                is_custom: false,
+                supports_streaming: false,
+                supports_language_detection: false,
+            },
+        );
+
         // Whisper supported languages (99 languages from tokenizer)
         let whisper_languages: Vec<String> = vec![
             "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar",
@@ -948,13 +977,7 @@ impl ModelManager {
                 name: "Whisper Medium".to_string(),
                 description: "Good accuracy, medium speed".to_string(),
                 filename: "whisper-medium-q4_1.bin".to_string(),
-                source: ModelSource::Url {
-                    url: "https://blob.handy.computer/whisper-medium-q4_1.bin".to_string(),
-                    sha256: Some(
-                        "79283fc1f9fe12ca3248543fbd54b73292164d8df5a16e095e2bceeaaabddf57"
-                            .to_string(),
-                    ),
-                },
+                source: ModelSource::Local,
                 size_mb: 469,
                 is_downloaded: false,
                 is_downloading: false,
@@ -1039,13 +1062,7 @@ impl ModelManager {
                 description: "Optimized for Taiwanese Mandarin. Code-switching support."
                     .to_string(),
                 filename: "breeze-asr-q5_k.bin".to_string(),
-                source: ModelSource::Url {
-                    url: "https://blob.handy.computer/breeze-asr-q5_k.bin".to_string(),
-                    sha256: Some(
-                        "8efbf0ce8a3f50fe332b7617da787fb81354b358c288b008d3bdef8359df64c6"
-                            .to_string(),
-                    ),
-                },
+                source: ModelSource::Local,
                 size_mb: 1030,
                 is_downloaded: false,
                 is_downloading: false,
@@ -1069,7 +1086,7 @@ impl ModelManager {
             ("medium", "whisper-medium-q4_1.bin"),
             ("breeze-asr", "breeze-asr-q5_k.bin"),
         ] {
-            if !models_dir.join(filename).exists() {
+            if !models_dir.join(filename).is_file() {
                 available_models.remove(id);
             }
         }
@@ -1337,6 +1354,11 @@ impl ModelManager {
         let mut vanished_models: Vec<String> = Vec::new();
 
         for model in models.values_mut() {
+            #[cfg(target_os = "macos")]
+            if model.id == MACOS_NATIVE_SPEECH_MODEL_ID {
+                model.is_downloaded = macos_speech::is_available(None);
+                continue;
+            }
             if let ModelSource::HuggingFace { repo_id, revision } = &model.source {
                 // A models-dir copy counts too: mirror-fallback downloads land
                 // there, and it makes manual drop-ins of catalog files work.
@@ -1406,8 +1428,17 @@ impl ModelManager {
                 ModelSource::HuggingFace { repo_id, .. } => {
                     Self::is_catalog_alternate_quant(repo_id, &model.filename)
                 }
+                ModelSource::Local => matches!(model.id.as_str(), "medium" | "breeze-asr"),
                 _ => false,
             }
+    }
+
+    /// Whether a file-backed ASR is ready, excluding the virtual macOS entry.
+    #[cfg(target_os = "macos")]
+    pub(super) fn has_downloaded_asr_file(&self) -> bool {
+        self.available_models.lock().unwrap().values().any(|m| {
+            m.is_downloaded && (m.filename.ends_with(".bin") || m.filename.ends_with(".gguf"))
+        })
     }
 
     fn selected_model_is_available(models: &HashMap<String, ModelInfo>, model_id: &str) -> bool {
@@ -1480,7 +1511,12 @@ impl ModelManager {
                 .iter()
                 .any(|model| model.id == settings.selected_model && self.is_retired_on_disk(model));
 
-            if !is_available && !is_retired {
+            // Preserve an explicit choice of the built-in model even if its
+            // locale temporarily becomes unavailable.
+            let is_native = cfg!(target_os = "macos")
+                && settings.selected_model
+                    == crate::flow::macos_speech::MACOS_NATIVE_SPEECH_MODEL_ID;
+            if !is_available && !is_retired && !is_native {
                 info!(
                     "Selected model '{}' is not available on disk; clearing selection",
                     settings.selected_model
@@ -1501,11 +1537,12 @@ impl ModelManager {
         // If no model is selected, pick the first downloaded one using the same
         // ranked order the UI receives.
         if settings.selected_model.is_empty() {
-            if let Some(available_model) = self
-                .get_available_models()
-                .into_iter()
-                .find(|model| model.is_downloaded)
-            {
+            if let Some(available_model) = self.get_available_models().into_iter().find(|model| {
+                // Instant Voice is a runtime fallback, not a persisted
+                // choice that should preempt a later file download.
+                model.is_downloaded
+                    && model.id != crate::flow::macos_speech::MACOS_NATIVE_SPEECH_MODEL_ID
+            }) {
                 info!(
                     "Auto-selecting model: {} ({})",
                     available_model.id, available_model.name
@@ -2287,6 +2324,11 @@ impl ModelManager {
         let model_info =
             model_info.ok_or_else(|| anyhow::anyhow!("Model not found: {}", model_id))?;
 
+        #[cfg(target_os = "macos")]
+        if model_id == MACOS_NATIVE_SPEECH_MODEL_ID && model_info.is_downloaded {
+            return Ok(());
+        }
+
         let (url, expected_sha256) = match &model_info.source {
             ModelSource::Url { url, sha256 } => (url.clone(), sha256.clone()),
             ModelSource::HuggingFace { repo_id, revision } => {
@@ -2387,6 +2429,11 @@ impl ModelManager {
 
     pub fn delete_model(&self, model_id: &str) -> Result<()> {
         debug!("ModelManager: delete_model called for: {}", model_id);
+
+        #[cfg(target_os = "macos")]
+        if model_id == MACOS_NATIVE_SPEECH_MODEL_ID {
+            anyhow::bail!("macOS Instant Voice is built into macOS and cannot be deleted.");
+        }
 
         let model_info = {
             let models = self.available_models.lock().unwrap();
@@ -2525,11 +2572,30 @@ impl ModelManager {
     }
 
     pub fn get_model_path(&self, model_id: &str) -> Result<PathBuf> {
+        #[cfg(target_os = "macos")]
+        if model_id == MACOS_NATIVE_SPEECH_MODEL_ID {
+            anyhow::bail!("macOS Instant Voice uses the system recognizer and has no model file.");
+        }
+
         let model_info = self
             .get_model_info(model_id)
-            .ok_or_else(|| anyhow::anyhow!("Model not found: {}", model_id))?;
+            .ok_or_else(|| {
+                #[cfg(target_os = "macos")]
+                if !self.has_downloaded_asr_file() {
+                    return anyhow::anyhow!(
+                        "No speech model is ready. Check macOS on-device speech language settings or download a model."
+                    );
+                }
+                anyhow::anyhow!("Model not found: {}", model_id)
+            })?;
 
         if !model_info.is_downloaded {
+            #[cfg(target_os = "macos")]
+            if !self.has_downloaded_asr_file() {
+                anyhow::bail!(
+                    "No speech model is ready. Check macOS on-device speech language settings or finish the model download."
+                );
+            }
             return Err(anyhow::anyhow!("Model not available: {}", model_id));
         }
 

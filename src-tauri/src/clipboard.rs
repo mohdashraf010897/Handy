@@ -815,6 +815,11 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
         paste_method, paste_delay_ms, paste_delay_after_ms
     );
 
+    if paste_method != PasteMethod::None {
+        let own_ids = crate::flow::own_app_ids(&app_handle);
+        let _ = crate::flow::context::restore_target_app_if_self_frontmost(&own_ids);
+    }
+
     // Perform the paste operation
     match paste_method {
         PasteMethod::None => {

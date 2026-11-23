@@ -58,6 +58,91 @@ pub const fn template_label(template: MeetingTemplate) -> &'static str {
     }
 }
 
+/// Normalizes common small-model Markdown variations (e.g. `# TL;DR`, `### Action Items`,
+/// `**TL;DR**`, or `and` instead of `&` in required section headers) into the canonical
+/// `## <Heading>` structure expected by [`required_headings`]. Also inserts a clean
+/// `## Expanded from Your Notes` placeholder on `General` notes when `has_rough_notes`
+/// is `false` and the model emitted the other three sections cleanly.
+pub fn normalize_expanded_notes_markdown(
+    md: &str,
+    template: MeetingTemplate,
+    has_rough_notes: bool,
+) -> String {
+    let canonical_headings = required_headings(template);
+    let mut normalized_lines: Vec<String> = Vec::new();
+
+    for raw_line in md.lines() {
+        let trimmed = raw_line.trim();
+        if let Some(canonical) = match_canonical_heading_line(trimmed, canonical_headings) {
+            normalized_lines.push(canonical.to_owned());
+        } else {
+            normalized_lines.push(raw_line.to_owned());
+        }
+    }
+
+    let mut joined = normalized_lines.join("\n");
+
+    if template == MeetingTemplate::General
+        && !has_rough_notes
+        && joined.contains("## TL;DR")
+        && joined.contains("## Key Decisions & Discussion")
+        && joined.contains("## Action Items")
+        && !joined.contains("## Expanded from Your Notes")
+    {
+        joined = joined.replacen(
+            "## Action Items",
+            "## Expanded from Your Notes\n- No live rough notes captured during this call.\n\n## Action Items",
+            1,
+        );
+    }
+
+    joined
+}
+
+fn normalize_heading_comparison_key(input: &str) -> String {
+    let stripped = input
+        .trim()
+        .trim_start_matches('#')
+        .trim()
+        .trim_matches('*')
+        .trim_end_matches(':')
+        .trim();
+    stripped
+        .replace('&', " and ")
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c.is_whitespace() {
+                c.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn match_canonical_heading_line<'a>(
+    trimmed_line: &str,
+    canonical_headings: &'a [&'static str],
+) -> Option<&'a str> {
+    let looks_like_heading = trimmed_line.starts_with('#')
+        || (trimmed_line.starts_with("**")
+            && (trimmed_line.ends_with("**") || trimmed_line.ends_with("**:")));
+    if !looks_like_heading {
+        return None;
+    }
+    let candidate_key = normalize_heading_comparison_key(trimmed_line);
+    if candidate_key.is_empty() {
+        return None;
+    }
+    canonical_headings
+        .iter()
+        .copied()
+        .find(|h| normalize_heading_comparison_key(h) == candidate_key)
+}
+
 /// Validates that expanded meeting notes contain every required heading for
 /// `template` and at least one substantive non-heading content line.
 pub fn validate_expanded_notes(md: &str, template: MeetingTemplate) -> bool {

@@ -81,15 +81,22 @@ fn find_best_match<'a>(
     custom_words: &'a [String],
     custom_word_match_keys: &[CustomWordMatchKey],
     threshold: f64,
+    immune_from_fuzzy: bool,
 ) -> Option<(&'a String, f64)> {
     if !is_supported_fuzzy_key(candidate) || candidate.chars().count() > 50 {
         return None;
     }
 
+    let candidate_is_immune =
+        immune_from_fuzzy || lowyap_flow::is_immune_common_english_word(candidate);
     let mut best_match: Option<&String> = None;
     let mut best_score = f64::MAX;
 
     for custom_word_key in custom_word_match_keys {
+        if candidate_is_immune && candidate != custom_word_key.key {
+            continue;
+        }
+
         // Skip if lengths are too different (optimization + prevents over-matching)
         // Use percentage-based check: max 25% length difference (prevents n-grams from
         // matching significantly shorter custom words, e.g., "openaigpt" vs "openai")
@@ -110,11 +117,20 @@ fn find_best_match<'a>(
             1.0
         };
 
-        // Soundex is an English/ASCII phonetic algorithm. Numeric terms can
-        // still use edit distance, but must not receive a phonetic boost.
-        let phonetic_match = supports_soundex(candidate)
-            && supports_soundex(&custom_word_key.key)
-            && soundex(candidate, &custom_word_key.key);
+        // Soundex and global accent skeleton require ASCII alphabetic keys.
+        // Numeric terms can still use edit distance, but must not receive a phonetic boost.
+        let supports_phonetics =
+            supports_soundex(candidate) && supports_soundex(&custom_word_key.key);
+        let accent_skeleton_match = supports_phonetics
+            && !candidate_is_immune
+            && levenshtein_score <= 0.42
+            && ((candidate_len >= 5
+                && custom_word_len >= 5
+                && lowyap_flow::accent_phonetic_skeleton(candidate)
+                    == lowyap_flow::accent_phonetic_skeleton(&custom_word_key.key))
+                || lowyap_flow::is_accent_phonetic_match(candidate, &custom_word_key.key));
+        let phonetic_match = accent_skeleton_match
+            || (supports_phonetics && soundex(candidate, &custom_word_key.key));
 
         // Combine scores: favor phonetic matches, but also consider string similarity
         let combined_score = if phonetic_match {
@@ -338,12 +354,17 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
                 suffix,
             };
 
+            let has_immune_word = ngram_words
+                .iter()
+                .any(|word| lowyap_flow::is_immune_common_english_word(word));
+
             for framing in std::iter::once(unsplit).chain(split_url_framed_candidate(ngram_words)) {
                 if let Some((replacement, score)) = find_best_match(
                     &framing.ngram,
                     custom_words,
                     &custom_word_match_keys,
                     threshold,
+                    has_immune_word,
                 ) {
                     let is_better = best_match
                         .as_ref()
@@ -1081,5 +1102,35 @@ mod tests {
             apply_custom_words("Check github.com/low app.", &custom_words, threshold),
             "Check github.com/lowyap."
         );
+    }
+
+    #[test]
+    fn test_apply_custom_words_global_accent_phonetic_snapping_and_common_word_immunity() {
+        let custom_words = vec![
+            "Graffias".to_string(),
+            "Phantom".to_string(),
+            "WhatsApp".to_string(),
+            "Cloudflare".to_string(),
+            "Supabase".to_string(),
+            "Kubernetes".to_string(),
+            "lowyap".to_string(),
+            "Verizon".to_string(),
+            "Transkriptor".to_string(),
+        ];
+        let threshold = 0.18;
+
+        assert_eq!(
+            apply_custom_words(
+                "Deploy grafias and fantom on kloudflare, soopabase, and kubernetees via vatsapp.",
+                &custom_words,
+                threshold
+            ),
+            "Deploy Graffias and Phantom on Cloudflare, Supabase, and Kubernetes via WhatsApp."
+        );
+
+        // Common English words in the immunity set must never snap to custom lexicon entries.
+        let sentence =
+            "The transcription and translation production function checks version, session, section, location, question, connection, information, application, and action.";
+        assert_eq!(apply_custom_words(sentence, &custom_words, 0.5), sentence);
     }
 }

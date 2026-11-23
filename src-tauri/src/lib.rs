@@ -550,6 +550,7 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
     let Some(wav) = args.transcribe_file.clone() else {
         return 0;
     };
+    crate::settings::set_cli_language_override(args.language.clone());
 
     // read_wav_samples reads 16-bit int samples and does no validation; the app
     // only ever saves 16 kHz mono 16-bit PCM, so reject anything else rather than
@@ -627,7 +628,17 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
             }
         }
         let t = Instant::now();
-        match tm.transcribe(samples.clone()) {
+        let res = if args.simulate_live {
+            tm.start_stream();
+            let router = tm.stream_router();
+            for frame in samples.chunks(3_200) {
+                router.feed(frame);
+            }
+            tm.transcribe_recording(samples.clone()).map(|r| r.text)
+        } else {
+            tm.transcribe(samples.clone())
+        };
+        match res {
             Ok(out) => text = out,
             Err(e) => {
                 eprintln!("error: transcribe failed: {}", e);
@@ -639,6 +650,7 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
     #[cfg(debug_assertions)]
     flow::debug::run_headless(app, &model_id, &samples);
     let best_ms = times_ms.iter().copied().min().unwrap_or(0);
+    let chunk_count = crate::managers::transcription::last_decode_chunk_count();
     let rtf = if best_ms > 0 {
         audio_secs / (best_ms as f64 / 1000.0)
     } else {
@@ -657,6 +669,8 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
                 "transcribe_ms": times_ms,
                 "best_ms": best_ms,
                 "rtf": rtf,
+                "simulate_live": args.simulate_live,
+                "chunk_count": chunk_count,
                 "text": text,
             })
         );
@@ -737,6 +751,9 @@ pub fn run(cli_args: CliArgs) {
             meeting::commands::export_meeting_markdown,
             meeting::commands::copy_meeting_markdown,
             meeting::commands::delete_meeting,
+            meeting::commands::get_calendar_access_status,
+            meeting::commands::connect_calendar_access,
+            meeting::commands::get_active_calendar_meeting,
             shortcut::change_binding,
             shortcut::reset_binding,
             shortcut::change_shortcut_activation_setting,
@@ -857,6 +874,7 @@ pub fn run(cli_args: CliArgs) {
             commands::transcription::get_language_status,
             commands::transcription::unload_model_manually,
             commands::history::get_history_entries,
+            commands::history::get_dictation_telemetry_summary,
             commands::history::toggle_history_entry_saved,
             commands::history::get_audio_file_path,
             commands::history::delete_history_entry,
@@ -1050,7 +1068,7 @@ pub fn run(cli_args: CliArgs) {
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
                     .title(brand::NAME)
                     .inner_size(utils::MAIN_WINDOW_SIZE.0, utils::MAIN_WINDOW_SIZE.1)
-                    .min_inner_size(utils::MAIN_WINDOW_SIZE.0, utils::MAIN_WINDOW_SIZE.1)
+                    .min_inner_size(utils::MAIN_WINDOW_MIN_SIZE.0, utils::MAIN_WINDOW_MIN_SIZE.1)
                     .resizable(true)
                     .maximizable(true)
                     .visible(false);
@@ -1059,7 +1077,14 @@ pub fn run(cli_args: CliArgs) {
                 win_builder = win_builder.data_directory(data_dir.join("webview"));
             }
 
-            // Only used on macOS (to size it) and Windows (to disable WebView2
+            #[cfg(target_os = "macos")]
+            {
+                win_builder = win_builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
+
+            // Only used on macOS (to center it) and Windows (to disable WebView2
             // browser accelerators).
             #[cfg_attr(
                 not(any(target_os = "macos", target_os = "windows")),
@@ -1067,17 +1092,9 @@ pub fn run(cli_args: CliArgs) {
             )]
             let main_window = win_builder.build()?;
 
-            // macOS draws the title bar inside the inner size; grow the window to fit it.
             #[cfg(target_os = "macos")]
             {
-                let bar = utils::measure_title_bar(&main_window);
-                if bar > 0.0 {
-                    let (width, height) = utils::MAIN_WINDOW_SIZE;
-                    let size = tauri::LogicalSize::new(width, height + bar);
-                    let _ = main_window.set_min_size(Some(size));
-                    let _ = main_window.set_size(size);
-                    let _ = main_window.center();
-                }
+                let _ = main_window.center();
             }
 
             // Disable WebView2 browser accelerators (F5, F6, Ctrl+F, F12, ...).

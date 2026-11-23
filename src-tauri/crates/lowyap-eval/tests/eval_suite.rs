@@ -16,8 +16,17 @@ use lowyap_eval::scenarios::{
     run_soft_cancel_undo_invariants, synth_room_noise, synth_voiced_speech,
 };
 use lowyap_eval::{
-    format_comparison_markdown, format_scorecard_markdown, format_wav_report_markdown,
-    inspect_wav_pair, ComparisonReport, EvalScorecard, PipelineUnderTest,
+    append_trailing_breath_tail, attenuate_quiet_mic, compute_cer, compute_script_preservation,
+    compute_wer, detect_brand_token_hallucination, detect_phantom_hallucinations,
+    evaluate_real_voice_with_asr, extract_edge_silence_slices, format_comparison_markdown,
+    format_dictation_bench_markdown, format_real_voice_markdown, format_scorecard_markdown,
+    format_wav_report_markdown, inject_pink_fan_noise, inspect_wav_pair, load_manifest,
+    redact_transcript_preview, run_dictation_bench, run_real_voice_suite, BrandLeakReason,
+    ClipCategory, ComparisonReport, EvalScorecard, EvaluationTier, PerturbationKind,
+    PhantomFlagKind, PipelineUnderTest, RealVoiceConfig, RealVoiceReport, RealVoiceStatus,
+    ScriptKind, DEFAULT_PERTURBATION_SEED, DEFAULT_PINK_FAN_SNR_DB, DEFAULT_QUIET_MIC_GAIN,
+    DEFAULT_TRAILING_BREATH_TAIL_MS, SYNTHETIC_HONESTY_BANNER, UNVERIFIED_NO_ASR_STATUS,
+    UNVERIFIED_NO_WAVS_STATUS,
 };
 use lowyap_ports::{
     AsrProvider, AsrResult, EchoCanceller, HybridNotesRequest, MeetingTemplate, NoteSummarizer,
@@ -580,6 +589,7 @@ fn scorecard_and_comparison_json_roundtrip() {
     assert_eq!(decoded, target);
 
     let cmp = ComparisonReport {
+        evaluation_tier: EvaluationTier::SyntheticPlumbingOnly,
         scorecards: vec![base, target],
         passed: true,
     };
@@ -606,15 +616,22 @@ fn markdown_formatters_include_expected_headers_and_scores() {
 
     let single_md = format_scorecard_markdown(&target);
     assert!(single_md.contains("lowyap-eval Scorecard: `modular-target`"));
+    assert!(single_md.contains("PLUMBING GATE: PASS (6/6 deterministic invariants)"));
+    assert!(single_md.contains(SYNTHETIC_HONESTY_BANNER));
     assert!(single_md.contains("Echo Suppression"));
+    assert!(!single_md.contains("/ 10"));
 
     let cmp = ComparisonReport {
+        evaluation_tier: EvaluationTier::SyntheticPlumbingOnly,
         scorecards: vec![base, target],
         passed: true,
     };
     let cmp_md = format_comparison_markdown(&cmp);
+    assert!(cmp_md.contains("PLUMBING GATE:"));
+    assert!(cmp_md.contains(SYNTHETIC_HONESTY_BANNER));
     assert!(cmp_md.contains("Delta (Target - Baseline)"));
     assert!(cmp_md.contains("Silence Hallucinations"));
+    assert!(!cmp_md.contains("/ 10"));
 }
 
 #[test]
@@ -754,4 +771,841 @@ fn wav_pair_inspector_sanitizes_non_finite_float_wav_samples() {
         assert!(profile.post_aec_me_rms.is_finite());
         assert!(profile.me_attenuation_db.is_finite());
     }
+}
+
+// ============================================================================
+// Anti-Euphoria QA Reform + Real-Voice Benchmark Tests
+// ============================================================================
+
+#[test]
+fn synthetic_suites_tag_synthetic_plumbing_only_and_abolish_fake_out_of_ten_headlines() {
+    for (name, mut pipe) in [
+        ("baseline", PipelineUnderTest::baseline()),
+        ("modular-target", PipelineUnderTest::modular_target()),
+        ("ideal-oracle", PipelineUnderTest::ideal_oracle()),
+        ("production", PipelineUnderTest::production()),
+    ] {
+        let card = pipe.run_suite(name, None);
+        assert_eq!(card.evaluation_tier, EvaluationTier::SyntheticPlumbingOnly);
+        let md = format_scorecard_markdown(&card);
+        assert!(
+            md.contains("PLUMBING GATE:"),
+            "{name} missing gate header:\n{md}"
+        );
+        assert!(
+            md.contains(SYNTHETIC_HONESTY_BANNER),
+            "{name} missing honesty banner:\n{md}"
+        );
+        assert!(
+            !md.contains("/ 10") && !md.contains("/10"),
+            "{name} leaked fake /10 score:\n{md}"
+        );
+    }
+
+    let dict = run_dictation_bench();
+    assert_eq!(dict.evaluation_tier, EvaluationTier::SyntheticPlumbingOnly);
+    let dict_md = format_dictation_bench_markdown(&dict);
+    assert!(dict_md.contains("PLUMBING GATE: PASS (5/5 deterministic invariants)"));
+    assert!(dict_md.contains(SYNTHETIC_HONESTY_BANNER));
+}
+
+#[test]
+fn wer_and_cer_math_handles_english_urdu_devanagari_and_punctuation_normalization() {
+    // English punctuation & case normalization -> 0.0 WER/CER.
+    let exact = compute_wer(
+        "Hello, world! Let's ship the release.",
+        "hello world let's ship the release",
+    );
+    assert_eq!(exact.edits, 0);
+    assert_eq!(exact.rate, 0.0);
+
+    // 1 substitution out of 4 words -> 0.25 WER.
+    let sub = compute_wer("one two three four", "one two tree four");
+    assert_eq!(sub.edits, 1);
+    assert_eq!(sub.reference_len, 4);
+    assert!((sub.rate - 0.25).abs() < 1e-6);
+
+    // Urdu script with Urdu punctuation (۔ / ،) -> 0.0 WER & CER when matching.
+    let urdu_exact = compute_cer(
+        "آج کی میٹنگ، وقت پر شروع ہوئی۔",
+        "آج کی میٹنگ وقت پر شروع ہوئی",
+    );
+    assert_eq!(urdu_exact.edits, 0);
+    assert_eq!(urdu_exact.rate, 0.0);
+
+    // Devanagari script preserves combining vowel matras (`ा`, `े`, `ी`) so changing a matra is counted!
+    let dev_exact = compute_cer("नमस्ते दुनिया।", "नमस्ते दुनिया");
+    assert_eq!(dev_exact.edits, 0);
+    assert_eq!(dev_exact.rate, 0.0);
+
+    let dev_matra_diff = compute_cer("नमस्ते", "नमस्त");
+    assert_eq!(
+        dev_matra_diff.edits, 1,
+        "Devanagari matra drop must be counted in CER"
+    );
+    assert!(dev_matra_diff.rate > 0.0);
+
+    // Code-switch script preservation (Latin + Urdu + Devanagari).
+    let preserved = compute_script_preservation(
+        "Release status: آج کا ڈیمو तैयार है",
+        "release status آج کا ڈیمو तैयार है",
+    );
+    assert!(preserved.is_code_switched);
+    assert_eq!(preserved.preserved_script_ratio, 1.0);
+    assert!(preserved.unexpected_scripts.is_empty());
+    assert!(preserved.expected_scripts.contains(&ScriptKind::Latin));
+    assert!(preserved.expected_scripts.contains(&ScriptKind::ArabicUrdu));
+    assert!(preserved.expected_scripts.contains(&ScriptKind::Devanagari));
+
+    // Cross-script hallucination (Cyrillic injected when reference is English) is flagged.
+    let drifted = compute_script_preservation("ship the build", "ship the build Привет");
+    assert_eq!(drifted.unexpected_scripts, vec![ScriptKind::Cyrillic]);
+}
+
+#[test]
+fn silence_phantom_and_brand_injection_detectors_catch_real_failure_patterns() {
+    let yt = detect_phantom_hallucinations("Thank you for watching!", false);
+    assert!(
+        yt.iter()
+            .any(|f| f.kind == PhantomFlagKind::KnownPhantomPhrase),
+        "expected YouTube phantom phrase caught: {yt:?}"
+    );
+
+    let subs = detect_phantom_hallucinations("Subtitles by the Amara.org community", false);
+    assert!(
+        subs.iter()
+            .any(|f| f.kind == PhantomFlagKind::KnownPhantomPhrase),
+        "expected subtitle phantom caught: {subs:?}"
+    );
+
+    let tri_loop =
+        detect_phantom_hallucinations("check the mic check the mic check the mic", false);
+    assert!(
+        tri_loop
+            .iter()
+            .any(|f| f.kind == PhantomFlagKind::RepeatedNgramLoop),
+        "expected 3-gram loop caught: {tri_loop:?}"
+    );
+
+    let silence_out = detect_phantom_hallucinations("Thank you.", true);
+    assert!(silence_out
+        .iter()
+        .any(|f| f.kind == PhantomFlagKind::SilenceSliceHallucination));
+
+    let clean_speech = detect_phantom_hallucinations(
+        "Please send the updated calendar invite after lunch.",
+        false,
+    );
+    assert!(clean_speech.is_empty(), "false positive: {clean_speech:?}");
+
+    // SV-95: standalone ALL-CAPS LOWYAP over "Transcription" (unlabeled and labeled).
+    let sv95_unlabeled =
+        detect_brand_token_hallucination("Open the LOWYAP settings panel", None, 4.0)
+            .expect("ALL-CAPS LOWYAP must be flagged");
+    assert_eq!(sv95_unlabeled.reason, BrandLeakReason::AllCapsBrandToken);
+    assert_eq!(sv95_unlabeled.all_caps_count, 1);
+
+    let sv95_labeled = detect_brand_token_hallucination(
+        "Open the lowyap settings panel",
+        Some("Open the transcription settings panel"),
+        4.0,
+    )
+    .expect("unreferenced brand injection must be flagged");
+    assert_eq!(
+        sv95_labeled.reason,
+        BrandLeakReason::UnreferencedBrandInjection
+    );
+
+    // Disproportionate density without reference justification.
+    let dense = detect_brand_token_hallucination("lowyap lowyap test", None, 3.0)
+        .expect("disproportionate density must be flagged");
+    assert_eq!(dense.reason, BrandLeakReason::DisproportionateBrandDensity);
+
+    // Legitimate single lowercase mention in longer unlabeled utterance or referenced utterance passes.
+    assert!(detect_brand_token_hallucination(
+        "We tested lowyap on a real microphone during the team call today.",
+        None,
+        6.0
+    )
+    .is_none());
+    assert!(detect_brand_token_hallucination(
+        "We tested LowYap today.",
+        Some("We tested LowYap today."),
+        2.5
+    )
+    .is_none());
+}
+
+#[test]
+fn acoustic_perturbations_preserve_length_invariants_and_deterministic_seeds() {
+    let speech = synth_voiced_speech(2_000, 165.0, 0.40, 201);
+    assert_eq!(speech.len(), 2 * SAMPLE_RATE_16K);
+
+    // 1. +12 dB SNR pink/fan noise: exact length + deterministic + measurable SNR.
+    let noisy_a =
+        inject_pink_fan_noise(&speech, DEFAULT_PINK_FAN_SNR_DB, DEFAULT_PERTURBATION_SEED);
+    let noisy_b =
+        inject_pink_fan_noise(&speech, DEFAULT_PINK_FAN_SNR_DB, DEFAULT_PERTURBATION_SEED);
+    let noisy_c = inject_pink_fan_noise(
+        &speech,
+        DEFAULT_PINK_FAN_SNR_DB,
+        DEFAULT_PERTURBATION_SEED + 1,
+    );
+    assert_eq!(noisy_a.len(), speech.len());
+    assert_eq!(
+        noisy_a, noisy_b,
+        "pink/fan noise must be deterministic for same seed"
+    );
+    assert_ne!(
+        noisy_a, noisy_c,
+        "different seeds must produce distinct noise"
+    );
+    let residual: Vec<f32> = noisy_a
+        .iter()
+        .zip(speech.iter())
+        .map(|(n, s)| n - s)
+        .collect();
+    let snr_db = 20.0 * (rms(&speech) / rms(&residual)).log10();
+    assert!(
+        (snr_db - 12.0).abs() < 0.75,
+        "expected ~12 dB SNR, got {snr_db:.2} dB"
+    );
+
+    // 2. 0.25x (-12 dB) quiet-mic attenuation: exact length + exact 0.25x RMS.
+    let quiet = attenuate_quiet_mic(&speech, DEFAULT_QUIET_MIC_GAIN);
+    assert_eq!(quiet.len(), speech.len());
+    let ratio = rms(&quiet) / rms(&speech);
+    assert!(
+        (ratio - 0.25).abs() < 1e-4,
+        "expected 0.25x RMS attenuation, got {ratio:.5}"
+    );
+
+    // 3. +1.5s trailing breath + room-tone tail: exact +24,000 samples + deterministic + low-level tail.
+    let tail_a = append_trailing_breath_tail(
+        &speech,
+        DEFAULT_TRAILING_BREATH_TAIL_MS,
+        DEFAULT_PERTURBATION_SEED,
+    );
+    let tail_b = append_trailing_breath_tail(
+        &speech,
+        DEFAULT_TRAILING_BREATH_TAIL_MS,
+        DEFAULT_PERTURBATION_SEED,
+    );
+    assert_eq!(tail_a.len(), speech.len() + 24_000);
+    assert_eq!(tail_a, tail_b);
+    assert_eq!(&tail_a[..speech.len()], speech.as_slice());
+    let tail_rms = rms(&tail_a[speech.len()..]);
+    assert!(
+        tail_rms > 0.002 && tail_rms < 0.02,
+        "expected realistic room-tone/breath tail RMS, got {tail_rms:.5}"
+    );
+}
+
+#[test]
+fn real_voice_zero_wavs_reports_unverified_and_refuses_score() {
+    let report = run_real_voice_suite(&RealVoiceConfig::default()).expect("run zero-wav suite");
+    assert_eq!(report.evaluation_tier, EvaluationTier::EmpiricalRealAudio);
+    assert_eq!(report.status, RealVoiceStatus::Unverified);
+    assert_eq!(report.status_banner, UNVERIFIED_NO_WAVS_STATUS);
+    assert_eq!(report.clips_evaluated, 0);
+    assert!(report.aggregate_wer.is_none());
+
+    let md = format_real_voice_markdown(&report, false);
+    assert!(md.contains(UNVERIFIED_NO_WAVS_STATUS));
+
+    // CLI invocation with 0 WAVs exits non-zero and emits UNVERIFIED in JSON & Markdown.
+    let cli_json = Command::new(env!("CARGO_BIN_EXE_lowyap-eval"))
+        .args(["--suite", "real-voice", "--json"])
+        .output()
+        .expect("run real-voice cli json");
+    assert!(!cli_json.status.success(), "0-WAV real-voice must not pass");
+    let decoded: RealVoiceReport =
+        serde_json::from_slice(&cli_json.stdout).expect("parse real-voice json");
+    assert_eq!(decoded.status, RealVoiceStatus::Unverified);
+    assert_eq!(decoded.status_banner, UNVERIFIED_NO_WAVS_STATUS);
+
+    let cli_md = Command::new(env!("CARGO_BIN_EXE_lowyap-eval"))
+        .args(["--suite", "real-voice"])
+        .output()
+        .expect("run real-voice cli markdown");
+    assert!(!cli_md.status.success());
+    let stdout = String::from_utf8_lossy(&cli_md.stdout);
+    assert!(stdout.contains(UNVERIFIED_NO_WAVS_STATUS));
+}
+
+#[test]
+fn real_voice_evaluates_manifests_sidecars_privacy_and_external_asr_cmd() {
+    let dir = TempFixtureDir::new("realvoice");
+
+    // Clip 1: 1.0s leading silence + 1.5s voiced speech + 1.0s trailing silence, with sidecar `.txt`.
+    let mut clip1_audio = synth_room_noise(SAMPLE_RATE_16K, 0.0005, 301);
+    clip1_audio.extend(synth_voiced_speech(1_500, 170.0, 0.40, 302));
+    clip1_audio.extend(synth_room_noise(SAMPLE_RATE_16K, 0.0005, 303));
+    let clip1_wav = dir.file("clip_alpha.wav");
+    write_wav_i16(&clip1_wav, &clip1_audio, 16_000, 1);
+    let private_sentence = "My confidential salary number is ninety thousand dollars";
+    fs::write(dir.file("clip_alpha.txt"), private_sentence).expect("write sidecar");
+
+    // Verify edge silence slicing extracts both 1.0s silence margins.
+    let (lead, trail) = extract_edge_silence_slices(&clip1_audio);
+    assert!(lead.len() >= 15_000 && trail.len() >= 15_000);
+
+    // Without --asr-cmd, WAVs are inspected but status stays UNVERIFIED.
+    let no_asr_report = run_real_voice_suite(&RealVoiceConfig {
+        wav_dir: Some(dir.path.clone()),
+        ..RealVoiceConfig::default()
+    })
+    .expect("run no-asr suite");
+    assert_eq!(no_asr_report.status, RealVoiceStatus::Unverified);
+    assert_eq!(no_asr_report.status_banner, UNVERIFIED_NO_ASR_STATUS);
+    assert_eq!(no_asr_report.clips_evaluated, 1);
+
+    // With callback ASR that returns silence on quiet slices and exact transcript on speech.
+    let cfg = RealVoiceConfig {
+        wav_dir: Some(dir.path.clone()),
+        verbose_redacted: false,
+        ..RealVoiceConfig::default()
+    };
+    let pass_report = evaluate_real_voice_with_asr(
+        &cfg,
+        Some(|samples: &[f32]| {
+            if rms(samples) < 0.015 {
+                Ok(String::new())
+            } else {
+                Ok(private_sentence.to_owned())
+            }
+        }),
+    )
+    .expect("evaluate pass real voice");
+
+    assert_eq!(pass_report.status, RealVoiceStatus::Pass);
+    assert_eq!(pass_report.clips_evaluated, 1);
+    assert_eq!(pass_report.labeled_clips, 1);
+    assert_eq!(pass_report.aggregate_wer, Some(0.0));
+    assert_eq!(pass_report.aggregate_cer, Some(0.0));
+    assert_eq!(pass_report.silence_hallucination_clips, 0);
+    assert_eq!(pass_report.brand_leak_clips, 0);
+    assert_eq!(pass_report.perturbation_passed, 3);
+    assert_eq!(pass_report.perturbation_total, 3);
+    assert!(pass_report.rtf_p50.is_some());
+    assert!(pass_report.rtf_p95.is_some());
+    assert!(pass_report.latency_ms_p50.is_some());
+    assert!(pass_report.latency_ms_p95.is_some());
+
+    // Privacy check (D-05): default Markdown and JSON must NOT contain the private sentence!
+    let md_private = format_real_voice_markdown(&pass_report, false);
+    assert!(
+        !md_private.contains("confidential") && !md_private.contains("ninety thousand"),
+        "default real-voice Markdown leaked private transcript:\n{md_private}"
+    );
+    let json_private = serde_json::to_string(&pass_report).expect("serialize pass report");
+    assert!(
+        !json_private.contains("confidential") && !json_private.contains("ninety thousand"),
+        "default real-voice JSON leaked private transcript"
+    );
+
+    // Even redacted preview masks words and never prints the raw private sentence.
+    let redacted = redact_transcript_preview(private_sentence);
+    assert!(!redacted.contains("confidential"));
+    assert!(!redacted.contains("ninety"));
+    assert!(redacted.contains("[redacted 8w:"));
+
+    // Failing callback: hallucinates "Thank you for watching" on silence and "LOWYAP" on speech.
+    let fail_report = evaluate_real_voice_with_asr(
+        &cfg,
+        Some(|samples: &[f32]| {
+            if rms(samples) < 0.015 {
+                Ok("Thank you for watching.".to_owned())
+            } else {
+                Ok("My LOWYAP salary number is ninety thousand dollars".to_owned())
+            }
+        }),
+    )
+    .expect("evaluate failing real voice");
+    assert_eq!(fail_report.status, RealVoiceStatus::Fail);
+    assert_eq!(fail_report.silence_hallucination_clips, 1);
+    assert_eq!(fail_report.brand_leak_clips, 1);
+    assert!(!fail_report.clips[0].passed);
+
+    // JSON & TOML manifest loaders both resolve relative paths and categories.
+    let json_manifest = dir.file("corpus.json");
+    fs::write(
+        &json_manifest,
+        r#"{ "clips": [ { "wav": "clip_alpha.wav", "category": "noisy_room", "clip_id": "json_alpha" } ] }"#,
+    )
+    .expect("write json manifest");
+    let loaded_json = load_manifest(&json_manifest).expect("load json manifest");
+    assert_eq!(loaded_json.len(), 1);
+    assert_eq!(loaded_json[0].category, ClipCategory::NoisyRoom);
+    assert_eq!(loaded_json[0].clip_id.as_deref(), Some("json_alpha"));
+    assert_eq!(
+        loaded_json[0].reference_text.as_deref(),
+        Some(private_sentence)
+    );
+
+    let toml_manifest = dir.file("corpus.toml");
+    fs::write(
+        &toml_manifest,
+        r#"
+# Real human corpus manifest
+[[clips]]
+wav = "clip_alpha.wav"
+category = "accent_multilingual"
+clip_id = "toml_alpha"
+reference_text = "آج کا ڈیمو ready hai"
+"#,
+    )
+    .expect("write toml manifest");
+    let loaded_toml = load_manifest(&toml_manifest).expect("load toml manifest");
+    assert_eq!(loaded_toml.len(), 1);
+    assert_eq!(loaded_toml[0].category, ClipCategory::AccentMultilingual);
+    assert_eq!(loaded_toml[0].clip_id.as_deref(), Some("toml_alpha"));
+    assert_eq!(
+        loaded_toml[0].reference_text.as_deref(),
+        Some("آج کا ڈیمو ready hai")
+    );
+    assert_eq!(
+        pass_report.clips[0].perturbations[0].kind,
+        PerturbationKind::PinkFanNoise12DbSnr
+    );
+
+    // External `--asr-cmd` CLI test using a simple clip without silence edges.
+    let short_speech_wav = dir.file("short_speech.wav");
+    write_wav_i16(
+        &short_speech_wav,
+        &synth_voiced_speech(1_000, 175.0, 0.4, 304),
+        16_000,
+        1,
+    );
+    let cli_manifest = dir.file("cli_manifest.json");
+    fs::write(
+        &cli_manifest,
+        r#"[{ "wav": "short_speech.wav", "reference_text": "hello world", "category": "clean" }]"#,
+    )
+    .expect("write cli manifest");
+
+    let cli_out = Command::new(env!("CARGO_BIN_EXE_lowyap-eval"))
+        .args([
+            "--suite",
+            "real-voice",
+            "--manifest",
+            cli_manifest.to_str().unwrap(),
+            "--asr-cmd",
+            "/bin/sh -c 'test -s \"$1\" && printf \"hello world\"' _ {wav}",
+            "--json",
+        ])
+        .output()
+        .expect("run real-voice with external asr-cmd");
+    assert!(
+        cli_out.status.success(),
+        "expected PASS from external asr-cmd, stderr={}",
+        String::from_utf8_lossy(&cli_out.stderr)
+    );
+    let cli_report: RealVoiceReport =
+        serde_json::from_slice(&cli_out.stdout).expect("parse external asr-cmd json");
+    assert_eq!(cli_report.status, RealVoiceStatus::Pass);
+    assert_eq!(cli_report.aggregate_wer, Some(0.0));
+}
+
+#[test]
+fn default_real_voice_corpus_manifest_loads_all_human_clips_and_provenance() {
+    use lowyap_eval::real_voice::{
+        default_corpus_manifest_path, discover_clips, LIVE_CHUNKER_THRESHOLD_MS,
+    };
+    use lowyap_eval::wav_replay::load_wav_mono_16k;
+
+    let manifest_path = default_corpus_manifest_path();
+    assert!(
+        manifest_path.exists(),
+        "default corpus manifest missing at {}",
+        manifest_path.display()
+    );
+    let corpus_dir = manifest_path
+        .parent()
+        .expect("default corpus manifest parent");
+    let provenance_path = corpus_dir.join("PROVENANCE.md");
+    let provenance = fs::read_to_string(&provenance_path).expect("read PROVENANCE.md");
+    assert!(provenance.contains("CC-BY-4.0"));
+    assert!(provenance.contains("CC0-1.0"));
+
+    let entries = discover_clips(&RealVoiceConfig {
+        use_default_corpus: true,
+        ..RealVoiceConfig::default()
+    })
+    .expect("discover default corpus clips");
+    assert!(
+        (15..=20).contains(&entries.len()),
+        "expected 15-20 clips in default corpus, got {}",
+        entries.len()
+    );
+
+    let mut total_bytes = 0u64;
+    let mut clean_en = 0usize;
+    let mut accented_en = 0usize;
+    let mut multilingual = 0usize;
+    let mut silence_breath = 0usize;
+    let mut long_chunked = 0usize;
+    let mut langs = std::collections::BTreeSet::new();
+    let mut has_devanagari = false;
+    let mut has_arabic_urdu = false;
+
+    for entry in &entries {
+        let wav_name = entry
+            .wav
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("wav filename");
+        assert!(
+            provenance.contains(wav_name),
+            "PROVENANCE.md must document {wav_name}"
+        );
+        let meta = fs::metadata(&entry.wav).expect("stat corpus wav");
+        total_bytes += meta.len();
+
+        let (samples, summary) = load_wav_mono_16k(&entry.wav).expect("decode corpus wav");
+        assert_eq!(summary.source_sample_rate, 16_000);
+        assert_eq!(summary.source_channels, 1);
+        assert!(!samples.is_empty());
+        assert!(samples.iter().all(|s| s.is_finite()));
+
+        if summary.duration_ms >= LIVE_CHUNKER_THRESHOLD_MS {
+            assert!(
+                summary.duration_ms <= 22_500,
+                "long chunked clip should be 14-22s, got {} ms",
+                summary.duration_ms
+            );
+            long_chunked += 1;
+        }
+
+        if let Some(ref lang) = entry.language_hint {
+            langs.insert(lang.clone());
+        }
+
+        match entry.category {
+            ClipCategory::CleanEnglish => {
+                clean_en += 1;
+                assert!(entry
+                    .reference_text
+                    .as_deref()
+                    .is_some_and(|t| !t.trim().is_empty()));
+            }
+            ClipCategory::AccentedEnglish => {
+                accented_en += 1;
+                assert!(entry
+                    .reference_text
+                    .as_deref()
+                    .is_some_and(|t| !t.trim().is_empty()));
+            }
+            ClipCategory::Multilingual | ClipCategory::CodeSwitch => {
+                multilingual += 1;
+                let text = entry
+                    .reference_text
+                    .as_deref()
+                    .expect("multilingual clip must have reference_text");
+                let sp = compute_script_preservation(text, text);
+                if sp.expected_scripts.contains(&ScriptKind::Devanagari) {
+                    has_devanagari = true;
+                }
+                if sp.expected_scripts.contains(&ScriptKind::ArabicUrdu) {
+                    has_arabic_urdu = true;
+                }
+            }
+            ClipCategory::SilenceBreath => {
+                silence_breath += 1;
+                assert!(
+                    entry.reference_text.is_none(),
+                    "silence_breath clip must omit reference_text"
+                );
+                assert!(
+                    summary.rms < 0.02,
+                    "silence_breath clip RMS must stay room-tone quiet, got {}",
+                    summary.rms
+                );
+            }
+            other => panic!("unexpected category in curated default corpus: {other:?}"),
+        }
+    }
+
+    assert!(
+        total_bytes < 10 * 1024 * 1024,
+        "default corpus folder must stay < 10 MiB, got {total_bytes} bytes"
+    );
+    assert!(
+        clean_en >= 3,
+        "expected >=3 clean_english clips, got {clean_en}"
+    );
+    assert!(
+        accented_en >= 4,
+        "expected >=4 accented_english clips, got {accented_en}"
+    );
+    assert!(
+        multilingual >= 5,
+        "expected >=5 multilingual clips, got {multilingual}"
+    );
+    assert_eq!(silence_breath, 2, "expected 2 silence_breath probes");
+    assert!(
+        long_chunked >= 2,
+        "expected >=2 >=14s live-chunker clips, got {long_chunked}"
+    );
+    for expected_lang in ["en", "hi", "ur", "es", "de"] {
+        assert!(
+            langs.contains(expected_lang),
+            "default corpus missing language_hint '{expected_lang}' (saw {langs:?})"
+        );
+    }
+    assert!(
+        has_devanagari,
+        "default corpus must include Devanagari reference"
+    );
+    assert!(
+        has_arabic_urdu,
+        "default corpus must include Perso-Arabic Urdu reference"
+    );
+}
+
+#[test]
+fn real_voice_default_corpus_reports_category_breakdown_and_live_chunker_gate() {
+    use lowyap_eval::real_voice::{
+        discover_clips, evaluate_real_voice_with_timed_asr, AsrStdoutOutput,
+    };
+
+    let config = RealVoiceConfig {
+        use_default_corpus: true,
+        ..RealVoiceConfig::default()
+    };
+    let entries = discover_clips(&config).expect("discover default corpus");
+    let refs_with_audio: Vec<(Vec<f32>, Option<String>, Option<String>)> = entries
+        .iter()
+        .map(|e| {
+            let (samples, _) =
+                lowyap_eval::wav_replay::load_wav_mono_16k(&e.wav).expect("load wav");
+            (samples, e.language_hint.clone(), e.reference_text.clone())
+        })
+        .collect();
+
+    let report = evaluate_real_voice_with_timed_asr(
+        &config,
+        Some(
+            |samples: &[f32], lang: Option<&str>| -> Result<AsrStdoutOutput, String> {
+                // Pure `silence_breath` probes (`lang == None`) and short edge silence slices.
+                if lang.is_none() || (rms(samples) < 0.0085 && samples.len() < 48_000) {
+                    return Ok(AsrStdoutOutput {
+                        text: String::new(),
+                        decode_ms: Some(18.0),
+                        ..AsrStdoutOutput::default()
+                    });
+                }
+                // Match clip by language + highest dot-product correlation on prefix samples.
+                let matched = refs_with_audio
+                    .iter()
+                    .filter(|(orig, l, r)| {
+                        r.is_some()
+                            && l.as_deref() == lang
+                            && (orig.len() == samples.len() || orig.len() + 24_000 == samples.len())
+                    })
+                    .max_by(|(a, _, _), (b, _, _)| {
+                        let corr_a: f32 = a
+                            .iter()
+                            .zip(samples.iter())
+                            .take(8_000)
+                            .map(|(x, y)| x * y)
+                            .sum();
+                        let corr_b: f32 = b
+                            .iter()
+                            .zip(samples.iter())
+                            .take(8_000)
+                            .map(|(x, y)| x * y)
+                            .sum();
+                        corr_a.total_cmp(&corr_b)
+                    })
+                    .and_then(|(_, _, r)| r.clone())
+                    .unwrap_or_else(|| "fallback transcript".to_owned());
+                Ok(AsrStdoutOutput {
+                    text: matched,
+                    decode_ms: Some(120.0),
+                    simulate_live: Some(true),
+                    chunk_count: Some(if samples.len() >= 14 * 16_000 { 2 } else { 1 }),
+                })
+            },
+        ),
+    )
+    .expect("evaluate default corpus");
+
+    let failed: Vec<_> = report
+        .clips
+        .iter()
+        .filter(|c| !c.passed)
+        .map(|c| {
+            (
+                &c.clip_id,
+                c.rms,
+                c.wer.as_ref().map(|w| w.rate),
+                &c.silence_slice_hallucinations,
+                &c.phantom_flags,
+                c.perturbations
+                    .iter()
+                    .filter(|p| !p.passed)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        report.status,
+        RealVoiceStatus::Pass,
+        "failed clips: {failed:?}"
+    );
+    assert_eq!(report.clips_evaluated, 18);
+    assert_eq!(report.labeled_clips, 16);
+    assert_eq!(report.unlabeled_clips, 2);
+    assert_eq!(report.long_chunked_clips, 2);
+    assert_eq!(report.long_chunked_passed, 2);
+    assert_eq!(report.silence_hallucination_clips, 0);
+    assert_eq!(report.brand_leak_clips, 0);
+    assert_eq!(report.wer_gate_failed_clips, 0);
+    assert!(report.clean_english_wer.is_some_and(|w| w <= 0.35));
+    assert!(report.accented_english_wer.is_some_and(|w| w <= 0.55));
+    assert!(report.multilingual_wer.is_some_and(|w| w <= 0.75));
+    assert_eq!(report.latency_ms_p50, Some(120.0));
+
+    let md = format_real_voice_markdown(&report, false);
+    assert!(md.contains("### Category Breakdown"));
+    assert!(md.contains("`clean_english`"));
+    assert!(md.contains("`accented_english`"));
+    assert!(md.contains("`multilingual_code_switch`"));
+    assert!(md.contains("`silence_breath`"));
+    assert!(md.contains("Live-chunker (`>= 14 s` `LiveDecode::Chunked`) clips:** 2/2 passed"));
+    assert!(md.contains("(chunked)"));
+}
+
+#[test]
+fn real_voice_asr_cmd_supports_lang_placeholder_best_ms_and_honest_wer_ceilings() {
+    let dir = TempFixtureDir::new("sv98_lang_and_timing");
+    let en_wav = dir.file("en_clip.wav");
+    let ur_wav = dir.file("ur_clip.wav");
+    let auto_wav = dir.file("auto_clip.wav");
+    let speech = synth_voiced_speech(1_200, 175.0, 0.42, 701);
+    write_wav_i16(&en_wav, &speech, 16_000, 1);
+    write_wav_i16(&ur_wav, &speech, 16_000, 1);
+    write_wav_i16(&auto_wav, &speech, 16_000, 1);
+
+    // Case 1: `{lang}` + `{wav}` substitution + `best_ms` / `transcribe_ms` extraction + relaxed multilingual WER pass.
+    // Reference has 4 Urdu words; ASR returns 2 matching + 2 slightly altered words (WER = 0.50 <= 0.75 multilingual ceiling).
+    let pass_manifest = dir.file("pass_manifest.toml");
+    fs::write(
+        &pass_manifest,
+        r#"
+[[clips]]
+clip_id = "en_clean"
+wav = "en_clip.wav"
+category = "clean_english"
+language_hint = "en"
+reference_text = "ship the release today"
+
+[[clips]]
+clip_id = "ur_multi"
+wav = "ur_clip.wav"
+category = "multilingual"
+language_hint = "ur"
+reference_text = "آج موسم بہت اچھا"
+
+[[clips]]
+clip_id = "auto_accented"
+wav = "auto_clip.wav"
+category = "accented_english"
+reference_text = "auto language fallback works"
+"#,
+    )
+    .expect("write pass_manifest");
+
+    let mock_script = dir.file("mock_asr.sh");
+    fs::write(
+        &mock_script,
+        r#"#!/bin/sh
+WAV="$1"
+LANG_HINT="$2"
+test -s "$WAV" || exit 2
+echo "[2026-10-27][12:00:00][lowyap_app_lib::cli][INFO] Loaded settings"
+case "$LANG_HINT" in
+  en)
+    printf '{"audio_secs":1.2,"load_ms":900,"transcribe_ms":[55,42],"best_ms":42,"text":"ship the release today"}\n'
+    ;;
+  ur)
+    printf '{"audio_secs":1.2,"transcribe_ms":[30.5,44.5],"text":"آج موسم کافی بہتر"}\n'
+    ;;
+  auto)
+    printf '{"audio_secs":1.2,"best_ms":60,"text":"auto language fallback works"}\n'
+    ;;
+  *)
+    exit 3
+    ;;
+esac
+"#,
+    )
+    .expect("write mock_asr.sh");
+
+    let config = RealVoiceConfig {
+        use_default_corpus: false,
+        wav_dir: None,
+        manifest: Some(pass_manifest),
+        asr_cmd: Some(format!(
+            "/bin/sh '{}' {{wav}} {{lang}}",
+            mock_script.display()
+        )),
+        verbose_redacted: false,
+        perturbation_seed: DEFAULT_PERTURBATION_SEED,
+    };
+    let report = run_real_voice_suite(&config).expect("run real-voice suite with lang+json");
+    assert_eq!(report.status, RealVoiceStatus::Pass);
+    assert_eq!(report.wer_gate_failed_clips, 0);
+    assert_eq!(report.clips[0].latency_ms, Some(42.0));
+    assert_eq!(report.clips[0].rtf, Some(0.035));
+    // Clip 1 omitted `best_ms`, so `transcribe_ms` array sum (30.5 + 44.5 = 75.0 ms) is used.
+    assert_eq!(report.clips[1].latency_ms, Some(75.0));
+    assert_eq!(report.clips[1].wer_gate_passed, Some(true));
+    assert_eq!(report.clips[2].latency_ms, Some(60.0));
+    assert_eq!(report.clean_english_wer, Some(0.0));
+    assert_eq!(report.accented_english_wer, Some(0.0));
+    assert_eq!(report.multilingual_wer, Some(0.5));
+
+    // Case 2: 0.50 WER on `clean_english` exceeds the strict 0.35 ceiling and fails the gate.
+    let fail_manifest = dir.file("fail_manifest.toml");
+    fs::write(
+        &fail_manifest,
+        r#"
+[[clips]]
+clip_id = "en_regressed"
+wav = "en_clip.wav"
+category = "clean_english"
+language_hint = "en"
+reference_text = "ship the release today"
+"#,
+    )
+    .expect("write fail_manifest");
+    let fail_report = evaluate_real_voice_with_asr(
+        &RealVoiceConfig {
+            manifest: Some(fail_manifest),
+            ..RealVoiceConfig::default()
+        },
+        Some(|_samples: &[f32]| Ok("ship wrong words now".to_owned())),
+    )
+    .expect("evaluate regressed clean_english clip");
+    assert_eq!(fail_report.status, RealVoiceStatus::Fail);
+    assert_eq!(fail_report.wer_gate_failed_clips, 1);
+    assert_eq!(fail_report.clips[0].wer_gate_passed, Some(false));
+
+    // Case 3: CLI `--suite real-voice --default-corpus` discovers all 18 bundled WAVs out of the box
+    // (exits non-zero when `--asr-cmd` is omitted so CI cannot pass on `Unverified`).
+    let cli_default = Command::new(env!("CARGO_BIN_EXE_lowyap-eval"))
+        .args(["--suite", "real-voice", "--default-corpus", "--json"])
+        .output()
+        .expect("run lowyap-eval --default-corpus");
+    assert!(
+        !cli_default.status.success(),
+        "Unverified run without --asr-cmd must exit non-zero"
+    );
+    let default_report: RealVoiceReport =
+        serde_json::from_slice(&cli_default.stdout).expect("parse --default-corpus json");
+    assert_eq!(default_report.status, RealVoiceStatus::Unverified);
+    assert_eq!(default_report.clips_evaluated, 18);
+    assert_eq!(default_report.long_chunked_clips, 2);
 }

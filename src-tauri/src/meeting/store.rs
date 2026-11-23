@@ -267,6 +267,17 @@ impl MeetingStore {
         })
     }
 
+    pub fn delete_segment(&self, meeting_id: &str, segment_id: i64) -> Result<bool, String> {
+        let conn = self.open_connection()?;
+        let removed = conn
+            .execute(
+                "DELETE FROM meeting_segments WHERE meeting_id = ?1 AND id = ?2",
+                params![meeting_id, segment_id],
+            )
+            .map_err(|e| format!("Failed to delete bleed segment {segment_id}: {e}"))?;
+        Ok(removed > 0)
+    }
+
     pub fn backfill_speaker_label(
         &self,
         meeting_id: &str,

@@ -79,14 +79,35 @@ public func processTextWithSystemPrompt(
     let tokenLimit = max(0, Int(maxTokens))
     let semaphore = DispatchSemaphore(value: 0)
 
-    // Thread-safe container to pass results from async task back to calling thread
+    // Thread-safe container to pass results from async task back to calling thread.
+    // Guarded by NSLock because a timed-out call cancels `genTask` and returns early
+    // while FoundationModels finishes tearing down on its detached executor.
     final class ResultBox: @unchecked Sendable {
-        var response: String?
-        var error: String?
+        private let lock = NSLock()
+        private var responseValue: String?
+        private var errorValue: String?
+
+        func setResponse(_ value: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            responseValue = value
+        }
+
+        func setError(_ value: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            errorValue = value
+        }
+
+        func snapshot() -> (response: String?, error: String?) {
+            lock.lock()
+            defer { lock.unlock() }
+            return (responseValue, errorValue)
+        }
     }
     let box = ResultBox()
 
-    Task.detached(priority: .userInitiated) {
+    let genTask = Task.detached(priority: .userInitiated) {
         defer { semaphore.signal() }
         do {
             let session = LanguageModelSession(
@@ -101,28 +122,50 @@ public func processTextWithSystemPrompt(
                     generating: CleanedTranscript.self
                 )
                 output = structured.content.cleanedText
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
-                let fallbackGeneration = try await session.respond(to: swiftUserContent)
+                try Task.checkCancellation()
+                // Never retry long utterances on the same session: Apple's on-device
+                // 4k context window overflows on guided JSON for multi-paragraph takes,
+                // and a second pass on a dirty session doubles wall-clock time to 50s+.
+                guard swiftUserContent.count <= 600 else {
+                    throw error
+                }
+                let fallbackSession = LanguageModelSession(
+                    model: model,
+                    instructions: swiftSystemPrompt
+                )
+                let fallbackGeneration = try await fallbackSession.respond(to: swiftUserContent)
                 output = fallbackGeneration.content
             }
 
             if tokenLimit > 0 {
                 output = truncatedText(output, limit: tokenLimit)
             }
-            box.response = output
+            box.setResponse(output)
         } catch {
-            box.error = error.localizedDescription
+            box.setError(error.localizedDescription)
         }
     }
 
-    semaphore.wait()
+    // Enforce interactive dictation SLA at the FFI boundary (3.4s max) so an
+    // overloaded Neural Engine / guided-decode stall cancels immediately.
+    let waitResult = semaphore.wait(timeout: .now() + .milliseconds(3400))
+    if waitResult == .timedOut {
+        genTask.cancel()
+        responsePtr.pointee.error_message = duplicateCString(
+            "Apple Intelligence exceeded 3.4s interactive budget; using instant local cleanup."
+        )
+        return responsePtr
+    }
 
-    // Write to responsePtr on the calling thread after task completes
-    if let response = box.response {
+    let snapshot = box.snapshot()
+    if let response = snapshot.response {
         responsePtr.pointee.response = duplicateCString(response)
         responsePtr.pointee.success = 1
     } else {
-        responsePtr.pointee.error_message = duplicateCString(box.error ?? "Unknown error")
+        responsePtr.pointee.error_message = duplicateCString(snapshot.error ?? "Unknown error")
     }
 
     return responsePtr

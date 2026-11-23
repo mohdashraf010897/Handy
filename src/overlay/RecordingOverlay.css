@@ -1,30 +1,33 @@
 @import "../styles/theme.css";
 
 :root {
-  --s-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --s-font:
+    "Hanken Grotesk Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   /* Near-opaque app surface (theme.css --color-background at 98%). Auto-flips
      light/dark with --color-background, so no dark-mode override is needed. */
   --s-surface: color-mix(in srgb, var(--color-background) 98%, transparent);
-  /* High-contrast brand accent (>=5.3:1 in both light and dark modes). */
+  /* High-contrast brand accent (>=5.07:1 in both light and dark modes). */
   --s-accent: var(--color-overlay-accent);
   /* The rest come from theme.css, which already follows the theme setting. */
   --s-accent-soft: color-mix(
     in srgb,
-    var(--color-overlay-accent) 20%,
+    var(--color-overlay-accent) 18%,
     transparent
   );
   --s-muted: var(--color-ink-2);
   --s-faint: var(--color-ink-3);
   --s-border: var(--color-line);
   --s-hair: var(--color-wash);
-  --s-paste-raw-border: rgba(15, 15, 15, 0.22);
-  --s-paste-raw-bg: rgba(15, 15, 15, 0.08);
-  --s-paste-raw-bg-hover: rgba(15, 15, 15, 0.15);
-  --s-paste-raw-text: rgba(15, 15, 15, 0.9);
+  --s-paste-raw-border: rgba(20, 20, 18, 0.22);
+  --s-paste-raw-bg: rgba(20, 20, 18, 0.08);
+  --s-paste-raw-bg-hover: rgba(20, 20, 18, 0.15);
+  --s-paste-raw-text: rgba(20, 20, 18, 0.92);
 
-  --s-amber: #f59e0b;
-  --s-amber-soft: rgba(245, 158, 11, 0.16);
-  --s-amber-border: rgba(245, 158, 11, 0.38);
+  /* WCAG AA compliant warning status in both Light (#9a5200 = 5.44:1) & Dark (#fbbf24 = 11.15:1) */
+  --s-amber: var(--color-warning);
+  --s-amber-soft: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  --s-amber-border: color-mix(in srgb, var(--color-warning) 36%, transparent);
 
   /* Card geometry — single source of truth for the visible overlay sizes. The
      native overlay window (overlay.rs) is sized from these: it must be at least
@@ -182,10 +185,10 @@
   width: var(--ov-rest-w);
 }
 .scard.compact.is-capturing {
-  width: min(252px, calc(100vw - 6px));
+  width: min(286px, calc(100vw - 6px));
 }
 .scard.compact.is-capturing.cpaused {
-  width: min(272px, calc(100vw - 6px));
+  width: min(296px, calc(100vw - 6px));
 }
 .scard.compact.cworking {
   width: var(--ov-work-w);
@@ -534,6 +537,14 @@
 .scard.cpaused .stimer {
   color: var(--s-amber);
 }
+.sstage-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+  white-space: nowrap;
+}
 .spaused-label {
   font-size: 11px;
   font-weight: 600;
@@ -543,34 +554,35 @@
   white-space: nowrap;
 }
 
-/* Waveform — reactive only after the first microphone callback. While arming,
-   a muted travelling pulse acknowledges the shortcut without pretending that
-   audio levels are already being received. */
+/* Waveform — 11 center-weighted symmetrical tactile bars driven at 60fps by
+   requestAnimationFrame. While arming, a muted travelling pulse acknowledges
+   the shortcut without pretending that audio levels are already flowing. */
 .swave {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding-right: 8px;
+  gap: 2.5px;
+  padding-right: 6px;
   height: 18px;
   flex: none;
 }
 .sbase.is-capturing .swave {
-  gap: 2.5px;
+  gap: 2px;
   padding-right: 0;
 }
 .swave i {
-  width: 4px;
+  width: 3.5px;
   min-height: 3px;
   max-height: 18px;
   border-radius: 2px;
   background: var(--s-accent);
+  will-change: height;
   transition:
-    height 80ms linear,
     background-color 180ms ease,
     opacity 180ms ease;
 }
 .sbase.is-capturing .swave i {
-  width: 3.5px;
+  width: 3px;
+  border-radius: 1.5px;
 }
 .scard.cpaused .swave i,
 .swave.paused i {
@@ -589,18 +601,22 @@
   animation: swave-arming 900ms ease-in-out infinite;
 }
 .swave.arming i:nth-child(2),
-.swave.arming i:nth-child(8) {
-  animation-delay: 75ms;
+.swave.arming i:nth-child(10) {
+  animation-delay: 60ms;
 }
 .swave.arming i:nth-child(3),
-.swave.arming i:nth-child(7) {
-  animation-delay: 150ms;
+.swave.arming i:nth-child(9) {
+  animation-delay: 120ms;
 }
 .swave.arming i:nth-child(4),
-.swave.arming i:nth-child(6) {
-  animation-delay: 225ms;
+.swave.arming i:nth-child(8) {
+  animation-delay: 180ms;
 }
-.swave.arming i:nth-child(5) {
+.swave.arming i:nth-child(5),
+.swave.arming i:nth-child(7) {
+  animation-delay: 240ms;
+}
+.swave.arming i:nth-child(6) {
   animation-delay: 300ms;
 }
 @keyframes swave-arming {
@@ -792,6 +808,23 @@
   height: 14px;
   display: block;
 }
+.smeeting-stopped-halo {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.2);
+}
+.smeeting-stopped-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  display: block;
+}
 .sundo-label {
   font-size: 12px;
   font-weight: 500;
@@ -865,7 +898,7 @@
 }
 .sundo-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #a08cff 0%, #6946e5 100%);
+  background: var(--s-accent);
   border-radius: 0 2px 2px 0;
   will-change: width;
 }
@@ -874,15 +907,18 @@
 }
 
 .scard.compact.is-meeting-pill {
+  --s-amber: #fbbf24;
+  --s-amber-soft: rgba(245, 158, 11, 0.16);
+  --s-amber-border: rgba(245, 158, 11, 0.34);
   box-sizing: border-box;
-  width: 100%;
-  max-width: min(392px, calc(100vw - 8px));
-  height: 42px;
-  border-radius: 21px;
-  background: rgba(22, 22, 25, 0.94);
+  width: max-content;
+  max-width: min(264px, calc(100vw - 8px));
+  height: 34px;
+  border-radius: 17px;
+  background: rgba(20, 20, 23, 0.92);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
   backdrop-filter: blur(18px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   color: #f5f5f7;
   justify-content: center;
 }
@@ -891,34 +927,34 @@
 }
 .scard.compact.is-meeting-pill.is-summarizing {
   width: max-content;
-  min-width: 176px;
-  max-width: min(280px, calc(100vw - 8px));
+  min-width: 156px;
+  max-width: min(264px, calc(100vw - 8px));
 }
 .smeeting-row {
   height: 100%;
   box-sizing: border-box;
-  padding: 0 8px 0 12px;
+  padding: 0 5px 0 10px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
   min-width: 0;
 }
 .smeeting-row.is-summarizing {
   justify-content: center;
-  padding: 0 14px;
-  gap: 8px;
+  padding: 0 12px;
+  gap: 7px;
 }
 .smeeting-status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   flex: 0 1 auto;
 }
 .sdot.smeeting-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
 .sdot.smeeting-dot.recording {
   background: #34c759;
@@ -939,44 +975,57 @@
   }
 }
 .smeeting-timer {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: #f5f5f7;
-  padding-right: 0;
+  padding-right: 1px;
 }
 .is-meeting-pill.is-paused .smeeting-timer {
   color: #fbbf24;
 }
 .smeeting-paused-badge {
   height: 18px;
-  padding: 0 6px;
+  padding: 0 5px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   background: rgba(245, 158, 11, 0.18);
   border: 1px solid rgba(245, 158, 11, 0.38);
   color: #fbbf24;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
 }
+.smeeting-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .smeeting-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex: none;
 }
 .smeeting-btn {
-  height: 25px;
+  width: 24px;
+  height: 24px;
   box-sizing: border-box;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.1);
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.09);
   color: #f5f5f7;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
@@ -994,8 +1043,8 @@
     opacity 140ms ease;
 }
 .smeeting-btn svg {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   flex: none;
   display: block;
 }
@@ -1004,6 +1053,9 @@
   border-color: rgba(255, 255, 255, 0.26);
 }
 .smeeting-btn.is-resume {
+  width: auto;
+  padding: 0 7px;
+  border-radius: 999px;
   background: rgba(245, 158, 11, 0.2);
   border-color: rgba(245, 158, 11, 0.44);
   color: #fde68a;
@@ -1055,7 +1107,7 @@
 }
 .smeeting-spinner {
   border-color: rgba(255, 255, 255, 0.18);
-  border-top-color: #a08cff;
+  border-top-color: var(--s-accent);
 }
 .smeeting-saving-label {
   color: rgba(245, 245, 247, 0.92);

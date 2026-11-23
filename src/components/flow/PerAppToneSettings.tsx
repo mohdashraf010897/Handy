@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import type { AppToneRule, LastFlowApp, Tone, VoiceSnippet } from "@/bindings";
+import { useOsType } from "@/hooks/useOsType";
 import { useSettings } from "@/hooks/useSettings";
 import { useFlowStore } from "@/stores/flowStore";
 import { Alert } from "../ui/Alert";
@@ -646,6 +647,7 @@ const BuiltinList: React.FC<{
 
 export const PerAppToneSettings: React.FC = () => {
   const { t } = useTranslation();
+  const osType = useOsType();
   const { getSetting } = useSettings();
   const { settings, builtins, lastApp, isLoading, isSaving, load, save } =
     useFlowStore();
@@ -747,6 +749,14 @@ export const PerAppToneSettings: React.FC = () => {
           grouped
         />
         <div className="space-y-2 px-4 py-3">
+          {osType === "linux" && (
+            <Alert variant="info" contained className="rounded-md">
+              {t("flow.notice.linuxAppDetection", {
+                defaultValue:
+                  "App-based tone needs app detection (not supported on Linux yet).",
+              })}
+            </Alert>
+          )}
           {!postProcessEnabled && (
             <Alert variant="warning" contained className="rounded-md">
               {t("flow.notice.postProcessOff")}

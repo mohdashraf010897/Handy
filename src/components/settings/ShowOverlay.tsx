@@ -16,6 +16,7 @@ export const ShowOverlay: React.FC<ShowOverlayProps> = React.memo(
     const { t } = useTranslation();
     const { getSetting, updateSetting, isUpdating } = useSettings();
 
+    const minimalOptionLabel = t("settings.advanced.overlay.style.options.minimal");
     const styleOptions = [
       {
         value: "none",
@@ -23,7 +24,10 @@ export const ShowOverlay: React.FC<ShowOverlayProps> = React.memo(
       },
       {
         value: "minimal",
-        label: t("settings.advanced.overlay.style.options.minimal"),
+        label:
+          minimalOptionLabel === "Minimal"
+            ? "Minimal (Calm waveform)"
+            : minimalOptionLabel,
       },
       {
         value: "live",
@@ -43,7 +47,7 @@ export const ShowOverlay: React.FC<ShowOverlayProps> = React.memo(
     ];
 
     const selectedStyle = (getSetting("overlay_style") ||
-      "live") as OverlayStyle;
+      "minimal") as OverlayStyle;
     // Only "top" and "bottom" are selectable; anything else (empty, or a legacy
     // "none" from before the position was retired) falls back to "bottom".
     const selectedPosition: OverlayPosition =

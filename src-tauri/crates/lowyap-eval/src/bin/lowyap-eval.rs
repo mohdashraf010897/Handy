@@ -9,12 +9,14 @@ use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 use lowyap_eval::{
-    evaluate_all, evaluate_comparison, format_comparison_markdown, format_scorecard_markdown,
-    format_wav_report_markdown, inspect_wav_pair, PipelineUnderTest,
+    evaluate_all, evaluate_comparison, format_comparison_markdown, format_dictation_bench_markdown,
+    format_real_voice_markdown, format_scorecard_markdown, format_wav_report_markdown,
+    inspect_wav_pair, run_dictation_bench, run_real_voice_suite, PipelineUnderTest,
+    RealVoiceConfig, RealVoiceStatus,
 };
 use lowyap_ports::OutputRouteKind;
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum SuiteArg {
     Baseline,
     ProductionDsp,
@@ -23,6 +25,8 @@ enum SuiteArg {
     ModularTarget,
     Compare,
     All,
+    #[value(name = "real-voice")]
+    RealVoice,
 }
 
 impl SuiteArg {
@@ -32,7 +36,7 @@ impl SuiteArg {
             Self::ProductionDsp => Some(("production-dsp", PipelineUnderTest::production_dsp())),
             Self::Production => Some(("production", PipelineUnderTest::production())),
             Self::ModularTarget => Some(("modular-target", PipelineUnderTest::modular_target())),
-            Self::Compare | Self::All => None,
+            Self::Compare | Self::All | Self::RealVoice => None,
         }
     }
 }
@@ -58,16 +62,20 @@ impl From<RouteArg> for OutputRouteKind {
 #[command(
     name = "lowyap-eval",
     version,
-    about = "Deterministic audio pipeline evaluation harness and WAV pair inspector"
+    about = "Deterministic synthetic plumbing harness, WAV pair inspector, and real-human-audio WAV benchmark"
 )]
 struct Cli {
-    /// Synthetic benchmark suite to execute.
+    /// Benchmark suite to execute (`real-voice` evaluates real human WAVs; other suites check synthetic plumbing invariants only).
     #[arg(long, value_enum, default_value_t = SuiteArg::Compare)]
     suite: SuiteArg,
 
     /// Emit machine-readable JSON to stdout.
     #[arg(long)]
     json: bool,
+
+    /// Replay offline dictation fixtures and simulate decode latency instead of running a suite.
+    #[arg(long, conflicts_with_all = ["wav_pair", "min_score"])]
+    dictation_bench: bool,
 
     /// Inspect a local pair of 16 kHz (or resampled) WAV files in read-only mode.
     #[arg(long, num_args = 2, value_names = ["ME_WAV", "OTHERS_WAV"])]
@@ -77,7 +85,27 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = RouteArg::Speakers)]
     route: RouteArg,
 
-    /// Minimum required overall score (0.0..=10.0) for the target suite; exits non-zero if missed.
+    /// Load the bundled real-human global accent & multilingual corpus (`fixtures/real-voice/manifest.toml`).
+    #[arg(long)]
+    default_corpus: bool,
+
+    /// Directory of real human `.wav` recordings (and optional `<stem>.txt` sidecars) for `--suite real-voice`.
+    #[arg(long, value_name = "DIR")]
+    wav_dir: Option<PathBuf>,
+
+    /// JSON or TOML corpus manifest for `--suite real-voice`.
+    #[arg(long, value_name = "PATH")]
+    manifest: Option<PathBuf>,
+
+    /// External ASR command for `--suite real-voice` (supports `{wav}` and `{lang}` placeholders, e.g. `lowyap --json --simulate-live --transcribe-file {wav}`).
+    #[arg(long, value_name = "BIN")]
+    asr_cmd: Option<String>,
+
+    /// Emit redacted diagnostic previews on `--suite real-voice` (raw private sentences are never printed).
+    #[arg(long)]
+    verbose_redacted: bool,
+
+    /// Minimum required synthetic plumbing index (0.0..=10.0) for synthetic suites; exits non-zero if missed.
     #[arg(long)]
     min_score: Option<f32>,
 
@@ -89,6 +117,17 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    if cli.dictation_bench {
+        let report = run_dictation_bench();
+        let rendered = if cli.json {
+            serde_json::to_string_pretty(&report)
+        } else {
+            Ok(format_dictation_bench_markdown(&report))
+        };
+        let passed = report.replays.iter().all(|row| row.output == row.expected);
+        return render_report(rendered, passed, cli.out.as_deref());
+    }
+
     if let Some(pair) = cli.wav_pair {
         return run_wav_mode(
             &pair[0],
@@ -99,7 +138,41 @@ fn main() -> ExitCode {
         );
     }
 
+    if cli.suite == SuiteArg::RealVoice {
+        return run_real_voice_mode(
+            RealVoiceConfig {
+                use_default_corpus: cli.default_corpus,
+                wav_dir: cli.wav_dir,
+                manifest: cli.manifest,
+                asr_cmd: cli.asr_cmd,
+                verbose_redacted: cli.verbose_redacted,
+                ..RealVoiceConfig::default()
+            },
+            cli.json,
+            cli.out.as_deref(),
+        );
+    }
+
     run_suite_mode(cli.suite, cli.json, cli.min_score, cli.out.as_deref())
+}
+
+fn run_real_voice_mode(config: RealVoiceConfig, json: bool, out_path: Option<&Path>) -> ExitCode {
+    let verbose_redacted = config.verbose_redacted;
+    let report = match run_real_voice_suite(&config) {
+        Ok(r) => r,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let passed = report.status == RealVoiceStatus::Pass;
+    let rendered = if json {
+        serde_json::to_string_pretty(&report)
+    } else {
+        Ok(format_real_voice_markdown(&report, verbose_redacted))
+    };
+    render_report(rendered, passed, out_path)
 }
 
 fn run_wav_mode(
@@ -168,6 +241,14 @@ fn run_suite_mode(
         };
         (rendered, passed)
     };
+    render_report(rendered, passed, out_path)
+}
+
+fn render_report(
+    rendered: Result<String, serde_json::Error>,
+    passed: bool,
+    out_path: Option<&Path>,
+) -> ExitCode {
     let rendered = match rendered {
         Ok(body) => body,
         Err(err) => {

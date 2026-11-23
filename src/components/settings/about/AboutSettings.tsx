@@ -6,6 +6,7 @@ import { SettingsGroup } from "../../ui/SettingsGroup";
 import { SettingContainer } from "../../ui/SettingContainer";
 import { Button } from "../../ui/Button";
 import HandyTextLogo from "../../icons/HandyTextLogo";
+import VocalKeycapMark from "../../icons/VocalKeycapMark";
 import { AppDataDirectory } from "../AppDataDirectory";
 import { AppLanguageSelector } from "../AppLanguageSelector";
 import { ShowWhatsNewOnUpdate } from "../ShowWhatsNewOnUpdate";
@@ -22,7 +23,13 @@ import {
 const TM_SYMBOL = "\u2122";
 const VERSION_FALLBACK = "\u2014";
 
-export const AboutSettings: React.FC = () => {
+export interface AboutSettingsProps {
+  studioScoped?: boolean;
+}
+
+export const AboutSettings: React.FC<AboutSettingsProps> = ({
+  studioScoped = false,
+}) => {
   const { t } = useTranslation();
   const [version, setVersion] = useState("");
 
@@ -46,24 +53,7 @@ export const AboutSettings: React.FC = () => {
       <div className="rounded-xl border border-line bg-wash/60 px-5 py-4 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3.5">
-            <div
-              className="w-12 h-12 rounded-[11px] shrink-0 flex items-center justify-center shadow-xs border border-white/10"
-              style={{
-                background: "linear-gradient(180deg, #24222E 0%, #121117 100%)",
-              }}
-              aria-hidden="true"
-            >
-              <svg width="30" height="30" viewBox="0 0 64 64" fill="none">
-                <path
-                  fill="#7C5CFF"
-                  d="M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6Z"
-                />
-                <path
-                  fill="#FFFFFF"
-                  d="M23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z"
-                />
-              </svg>
-            </div>
+            <VocalKeycapMark size={44} className="shrink-0" />
             <div className="flex flex-col gap-0.5">
               <div className="flex items-start gap-0.5">
                 <HandyTextLogo width={96} className="block" />
@@ -89,8 +79,12 @@ export const AboutSettings: React.FC = () => {
       </div>
 
       <SettingsGroup title={t("settings.about.title")}>
-        <AppLanguageSelector descriptionMode="tooltip" grouped={true} />
-        <ThemeSelector descriptionMode="tooltip" grouped={true} />
+        {!studioScoped && (
+          <>
+            <AppLanguageSelector descriptionMode="tooltip" grouped={true} />
+            <ThemeSelector descriptionMode="tooltip" grouped={true} />
+          </>
+        )}
         <SettingContainer
           title={t("settings.about.version.title")}
           description={t("settings.about.version.description")}

@@ -8,8 +8,8 @@ use lowyap_ports::{EchoCanceller, OutputRouteKind};
 use crate::normalized_pcm;
 
 const FRAME: usize = 160;
-const MAX_DELAY: usize = 2_880; // 180 ms
-const HISTORY: usize = 4_096;
+const MAX_DELAY: usize = 4_800; // 300 ms (covers laptop + external display / CoreAudio tap paths)
+const HISTORY: usize = 8_192;
 const LINEAR_TAPS: usize = 52;
 const NONLINEAR_TAPS: usize = 7;
 const FEATURE_COUNT: usize = LINEAR_TAPS + 2 * NONLINEAR_TAPS;
@@ -314,7 +314,22 @@ impl FastEchoFilter {
             }
         }
         if best.1 < 0.88 {
-            return None;
+            // In real reverberant rooms with laptop speakers, early reflections
+            // lower raw waveform correlation below 0.88 (typically 0.55..0.85)
+            // while still forming a sharp correlation peak above background lags.
+            if capture.len() < 120 || best.1 < 0.56 {
+                return None;
+            }
+            let mut sum_corr = 0.0_f32;
+            let mut count_corr = 0usize;
+            for lag in (0..=max_lag).step_by(16) {
+                sum_corr += score(lag);
+                count_corr += 1;
+            }
+            let mean_corr = sum_corr / (count_corr.max(1) as f32);
+            if best.1 < (2.45 * mean_corr).max(0.56) {
+                return None;
+            }
         }
         let fraction = if best.0 > 0 && best.0 < max_lag {
             let (left, right) = (score(best.0 - 1), score(best.0 + 1));
@@ -420,7 +435,8 @@ impl FastEchoFilter {
         let echo_only = if capture.len() < 40 {
             false
         } else if cold {
-            coherence > 0.90 && mic_rms < 1.1 * ref_rms
+            (coherence > 0.90 && mic_rms < 1.1 * ref_rms)
+                || (coherence > 0.60 && aec3_ratio < 0.45 && mic_rms < 1.15 * ref_rms)
         } else {
             let quiet_near_end_innovation =
                 residual_rms >= (0.045 * pred_rms).max(0.006) && residual_coherence < 0.35;

@@ -2,9 +2,65 @@ use crate::managers::{
     history::{HistoryEntry, HistoryManager, PaginatedHistory},
     transcription_jobs::TranscriptionJobManager,
 };
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type)]
+pub struct DictationTelemetrySummaryDto {
+    pub sample_count: u32,
+    pub total_audio_s: f64,
+    pub p50_release_to_done_ms: Option<f64>,
+    pub p95_release_to_done_ms: Option<f64>,
+    pub p50_asr_ms: Option<f64>,
+    pub p95_cleanup_ms: Option<f64>,
+    pub median_rtf: Option<f64>,
+    pub live_predecoded_ratio: Option<f64>,
+    pub polished_count: u32,
+    pub bottleneck: String,
+}
+
+impl From<lowyap_ports::LatencyHealthSummary> for DictationTelemetrySummaryDto {
+    fn from(summary: lowyap_ports::LatencyHealthSummary) -> Self {
+        use lowyap_ports::BottleneckKind;
+        Self {
+            sample_count: u32::try_from(summary.sample_count).unwrap_or(u32::MAX),
+            total_audio_s: summary.total_audio_s,
+            p50_release_to_done_ms: summary.p50_release_to_done_ms,
+            p95_release_to_done_ms: summary.p95_release_to_done_ms,
+            p50_asr_ms: summary.p50_asr_ms,
+            p95_cleanup_ms: summary.p95_cleanup_ms,
+            median_rtf: summary.median_rtf,
+            live_predecoded_ratio: summary.live_predecoded_ratio,
+            polished_count: u32::try_from(summary.polished_count).unwrap_or(u32::MAX),
+            bottleneck: match summary.bottleneck {
+                BottleneckKind::None => "none",
+                BottleneckKind::PostStopBatchDecode => "post_stop_batch_decode",
+                BottleneckKind::ComputeBoundAsr => "compute_bound_asr",
+                BottleneckKind::SlowLinguistProvider => "slow_linguist_provider",
+                BottleneckKind::UnpolishedTakes => "unpolished_takes",
+            }
+            .to_string(),
+        }
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_dictation_telemetry_summary(
+    app: AppHandle,
+    limit: Option<u32>,
+) -> Result<DictationTelemetrySummaryDto, String> {
+    let history = Arc::clone(app.state::<Arc<HistoryManager>>().inner());
+    let limit = limit.unwrap_or(50).min(1000) as usize;
+    tauri::async_runtime::spawn_blocking(move || {
+        history.summarize_recent_telemetry(limit).map(Into::into)
+    })
+    .await
+    .map_err(|e| format!("Telemetry summary task failed: {e}"))?
+    .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 #[specta::specta]

@@ -19,6 +19,28 @@ use crate::scenarios::{
     run_soft_cancel_undo_invariants,
 };
 
+/// Honesty banner emitted on all synthetic plumbing reports so synthetic invariants
+/// are never mistaken for empirical speech-recognition quality.
+pub const SYNTHETIC_HONESTY_BANNER: &str =
+    "[SYNTHETIC PLUMBING ONLY — Real-Audio Quality: UNVERIFIED until --suite real-voice runs on real human WAVs]";
+
+/// Distinguishes synthetic plumbing invariant checks from empirical evaluation
+/// on real human audio recordings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationTier {
+    /// Deterministic synthetic signal and text plumbing checks only.
+    SyntheticPlumbingOnly,
+    /// Empirical evaluation run against real human WAV recordings.
+    EmpiricalRealAudio,
+}
+
+impl EvaluationTier {
+    pub(crate) const fn synthetic_default() -> Self {
+        Self::SyntheticPlumbingOnly
+    }
+}
+
 /// Manifest of adapter implementations evaluated in a suite run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -124,6 +146,9 @@ pub struct ScenarioReport {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct EvalScorecard {
+    /// Evaluation tier distinguishing synthetic plumbing checks from real-audio runs.
+    #[serde(default = "EvaluationTier::synthetic_default")]
+    pub evaluation_tier: EvaluationTier,
     /// Suite profile label (`baseline`, `modular-target`, `ideal-oracle`, etc.).
     pub suite_name: String,
     /// Adapters wired into this run.
@@ -142,10 +167,37 @@ pub struct EvalScorecard {
     pub scenario_details: Vec<ScenarioReport>,
 }
 
+impl EvalScorecard {
+    /// Counts `(passed, total)` deterministic plumbing invariants for this scorecard.
+    pub fn plumbing_invariant_counts(&self) -> (usize, usize) {
+        let checks = [
+            self.metrics.echo_leak_rate <= 0.15,
+            self.metrics.double_talk_survival_rate >= 0.85,
+            self.metrics.silence_hallucination_count == 0,
+            self.metrics.speaker_attribution_f1 >= 0.90,
+            self.metrics.summary_overflow_count == 0
+                && self.metrics.summary_budget_pass_rate >= 0.95,
+            self.metrics.session_bus_invariant_pass_rate >= 1.0,
+        ];
+        let passed = checks.into_iter().filter(|&ok| ok).count();
+        (passed, checks.len())
+    }
+
+    /// Returns `true` when all deterministic plumbing invariants pass and any
+    /// configured threshold gate also passed.
+    pub fn plumbing_gate_passed(&self) -> bool {
+        let (passed, total) = self.plumbing_invariant_counts();
+        self.passed && passed == total
+    }
+}
+
 /// Side-by-side comparison payload for `--suite compare` / `--suite all`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ComparisonReport {
+    /// Evaluation tier distinguishing synthetic plumbing checks from real-audio runs.
+    #[serde(default = "EvaluationTier::synthetic_default")]
+    pub evaluation_tier: EvaluationTier,
     /// Ordered scorecards included in the comparison.
     pub scorecards: Vec<EvalScorecard>,
     /// Overall pass/fail verdict against `--min-score` (if specified).
@@ -305,6 +357,7 @@ impl PipelineUnderTest {
         ];
 
         EvalScorecard {
+            evaluation_tier: EvaluationTier::SyntheticPlumbingOnly,
             suite_name: suite_name.to_owned(),
             adapters: AdapterManifest {
                 echo_canceller: self.echo_canceller.name().to_owned(),
@@ -830,6 +883,7 @@ pub fn evaluate_comparison(min_score: Option<f32>) -> ComparisonReport {
     let production = PipelineUnderTest::production().run_suite("production", min_score);
     let passed = production.passed;
     ComparisonReport {
+        evaluation_tier: EvaluationTier::SyntheticPlumbingOnly,
         scorecards: vec![baseline, production],
         passed,
     }
@@ -844,20 +898,39 @@ pub fn evaluate_all(min_score: Option<f32>) -> ComparisonReport {
     let modular_target = PipelineUnderTest::modular_target().run_suite("modular-target", None);
     let passed = production.passed;
     ComparisonReport {
+        evaluation_tier: EvaluationTier::SyntheticPlumbingOnly,
         scorecards: vec![baseline, production_dsp, production, modular_target],
         passed,
     }
 }
 
+fn gate_word(ok: bool) -> &'static str {
+    if ok {
+        "PASS"
+    } else {
+        "FAIL"
+    }
+}
+
 /// Renders a single `EvalScorecard` as a concise Markdown table.
+///
+/// Synthetic suites intentionally omit `/10` quality headlines and instead
+/// report deterministic plumbing gate verdicts plus an explicit honesty banner.
 pub fn format_scorecard_markdown(card: &EvalScorecard) -> String {
+    let (inv_passed, inv_total) = card.plumbing_invariant_counts();
+    let gate_ok = card.plumbing_gate_passed();
     let mut out = String::new();
     out.push_str(&format!(
-        "## lowyap-eval Scorecard: `{}` (Overall: {:.2} / 10.00 — {})\n\n",
+        "## lowyap-eval Scorecard: `{}` — PLUMBING GATE: {} ({}/{} deterministic invariants)\n\n",
         card.suite_name,
-        card.overall_score,
-        if card.passed { "PASS" } else { "FAIL" }
+        gate_word(gate_ok),
+        inv_passed,
+        inv_total
     ));
+    if card.evaluation_tier == EvaluationTier::SyntheticPlumbingOnly {
+        out.push_str(SYNTHETIC_HONESTY_BANNER);
+        out.push_str("\n\n");
+    }
     out.push_str(&format!(
         "Adapters: AEC=`{}`, VAD=`{}`, ASR=`{}`, Diarizer=`{}`, Summarizer=`{}` (rolling=`{}`)\n\n",
         card.adapters.echo_canceller,
@@ -867,41 +940,50 @@ pub fn format_scorecard_markdown(card: &EvalScorecard) -> String {
         card.adapters.summarizer,
         card.adapters.rolling_window_summary,
     ));
-    out.push_str("| Dimension | Raw Metric | Score (0-10) |\n");
+    out.push_str("| Plumbing Invariant | Raw Metric | Gate |\n");
     out.push_str("|---|---|---|\n");
     out.push_str(&format!(
-        "| Echo Suppression | leak_rate={:.3} | {:.2} |\n",
-        card.metrics.echo_leak_rate, card.dimension_scores.echo_suppression
+        "| Echo Suppression | leak_rate={:.3} (<= 0.150) | {} |\n",
+        card.metrics.echo_leak_rate,
+        gate_word(card.metrics.echo_leak_rate <= 0.15)
     ));
     out.push_str(&format!(
-        "| Double-Talk Survival | survival={:.3} | {:.2} |\n",
-        card.metrics.double_talk_survival_rate, card.dimension_scores.double_talk_survival
+        "| Double-Talk Survival | survival={:.3} (>= 0.850) | {} |\n",
+        card.metrics.double_talk_survival_rate,
+        gate_word(card.metrics.double_talk_survival_rate >= 0.85)
     ));
     out.push_str(&format!(
-        "| Hallucination Resistance | hallucinations={} | {:.2} |\n",
-        card.metrics.silence_hallucination_count, card.dimension_scores.hallucination_resistance
+        "| Hallucination Resistance | hallucinations={} (== 0) | {} |\n",
+        card.metrics.silence_hallucination_count,
+        gate_word(card.metrics.silence_hallucination_count == 0)
     ));
     out.push_str(&format!(
-        "| Speaker Attribution | f1={:.3} (self={:.2}, purity={:.2}) | {:.2} |\n",
+        "| Speaker Attribution | f1={:.3} (self={:.2}, purity={:.2}, >= 0.900) | {} |\n",
         card.metrics.speaker_attribution_f1,
         card.metrics.speaker_self_recall,
         card.metrics.remote_cluster_purity,
-        card.dimension_scores.speaker_attribution
+        gate_word(card.metrics.speaker_attribution_f1 >= 0.90)
     ));
     out.push_str(&format!(
-        "| Summary Budget & Multilingual | pass={:.2}, markers={:.2}, overflows={} | {:.2} |\n",
+        "| Summary Budget & Multilingual | pass={:.2}, markers={:.2}, overflows={} | {} |\n",
         card.metrics.summary_budget_pass_rate,
         card.metrics.multilingual_marker_recall,
         card.metrics.summary_overflow_count,
-        card.dimension_scores.summary_budget
+        gate_word(
+            card.metrics.summary_overflow_count == 0
+                && card.metrics.summary_budget_pass_rate >= 0.95
+        )
     ));
     out.push_str(&format!(
-        "| Session Bus Invariants | pass={:.2} | {:.2} |\n",
-        card.metrics.session_bus_invariant_pass_rate, card.dimension_scores.session_bus_invariants
+        "| Session Bus Invariants | pass={:.2} (== 1.00) | {} |\n",
+        card.metrics.session_bus_invariant_pass_rate,
+        gate_word(card.metrics.session_bus_invariant_pass_rate >= 1.0)
     ));
     out.push_str(&format!(
-        "| **Overall Weighted Score** | — | **{:.2}** |\n",
-        card.overall_score
+        "| **Plumbing Gate** | {}/{} deterministic invariants | **{}** |\n",
+        inv_passed,
+        inv_total,
+        gate_word(gate_ok)
     ));
     out
 }
@@ -911,14 +993,30 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
     if report.scorecards.len() == 1 {
         return format_scorecard_markdown(&report.scorecards[0]);
     }
+    let base = &report.scorecards[0];
+    let target = report
+        .scorecards
+        .iter()
+        .find(|card| card.suite_name == "production")
+        .unwrap_or(&report.scorecards[1]);
+    let (target_passed, target_total) = target.plumbing_invariant_counts();
+    let gate_ok = report.passed && target.plumbing_gate_passed();
+
     let mut out = String::new();
     out.push_str(&format!(
-        "## lowyap-eval Suite Comparison ({})\n\n",
-        if report.passed { "PASS" } else { "FAIL" }
+        "## lowyap-eval Suite Comparison — PLUMBING GATE: {} ({}/{} deterministic invariants on `{}`)\n\n",
+        gate_word(gate_ok),
+        target_passed,
+        target_total,
+        target.suite_name
     ));
+    if report.evaluation_tier == EvaluationTier::SyntheticPlumbingOnly {
+        out.push_str(SYNTHETIC_HONESTY_BANNER);
+        out.push_str("\n\n");
+    }
 
     // Header row
-    out.push_str("| Metric / Dimension |");
+    out.push_str("| Metric / Invariant |");
     for card in &report.scorecards {
         out.push_str(&format!(" {} |", card.suite_name));
     }
@@ -947,13 +1045,6 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
         out.push('\n');
     };
 
-    let base = &report.scorecards[0];
-    let target = report
-        .scorecards
-        .iter()
-        .find(|card| card.suite_name == "production")
-        .unwrap_or(&report.scorecards[1]);
-
     add_row(
         "Echo Leak Rate (lower better)",
         report
@@ -961,15 +1052,15 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
             .iter()
             .map(|c| {
                 format!(
-                    "{:.3} ({:.1}/10)",
-                    c.metrics.echo_leak_rate, c.dimension_scores.echo_suppression
+                    "{:.3} ({})",
+                    c.metrics.echo_leak_rate,
+                    gate_word(c.metrics.echo_leak_rate <= 0.15)
                 )
             })
             .collect(),
         Some(format!(
-            "{:+.3} ({:+.2})",
-            target.metrics.echo_leak_rate - base.metrics.echo_leak_rate,
-            target.dimension_scores.echo_suppression - base.dimension_scores.echo_suppression
+            "{:+.3}",
+            target.metrics.echo_leak_rate - base.metrics.echo_leak_rate
         )),
     );
     add_row(
@@ -979,16 +1070,15 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
             .iter()
             .map(|c| {
                 format!(
-                    "{:.3} ({:.1}/10)",
-                    c.metrics.double_talk_survival_rate, c.dimension_scores.double_talk_survival
+                    "{:.3} ({})",
+                    c.metrics.double_talk_survival_rate,
+                    gate_word(c.metrics.double_talk_survival_rate >= 0.85)
                 )
             })
             .collect(),
         Some(format!(
-            "{:+.3} ({:+.2})",
-            target.metrics.double_talk_survival_rate - base.metrics.double_talk_survival_rate,
-            target.dimension_scores.double_talk_survival
-                - base.dimension_scores.double_talk_survival
+            "{:+.3}",
+            target.metrics.double_talk_survival_rate - base.metrics.double_talk_survival_rate
         )),
     );
     add_row(
@@ -998,18 +1088,16 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
             .iter()
             .map(|c| {
                 format!(
-                    "{} ({:.1}/10)",
+                    "{} ({})",
                     c.metrics.silence_hallucination_count,
-                    c.dimension_scores.hallucination_resistance
+                    gate_word(c.metrics.silence_hallucination_count == 0)
                 )
             })
             .collect(),
         Some(format!(
-            "{:+} ({:+.2})",
+            "{:+}",
             target.metrics.silence_hallucination_count as isize
-                - base.metrics.silence_hallucination_count as isize,
-            target.dimension_scores.hallucination_resistance
-                - base.dimension_scores.hallucination_resistance
+                - base.metrics.silence_hallucination_count as isize
         )),
     );
     add_row(
@@ -1019,15 +1107,15 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
             .iter()
             .map(|c| {
                 format!(
-                    "{:.3} ({:.1}/10)",
-                    c.metrics.speaker_attribution_f1, c.dimension_scores.speaker_attribution
+                    "{:.3} ({})",
+                    c.metrics.speaker_attribution_f1,
+                    gate_word(c.metrics.speaker_attribution_f1 >= 0.90)
                 )
             })
             .collect(),
         Some(format!(
-            "{:+.3} ({:+.2})",
-            target.metrics.speaker_attribution_f1 - base.metrics.speaker_attribution_f1,
-            target.dimension_scores.speaker_attribution - base.dimension_scores.speaker_attribution
+            "{:+.3}",
+            target.metrics.speaker_attribution_f1 - base.metrics.speaker_attribution_f1
         )),
     );
     add_row(
@@ -1037,17 +1125,19 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
             .iter()
             .map(|c| {
                 format!(
-                    "{:.2} / {} ovf ({:.1}/10)",
+                    "{:.2} / {} ovf ({})",
                     c.metrics.summary_budget_pass_rate,
                     c.metrics.summary_overflow_count,
-                    c.dimension_scores.summary_budget
+                    gate_word(
+                        c.metrics.summary_overflow_count == 0
+                            && c.metrics.summary_budget_pass_rate >= 0.95
+                    )
                 )
             })
             .collect(),
         Some(format!(
-            "{:+.2} ({:+.2})",
-            target.metrics.summary_budget_pass_rate - base.metrics.summary_budget_pass_rate,
-            target.dimension_scores.summary_budget - base.dimension_scores.summary_budget
+            "{:+.2}",
+            target.metrics.summary_budget_pass_rate - base.metrics.summary_budget_pass_rate
         )),
     );
     add_row(
@@ -1057,30 +1147,31 @@ pub fn format_comparison_markdown(report: &ComparisonReport) -> String {
             .iter()
             .map(|c| {
                 format!(
-                    "{:.2} ({:.1}/10)",
+                    "{:.2} ({})",
                     c.metrics.session_bus_invariant_pass_rate,
-                    c.dimension_scores.session_bus_invariants
+                    gate_word(c.metrics.session_bus_invariant_pass_rate >= 1.0)
                 )
             })
             .collect(),
         Some(format!(
-            "{:+.2} ({:+.2})",
+            "{:+.2}",
             target.metrics.session_bus_invariant_pass_rate
-                - base.metrics.session_bus_invariant_pass_rate,
-            target.dimension_scores.session_bus_invariants
-                - base.dimension_scores.session_bus_invariants
+                - base.metrics.session_bus_invariant_pass_rate
         )),
     );
     add_row(
-        "**Overall Weighted Score**",
+        "**Plumbing Gate**",
         report
             .scorecards
             .iter()
-            .map(|c| format!("**{:.2} / 10.00**", c.overall_score))
+            .map(|c| {
+                let (p, t) = c.plumbing_invariant_counts();
+                format!("**{} ({}/{})**", gate_word(c.plumbing_gate_passed()), p, t)
+            })
             .collect(),
         Some(format!(
-            "**{:+.2}**",
-            target.overall_score - base.overall_score
+            "**{:+} invariants**",
+            target_passed as isize - base.plumbing_invariant_counts().0 as isize
         )),
     );
 

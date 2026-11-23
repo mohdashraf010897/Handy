@@ -128,7 +128,11 @@ pub trait ShortcutAction: Send + Sync {
 
 // Transcribe Action
 struct TranscribeAction {
-    post_process: bool,
+    force_post_process: bool,
+}
+
+fn should_post_process(force_post_process: bool, settings_post_process_enabled: bool) -> bool {
+    force_post_process || settings_post_process_enabled
 }
 
 /// Field name for structured output JSON schema
@@ -259,22 +263,36 @@ pub(crate) async fn post_process_transcription(
         if provider.id == APPLE_INTELLIGENCE_PROVIDER_ID {
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             {
-                if !apple_intelligence::check_apple_intelligence_availability() {
-                    debug!(
-                        "Apple Intelligence selected but not currently available on this device"
-                    );
+                static APPLE_INTELLIGENCE_SERIAL: std::sync::OnceLock<tokio::sync::Mutex<()>> =
+                    std::sync::OnceLock::new();
+                let serial = APPLE_INTELLIGENCE_SERIAL.get_or_init(|| tokio::sync::Mutex::new(()));
+                let Ok(_guard) =
+                    tokio::time::timeout(Duration::from_millis(800), serial.lock()).await
+                else {
+                    warn!("Apple Intelligence busy tearing down prior session; skipping Stage-B");
                     return None;
-                }
+                };
 
                 let token_limit = model.trim().parse::<i32>().unwrap_or(0);
-                return match apple_intelligence::process_text_with_system_prompt(
-                    &system_prompt,
-                    &user_content,
-                    token_limit,
-                ) {
-                    Ok(result) => {
+                let ffi_join = tokio::task::spawn_blocking(move || {
+                    if !apple_intelligence::check_apple_intelligence_availability() {
+                        debug!(
+                            "Apple Intelligence selected but not currently available on this device"
+                        );
+                        return Ok(String::new());
+                    }
+                    apple_intelligence::process_text_with_system_prompt(
+                        &system_prompt,
+                        &user_content,
+                        token_limit,
+                    )
+                })
+                .await;
+
+                return match ffi_join {
+                    Ok(Ok(result)) => {
                         if result.trim().is_empty() {
-                            debug!("Apple Intelligence returned an empty response");
+                            debug!("Apple Intelligence returned an empty/unavailable response");
                             None
                         } else {
                             let result = strip_invisible_chars(&result);
@@ -285,8 +303,12 @@ pub(crate) async fn post_process_transcription(
                             Some(result)
                         }
                     }
-                    Err(err) => {
-                        error!("Apple Intelligence post-processing failed: {}", err);
+                    Ok(Err(err)) => {
+                        warn!("Apple Intelligence post-processing skipped/failed: {}", err);
+                        None
+                    }
+                    Err(join_err) => {
+                        error!("Apple Intelligence blocking worker failed: {}", join_err);
                         None
                     }
                 };
@@ -524,17 +546,19 @@ impl ShortcutAction for TranscribeAction {
             streaming: model_supports_streaming,
             long_form: false,
         };
-        if live_decode(expected_model, settings.long_form_chunking) != LiveDecode::None {
+        let has_live_decode =
+            live_decode(expected_model, settings.long_form_chunking) != LiveDecode::None;
+        if has_live_decode {
             tm.start_stream();
         }
         let plan_elapsed = plan_started.elapsed();
 
-        // Sizing the overlay follows the same advertised capability. A model that
-        // doesn't stream (or whose capability is not known yet) gets the compact
-        // pill instead of an oversized transparent live window.
+        // Both native streaming engines and live chunked decoders emit progressive
+        // StreamTextEvents while recording (the Live overlay stays a compact pill
+        // until the first text chunk arrives, then sculpts open smoothly).
         let overlay_started = Instant::now();
         match settings.overlay_style {
-            OverlayStyle::Live if model_supports_streaming => utils::show_streaming_overlay(app),
+            OverlayStyle::Live if has_live_decode => utils::show_streaming_overlay(app),
             OverlayStyle::Live | OverlayStyle::Minimal => show_recording_overlay(app),
             OverlayStyle::None => {} // show_overlay_state no-ops on None anyway
         }
@@ -667,7 +691,8 @@ impl ShortcutAction for TranscribeAction {
         // the larger panel, but it still switches from listening to a working
         // spinner while the stream finalizes. Non-streaming paths use the
         // compact transcribing pill (None no-ops in show_*).
-        let style = get_settings(app).overlay_style;
+        let settings_snapshot = get_settings(app);
+        let style = settings_snapshot.overlay_style;
         // Capture this before finalizing the stream so every later working state
         // targets the same overlay that was shown for this transcription.
         let use_streaming_overlay = should_use_streaming_overlay(style, tm.is_streaming());
@@ -684,7 +709,10 @@ impl ShortcutAction for TranscribeAction {
         play_feedback_sound(app, SoundType::Stop);
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
-        let post_process = self.post_process;
+        let post_process = should_post_process(
+            self.force_post_process,
+            settings_snapshot.post_process_enabled,
+        );
         let cancel_generation = rm.cancel_generation();
 
         tauri::async_runtime::spawn(async move {
@@ -735,6 +763,14 @@ impl ShortcutAction for TranscribeAction {
                     let wav_handle = tauri::async_runtime::spawn_blocking(move || {
                         crate::audio_toolkit::save_wav_file(&wav_path, &samples_for_wav)
                     });
+                    let cleanup_cancelled_wav =
+                        |handle: tauri::async_runtime::JoinHandle<anyhow::Result<()>>,
+                         path: std::path::PathBuf| {
+                            tauri::async_runtime::spawn(async move {
+                                let _ = handle.await;
+                                let _ = std::fs::remove_file(path);
+                            });
+                        };
 
                     // Transcribe concurrently with WAV save: the live decode's
                     // result when it has one (all audio was already fed to it),
@@ -744,32 +780,9 @@ impl ShortcutAction for TranscribeAction {
                     let transcription_result =
                         crate::flow::timing::asr(flow_session, || tm.transcribe_recording(samples));
 
-                    // Await WAV save and verify
-                    let wav_saved = match wav_handle.await {
-                        Ok(Ok(())) => {
-                            match crate::audio_toolkit::verify_wav_file(
-                                &wav_path_for_verify,
-                                sample_count,
-                            ) {
-                                Ok(()) => true,
-                                Err(e) => {
-                                    error!("WAV verification failed: {}", e);
-                                    false
-                                }
-                            }
-                        }
-                        Ok(Err(e)) => {
-                            error!("Failed to save WAV file: {}", e);
-                            false
-                        }
-                        Err(e) => {
-                            error!("WAV save task panicked: {}", e);
-                            false
-                        }
-                    };
-
                     if rm.was_cancelled_since(cancel_generation) {
                         debug!("Transcription operation cancelled before output handling");
+                        cleanup_cancelled_wav(wav_handle, wav_path_for_verify);
                         return;
                     }
 
@@ -784,11 +797,15 @@ impl ShortcutAction for TranscribeAction {
                                 utils::redact_text(&transcription)
                             );
 
+                            let audio_duration_s = sample_count as f64 / 16_000.0;
+                            let selected_model_id = Some(get_settings(&ah).selected_model);
+
                             let Some(processed) = crate::flow::finalize_dictation(
                                 &ah,
                                 &transcription,
+                                audio_duration_s,
                                 post_process,
-                                || {
+                                |stage_a_text| {
                                     if crate::session_bus::bus()
                                         .update(&ah, |machine, now| {
                                             machine
@@ -799,6 +816,11 @@ impl ShortcutAction for TranscribeAction {
                                         return;
                                     }
                                     if use_streaming_overlay {
+                                        tm.emit_stream_snapshot(stage_a_text);
+                                        tm.emit_stream_working(StreamWorkKind::Polishing);
+                                    } else if matches!(style, OverlayStyle::Live) {
+                                        utils::show_streaming_overlay(&ah);
+                                        tm.emit_stream_snapshot(stage_a_text);
                                         tm.emit_stream_working(StreamWorkKind::Polishing);
                                     } else {
                                         show_processing_overlay(&ah);
@@ -809,17 +831,48 @@ impl ShortcutAction for TranscribeAction {
                             .await
                             else {
                                 debug!("Transcription operation cancelled during output handling");
+                                cleanup_cancelled_wav(wav_handle, wav_path_for_verify);
                                 return;
                             };
 
                             if rm.was_cancelled_since(cancel_generation) {
                                 debug!("Transcription operation cancelled before paste");
+                                cleanup_cancelled_wav(wav_handle, wav_path_for_verify);
+                                return;
+                            };
+
+                            // Await WAV save and verify only after text paste/polish path is ready
+                            // so disk I/O never blocks instant Stage-A or fast-path paste.
+                            let wav_saved = match wav_handle.await {
+                                Ok(Ok(())) => match crate::audio_toolkit::verify_wav_file(
+                                    &wav_path_for_verify,
+                                    sample_count,
+                                ) {
+                                    Ok(()) => true,
+                                    Err(e) => {
+                                        error!("WAV verification failed: {}", e);
+                                        false
+                                    }
+                                },
+                                Ok(Err(e)) => {
+                                    error!("Failed to save WAV file: {}", e);
+                                    false
+                                }
+                                Err(e) => {
+                                    error!("WAV save task panicked: {}", e);
+                                    false
+                                }
+                            };
+
+                            if rm.was_cancelled_since(cancel_generation) {
+                                debug!("Transcription operation cancelled while awaiting WAV save");
+                                let _ = std::fs::remove_file(&wav_path_for_verify);
                                 return;
                             }
 
-                            // Save to history if WAV was saved
-                            if wav_saved {
-                                if let Err(err) = hm.save_entry(
+                            // Save to history if WAV was saved, and attach telemetry immediately
+                            let saved_entry_id = if wav_saved {
+                                match hm.save_entry(
                                     file_name,
                                     transcription,
                                     post_process || processed.post_processed_text.is_some(),
@@ -827,9 +880,30 @@ impl ShortcutAction for TranscribeAction {
                                     processed.post_process_prompt.clone(),
                                     language,
                                 ) {
-                                    error!("Failed to save history entry: {}", err);
+                                    Ok(entry) => {
+                                        if let Some(snap) =
+                                            crate::flow::timing::snapshot_for_session(
+                                                flow_session,
+                                                audio_duration_s,
+                                                selected_model_id.clone(),
+                                            )
+                                        {
+                                            if let Err(err) = hm.attach_telemetry(entry.id, &snap) {
+                                                debug!(
+                                                    "Failed to attach pre-paste telemetry: {err}"
+                                                );
+                                            }
+                                        }
+                                        Some(entry.id)
+                                    }
+                                    Err(err) => {
+                                        error!("Failed to save history entry: {}", err);
+                                        None
+                                    }
                                 }
-                            }
+                            } else {
+                                None
+                            };
 
                             if processed.final_text.is_empty() {
                                 emit_transcription_complete(
@@ -838,6 +912,16 @@ impl ShortcutAction for TranscribeAction {
                                     sample_count,
                                     stop_time,
                                 );
+                                if let (Some(entry_id), Some(snap)) = (
+                                    saved_entry_id,
+                                    crate::flow::timing::snapshot_for_session(
+                                        flow_session,
+                                        audio_duration_s,
+                                        selected_model_id,
+                                    ),
+                                ) {
+                                    let _ = hm.update_entry_telemetry(entry_id, &snap);
+                                }
                             } else {
                                 let dictation_id =
                                     crate::flow::paste_guard::remember_last_dictation(
@@ -847,6 +931,7 @@ impl ShortcutAction for TranscribeAction {
                                 let paste_time = Instant::now();
                                 let final_text = processed.final_text;
                                 let rm_for_paste = Arc::clone(&rm);
+                                let hm_for_paste = Arc::clone(&hm);
                                 // Off the main thread: paste sleeps between steps, and a
                                 // paste into Handy's own windows needs the main thread free.
                                 std::thread::Builder::new()
@@ -884,6 +969,22 @@ impl ShortcutAction for TranscribeAction {
                                             sample_count,
                                             stop_time,
                                         );
+                                        if let (Some(entry_id), Some(snap)) = (
+                                            saved_entry_id,
+                                            crate::flow::timing::snapshot_for_session(
+                                                flow_session,
+                                                audio_duration_s,
+                                                selected_model_id,
+                                            ),
+                                        ) {
+                                            if let Err(err) =
+                                                hm_for_paste.update_entry_telemetry(entry_id, &snap)
+                                            {
+                                                debug!(
+                                                    "Failed to update post-paste telemetry: {err}"
+                                                );
+                                            }
+                                        }
                                     })
                                     .map(|_| ())
                                     .unwrap_or_else(|e| {
@@ -902,6 +1003,7 @@ impl ShortcutAction for TranscribeAction {
                                 debug!(
                                     "Transcription operation cancelled after transcription error"
                                 );
+                                cleanup_cancelled_wav(wav_handle, wav_path_for_verify);
                                 return;
                             }
 
@@ -910,6 +1012,33 @@ impl ShortcutAction for TranscribeAction {
                             // Surface the failure to the UI (toast + floating overlay notice).
                             let _ = ah.emit("transcription-error", err_msg.clone());
                             // Save entry with empty text so user can retry
+                            let wav_saved = match wav_handle.await {
+                                Ok(Ok(())) => match crate::audio_toolkit::verify_wav_file(
+                                    &wav_path_for_verify,
+                                    sample_count,
+                                ) {
+                                    Ok(()) => true,
+                                    Err(verify_err) => {
+                                        error!(
+                                            "WAV verification failed after ASR error: {}",
+                                            verify_err
+                                        );
+                                        false
+                                    }
+                                },
+                                Ok(Err(save_err)) => {
+                                    error!("Failed to save WAV file after ASR error: {}", save_err);
+                                    false
+                                }
+                                Err(join_err) => {
+                                    error!("WAV save task panicked after ASR error: {}", join_err);
+                                    false
+                                }
+                            };
+                            if rm.was_cancelled_since(cancel_generation) {
+                                let _ = std::fs::remove_file(&wav_path_for_verify);
+                                return;
+                            }
                             if wav_saved {
                                 if let Err(save_err) = hm.save_entry(
                                     file_name,
@@ -998,12 +1127,14 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
     map.insert(
         "transcribe".to_string(),
         Arc::new(TranscribeAction {
-            post_process: false,
+            force_post_process: false,
         }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "transcribe_with_post_process".to_string(),
-        Arc::new(TranscribeAction { post_process: true }) as Arc<dyn ShortcutAction>,
+        Arc::new(TranscribeAction {
+            force_post_process: true,
+        }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "cancel".to_string(),
@@ -1019,8 +1150,8 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
 #[cfg(test)]
 mod tests {
     use super::{
-        complete_unless_cancelled, is_blank_transcription, should_use_streaming_overlay,
-        strip_think_block,
+        complete_unless_cancelled, is_blank_transcription, should_post_process,
+        should_use_streaming_overlay, strip_think_block,
     };
     use crate::settings::OverlayStyle;
     use std::future;
@@ -1102,5 +1233,13 @@ mod tests {
         assert!(!should_use_streaming_overlay(OverlayStyle::Live, false));
         assert!(!should_use_streaming_overlay(OverlayStyle::Minimal, true));
         assert!(!should_use_streaming_overlay(OverlayStyle::None, true));
+    }
+
+    #[test]
+    fn default_shortcut_honors_post_process_setting_and_force_binding_overrides() {
+        assert!(!should_post_process(false, false));
+        assert!(should_post_process(false, true));
+        assert!(should_post_process(true, false));
+        assert!(should_post_process(true, true));
     }
 }

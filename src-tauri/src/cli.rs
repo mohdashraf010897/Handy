@@ -39,6 +39,11 @@ pub struct CliArgs {
     #[arg(long)]
     pub model: Option<String>,
 
+    /// Non-persisted language code (`en`, `hi`, `ur`, `es`, `de`, or `auto`) for
+    /// `--transcribe-file`. Overrides stored spoken-language locks in memory only.
+    #[arg(long, value_name = "LANG")]
+    pub language: Option<String>,
+
     /// Hard-select the compute device for --transcribe-file by its registry
     /// index (see --list-devices). Omit to use the persisted accelerator
     /// setting. transcribe-cpp (whisper-family) models only.
@@ -61,4 +66,8 @@ pub struct CliArgs {
     /// Emit --transcribe-file results as JSON.
     #[arg(long)]
     pub json: bool,
+
+    /// Replay --transcribe-file through the live push-to-talk chunker (200 ms frames).
+    #[arg(long)]
+    pub simulate_live: bool,
 }

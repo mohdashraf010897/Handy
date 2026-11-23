@@ -38,11 +38,26 @@ static MIGRATIONS: &[M] = &[
 /// Nullable columns added outside [`MIGRATIONS`]; see
 /// [`HistoryManager::apply_migrations`].
 const ADDED_COLUMNS: &[&str] = &["source_name", "language", "language_source"];
+const TELEMETRY_COLUMNS: &[(&str, &str)] = &[
+    ("audio_duration_s", "REAL"),
+    ("asr_ms", "REAL"),
+    ("cleanup_ms", "REAL"),
+    ("paste_ms", "REAL"),
+    ("release_to_done_ms", "REAL"),
+    ("real_time_factor", "REAL"),
+    ("chunks_predecoded_live", "INTEGER"),
+    ("chunks_total", "INTEGER"),
+    ("asr_model_id", "TEXT"),
+    ("linguist_provider_id", "TEXT"),
+    ("linguist_stage", "TEXT"),
+];
 
 /// Every column a [`HistoryEntry`] is read from.
 const ENTRY_COLUMNS: &str = "id, file_name, timestamp, saved, title, transcription_text, \
     post_processed_text, post_process_prompt, post_process_requested, source_name, language, \
-    language_source";
+    language_source, audio_duration_s, asr_ms, cleanup_ms, paste_ms, release_to_done_ms, \
+    real_time_factor, chunks_predecoded_live, chunks_total, asr_model_id, linguist_provider_id, \
+    linguist_stage";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct PaginatedHistory {
@@ -63,7 +78,7 @@ pub enum HistoryUpdatePayload {
     Toggled { id: i64 },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
 pub struct HistoryEntry {
     pub id: i64,
     pub file_name: String,
@@ -81,6 +96,17 @@ pub struct HistoryEntry {
     pub language: Option<String>,
     /// How that language was chosen; `None` before it was recorded.
     pub language_source: Option<LanguageSource>,
+    pub audio_duration_s: Option<f64>,
+    pub asr_ms: Option<f64>,
+    pub cleanup_ms: Option<f64>,
+    pub paste_ms: Option<f64>,
+    pub release_to_done_ms: Option<f64>,
+    pub real_time_factor: Option<f64>,
+    pub chunks_predecoded_live: Option<u32>,
+    pub chunks_total: Option<u32>,
+    pub asr_model_id: Option<String>,
+    pub linguist_provider_id: Option<String>,
+    pub linguist_stage: Option<String>,
 }
 
 pub struct HistoryManager {
@@ -181,6 +207,16 @@ impl HistoryManager {
                 )?;
                 info!("Added the {column} column to transcription history");
             }
+            for (column, sql_type) in TELEMETRY_COLUMNS {
+                if !Self::has_column(conn, column)? {
+                    conn.execute(
+                        &format!(
+                            "ALTER TABLE transcription_history ADD COLUMN {column} {sql_type}"
+                        ),
+                        [],
+                    )?;
+                }
+            }
         }
 
         Ok(())
@@ -272,6 +308,17 @@ impl HistoryManager {
                 .get::<_, Option<String>>("language_source")?
                 .as_deref()
                 .and_then(LanguageSource::parse),
+            audio_duration_s: row.get("audio_duration_s")?,
+            asr_ms: row.get("asr_ms")?,
+            cleanup_ms: row.get("cleanup_ms")?,
+            paste_ms: row.get("paste_ms")?,
+            release_to_done_ms: row.get("release_to_done_ms")?,
+            real_time_factor: row.get("real_time_factor")?,
+            chunks_predecoded_live: row.get("chunks_predecoded_live")?,
+            chunks_total: row.get("chunks_total")?,
+            asr_model_id: row.get("asr_model_id")?,
+            linguist_provider_id: row.get("linguist_provider_id")?,
+            linguist_stage: row.get("linguist_stage")?,
         })
     }
 
@@ -304,6 +351,7 @@ impl HistoryManager {
             source_name: None,
             language,
             language_source,
+            ..HistoryEntry::default()
         })?;
 
         self.cleanup_old_entries()?;
@@ -328,6 +376,7 @@ impl HistoryManager {
             source_name: Some(source_name),
             language: None,
             language_source: None,
+            ..HistoryEntry::default()
         })
     }
 
@@ -378,6 +427,142 @@ impl HistoryManager {
         }
 
         Ok(entry)
+    }
+
+    /// Attaches timing metadata to the exact row returned by `save_entry`.
+    pub fn attach_telemetry(
+        &self,
+        entry_id: i64,
+        telemetry: &lowyap_ports::DictationTelemetryRecord,
+    ) -> Result<()> {
+        let mut conn = self.get_connection()?;
+        let tx = conn.transaction()?;
+        let entry = Self::update_telemetry_with_conn(&tx, entry_id, telemetry)?;
+        tx.commit()?;
+        if let Err(e) = (HistoryUpdatePayload::Updated { entry }).emit(&self.app_handle) {
+            error!("Failed to emit history-updated event: {}", e);
+        }
+        Ok(())
+    }
+
+    /// Refreshes the same history row after paste has supplied the final timings.
+    pub fn update_entry_telemetry(
+        &self,
+        entry_id: i64,
+        telemetry: &lowyap_ports::DictationTelemetryRecord,
+    ) -> Result<()> {
+        self.attach_telemetry(entry_id, telemetry)
+    }
+
+    fn update_telemetry_with_conn(
+        conn: &Connection,
+        entry_id: i64,
+        telemetry: &lowyap_ports::DictationTelemetryRecord,
+    ) -> Result<HistoryEntry> {
+        let updated = conn.execute(
+            "UPDATE transcription_history SET
+                audio_duration_s = ?1, asr_ms = ?2, cleanup_ms = ?3, paste_ms = ?4,
+                release_to_done_ms = ?5, real_time_factor = ?6,
+                chunks_predecoded_live = ?7, chunks_total = ?8, asr_model_id = ?9,
+                linguist_provider_id = ?10, linguist_stage = ?11
+             WHERE id = ?12",
+            params![
+                telemetry.audio_duration_s,
+                telemetry.asr_ms,
+                telemetry.cleanup_ms,
+                telemetry.paste_ms,
+                telemetry.release_to_done_ms,
+                telemetry.real_time_factor,
+                telemetry.chunks_predecoded_live,
+                telemetry.chunks_total,
+                telemetry.asr_engine_id,
+                telemetry.linguist_provider_id,
+                telemetry.linguist_stage.as_str(),
+                entry_id,
+            ],
+        )?;
+        if updated == 0 {
+            return Err(anyhow!("History entry {} not found", entry_id));
+        }
+        Ok(conn.query_row(
+            &format!("SELECT {ENTRY_COLUMNS} FROM transcription_history WHERE id = ?1"),
+            [entry_id],
+            Self::map_history_entry,
+        )?)
+    }
+
+    /// Summarizes recent instrumented dictations, never offline file jobs.
+    pub fn summarize_recent_telemetry(
+        &self,
+        limit: usize,
+    ) -> Result<lowyap_ports::LatencyHealthSummary> {
+        let conn = self.get_connection()?;
+        let records = Self::recent_telemetry_with_conn(&conn, limit, |file_name| {
+            let path = self.get_audio_file_path(file_name);
+            // Older telemetry may lack duration; read only the WAV header.
+            match hound::WavReader::open(path) {
+                Ok(reader) if reader.spec().sample_rate > 0 => {
+                    Some(reader.duration() as f64 / reader.spec().sample_rate as f64)
+                }
+                Ok(_) => None,
+                Err(e) => {
+                    debug!("history: telemetry WAV duration unavailable: {e}");
+                    None
+                }
+            }
+        })?;
+        Ok(lowyap_ports::summarize_telemetry(&records))
+    }
+
+    fn recent_telemetry_with_conn(
+        conn: &Connection,
+        limit: usize,
+        wav_duration: impl Fn(&str) -> Option<f64>,
+    ) -> Result<Vec<lowyap_ports::DictationTelemetryRecord>> {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {ENTRY_COLUMNS} FROM transcription_history
+             WHERE source_name IS NULL AND (audio_duration_s IS NOT NULL OR asr_ms IS NOT NULL)
+             ORDER BY id DESC LIMIT ?1"
+        ))?;
+        let entries = stmt.query_map(
+            [i64::try_from(limit).unwrap_or(i64::MAX)],
+            Self::map_history_entry,
+        )?;
+        let mut records = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            let Some(audio_s) = entry
+                .audio_duration_s
+                .filter(|s| s.is_finite() && *s >= 0.0)
+                .or_else(|| wav_duration(&entry.file_name))
+            else {
+                continue;
+            };
+            let real_time_factor = entry.real_time_factor.or_else(|| {
+                entry
+                    .asr_ms
+                    .and_then(|ms| lowyap_ports::DictationTelemetryRecord::compute_rtf(audio_s, ms))
+            });
+            records.push(lowyap_ports::DictationTelemetryRecord {
+                audio_duration_s: audio_s,
+                asr_ms: entry.asr_ms,
+                cleanup_ms: entry.cleanup_ms,
+                paste_ms: entry.paste_ms,
+                release_to_done_ms: entry.release_to_done_ms,
+                real_time_factor,
+                chunks_predecoded_live: entry.chunks_predecoded_live.unwrap_or(0),
+                chunks_total: entry.chunks_total.unwrap_or(1),
+                asr_engine_id: entry.asr_model_id,
+                linguist_provider_id: entry.linguist_provider_id,
+                linguist_stage: entry
+                    .linguist_stage
+                    .as_deref()
+                    .map(lowyap_ports::LinguistStageKind::from_wire)
+                    .unwrap_or_default(),
+                ..Default::default()
+            });
+        }
+        Ok(records)
     }
 
     /// Update an existing history entry with new transcription results (used by retry).
@@ -788,7 +973,7 @@ mod tests {
     use rusqlite::{params, Connection};
 
     fn setup_conn() -> Connection {
-        let conn = Connection::open_in_memory().expect("open in-memory db");
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch(
             "CREATE TABLE transcription_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -806,6 +991,9 @@ mod tests {
             );",
         )
         .expect("create transcription_history table");
+        conn.pragma_update(None, "user_version", MIGRATIONS.len() as i32)
+            .expect("mark schema version");
+        HistoryManager::apply_migrations(&mut conn).expect("add telemetry columns");
         conn
     }
 
@@ -846,6 +1034,16 @@ mod tests {
         HistoryManager::apply_migrations(&mut conn).expect("migrate");
         for column in ADDED_COLUMNS {
             assert!(HistoryManager::has_column(&conn, column).expect("read table info"));
+        }
+        for (column, sql_type) in TELEMETRY_COLUMNS {
+            let actual: String = conn
+                .query_row(
+                    "SELECT type FROM pragma_table_info('transcription_history') WHERE name = ?1",
+                    [column],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(actual, *sql_type);
         }
         assert_eq!(user_version(&conn), MIGRATIONS.len() as i32);
 
@@ -974,6 +1172,79 @@ mod tests {
 
         assert!(
             HistoryManager::update_entry_transcription_with_conn(&conn, 999, "missing").is_err()
+        );
+    }
+
+    #[test]
+    fn telemetry_updates_exact_entry_and_refreshes_after_paste() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "first", None);
+        insert_entry(&conn, 200, "second", None);
+        let mut telemetry = lowyap_ports::DictationTelemetryRecord {
+            audio_duration_s: 90.0,
+            asr_ms: Some(200.0),
+            cleanup_ms: Some(40.0),
+            real_time_factor: Some(450.0),
+            chunks_predecoded_live: 8,
+            chunks_total: 9,
+            asr_engine_id: Some("any-asr".into()),
+            linguist_provider_id: Some("local-rewriter".into()),
+            linguist_stage: lowyap_ports::LinguistStageKind::ModelPolished,
+            ..Default::default()
+        };
+        let entry = HistoryManager::update_telemetry_with_conn(&conn, 1, &telemetry).unwrap();
+        assert_eq!(entry.transcription_text, "first");
+        assert_eq!(entry.chunks_predecoded_live, Some(8));
+        assert_eq!(entry.asr_model_id.as_deref(), Some("any-asr"));
+        assert_eq!(entry.linguist_stage.as_deref(), Some("model_polished"));
+        assert_eq!(entry.paste_ms, None);
+        telemetry.paste_ms = Some(50.0);
+        telemetry.release_to_done_ms = Some(310.0);
+        let refreshed = HistoryManager::update_telemetry_with_conn(&conn, 1, &telemetry).unwrap();
+        assert_eq!(refreshed.paste_ms, Some(50.0));
+        assert_eq!(refreshed.release_to_done_ms, Some(310.0));
+        let second = HistoryManager::get_latest_entry_with_conn(&conn)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.audio_duration_s, None);
+        assert!(HistoryManager::update_telemetry_with_conn(&conn, 999, &telemetry).is_err());
+    }
+
+    #[test]
+    fn recent_telemetry_limits_rows_and_uses_wav_only_when_duration_is_missing() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "legacy", None);
+        insert_entry(&conn, 200, "older", None);
+        insert_entry(&conn, 300, "newest", None);
+        conn.execute(
+            "UPDATE transcription_history SET audio_duration_s = 90, asr_ms = 200,
+             chunks_predecoded_live = 8, chunks_total = 9,
+             linguist_stage = 'deterministic' WHERE id = 2",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE transcription_history SET asr_ms = 100, linguist_stage = 'future' WHERE id = 3",
+            [],
+        )
+        .unwrap();
+        let records = HistoryManager::recent_telemetry_with_conn(&conn, 1, |_| Some(20.0)).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].audio_duration_s, 20.0);
+        assert_eq!(records[0].real_time_factor, Some(200.0));
+        assert_eq!(
+            records[0].linguist_stage,
+            lowyap_ports::LinguistStageKind::Raw
+        );
+        let records = HistoryManager::recent_telemetry_with_conn(&conn, 100, |_| None).unwrap();
+        assert_eq!(records.len(), 1);
+        let summary = lowyap_ports::summarize_telemetry(&records);
+        assert_eq!(summary.polished_count, 1);
+        assert_eq!(summary.live_predecoded_ratio, Some(8.0 / 9.0));
+        assert!(
+            HistoryManager::recent_telemetry_with_conn(&conn, 0, |_| Some(20.0))
+                .unwrap()
+                .is_empty()
         );
     }
 }

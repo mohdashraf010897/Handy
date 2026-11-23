@@ -1,36 +1,114 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- lowyap macOS app icon. Apple HIG grid: 824px squircle plate at 100px inset, 185px corners. -->
+  <!-- lowyap macOS app icon — "Low-Frequency Terrace" (V2, locked permanent baseline).
+       Apple HIG grid: 824px sculpted anodized Machined Carbon keycap squircle at 100px inset,
+       185px corners, spherical recessed top dish, asymmetric Warm Stone vocal-cadence terrace
+       bars ("lowkey yap"), Signal Vermilion `_` cursor LED ("it types"), and tactile homing bar. -->
   <defs>
-    <linearGradient id="plate" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#24222E"/>
-      <stop offset="100%" stop-color="#121117"/>
+    <linearGradient id="capSkirt" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#27272B"/>
+      <stop offset="56%" stop-color="#18181B"/>
+      <stop offset="100%" stop-color="#0E0E10"/>
     </linearGradient>
-    <linearGradient id="rim" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16"/>
-      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.05"/>
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.02"/>
+    <linearGradient id="capFrontBevel" x1="512" y1="768" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#151518" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#070708" stop-opacity="0.78"/>
     </linearGradient>
-    <linearGradient id="bubbleFill" x1="32" y1="6" x2="32" y2="57" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#8B6EFF"/>
-      <stop offset="100%" stop-color="#7C5CFF"/>
+    <linearGradient id="outerRim" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F4F2EC" stop-opacity="0.30"/>
+      <stop offset="44%" stop-color="#B3B2AC" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#F4F2EC" stop-opacity="0.05"/>
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+    <linearGradient id="dishSurface" x1="512" y1="142" x2="512" y2="834" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#101012"/>
+      <stop offset="58%" stop-color="#141417"/>
+      <stop offset="100%" stop-color="#1C1C20"/>
+    </linearGradient>
+    <radialGradient id="dishAmbient" cx="70%" cy="72%" r="54%">
+      <stop offset="0%" stop-color="#FF6B3D" stop-opacity="0.18"/>
+      <stop offset="55%" stop-color="#C0320C" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#111113" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="dishRim" x1="512" y1="142" x2="512" y2="834" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#050506" stop-opacity="0.88"/>
+      <stop offset="56%" stop-color="#3A3935" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#F4F2EC" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="barPrimary" x1="512" y1="260" x2="512" y2="660" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FAF8F3"/>
+      <stop offset="68%" stop-color="#F4F2EC"/>
+      <stop offset="100%" stop-color="#DEDAD0"/>
+    </linearGradient>
+    <linearGradient id="barMuted" x1="512" y1="360" x2="512" y2="660" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C9C5BA"/>
+      <stop offset="100%" stop-color="#9E9A8F"/>
+    </linearGradient>
+    <linearGradient id="underscoreFill" x1="580" y1="665" x2="770" y2="730" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF8256"/>
+      <stop offset="52%" stop-color="#FF6B3D"/>
+      <stop offset="100%" stop-color="#C0320C"/>
+    </linearGradient>
+    <filter id="capShadow" x="-15%" y="-15%" width="130%" height="135%">
       <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
       <feOffset dy="10"/>
-      <feComponentTransfer><feFuncA type="linear" slope="0.28"/></feComponentTransfer>
+      <feComponentTransfer><feFuncA type="linear" slope="0.32"/></feComponentTransfer>
       <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <filter id="markDepth" x="-12%" y="-10%" width="124%" height="128%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="1.4"/>
-      <feOffset dy="1.2"/>
-      <feComponentTransfer><feFuncA type="linear" slope="0.34"/></feComponentTransfer>
+    <filter id="legendDepth" x="-40%" y="-35%" width="180%" height="180%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dy="6"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.42"/></feComponentTransfer>
       <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="underscoreGlow" x="-90%" y="-160%" width="280%" height="420%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 0.36 0 0 0  0 0 0.16 0 0  0 0 0 0.38 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
   </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#plate)" filter="url(#shadow)"/>
-  <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="url(#rim)" stroke-width="2"/>
-  <g transform="translate(176 176) scale(10.5)" filter="url(#markDepth)">
-    <path fill="url(#bubbleFill)" d="M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6Z"/>
-    <path fill="#FFFFFF" d="M23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z"/>
+
+  <!-- Outer sculpted mechanical keycap skirt -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#capSkirt)" filter="url(#capShadow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#capFrontBevel)"/>
+
+  <!-- Precision CNC chamfer lines connecting outer skirt to recessed top dish -->
+  <g stroke="#F4F2EC" stroke-opacity="0.06" stroke-width="3" stroke-linecap="round">
+    <line x1="156" y1="152" x2="204" y2="184"/>
+    <line x1="868" y1="152" x2="820" y2="184"/>
+    <line x1="156" y1="866" x2="208" y2="796"/>
+    <line x1="868" y1="866" x2="816" y2="796"/>
+  </g>
+
+  <!-- Outer anodized bevel catch-light -->
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="url(#outerRim)" stroke-width="3"/>
+
+  <!-- Tactile Signal Vermilion homing bar on the angled front keycap skirt -->
+  <rect x="438" y="868" width="148" height="11" rx="5.5" fill="#FF6B3D" fill-opacity="0.58"/>
+
+  <!-- Spherical recessed top-face keycap dish -->
+  <rect x="156" y="142" width="712" height="692" rx="144" fill="url(#dishSurface)"/>
+  <rect x="156" y="142" width="712" height="692" rx="144" fill="url(#dishAmbient)"/>
+  <rect x="157.5" y="143.5" width="709" height="689" rx="142.5" fill="none" stroke="url(#dishRim)" stroke-width="3"/>
+
+  <!-- Canonical 64-unit "Low-Frequency Terrace" (V2) legend centered in the top dish -->
+  <g transform="translate(130 112) scale(11.75)">
+    <g filter="url(#legendDepth)">
+      <rect x="12" y="25" width="5.8" height="20" rx="2.9" fill="url(#barMuted)"/>
+      <rect x="21" y="15" width="5.8" height="30" rx="2.9" fill="url(#barPrimary)"/>
+      <rect x="30" y="21" width="5.8" height="24" rx="2.9" fill="url(#barPrimary)"/>
+      <rect x="39" y="31.5" width="5.8" height="13.5" rx="2.9" fill="url(#barMuted)"/>
+    </g>
+    <rect
+      x="39"
+      y="47.5"
+      width="14"
+      height="4.8"
+      rx="2.4"
+      fill="url(#underscoreFill)"
+      filter="url(#underscoreGlow)"
+    />
   </g>
 </svg>
+

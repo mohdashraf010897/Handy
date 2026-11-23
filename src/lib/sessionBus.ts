@@ -9,6 +9,9 @@ export type { AudioCaptureMode, OutputRouteKind };
 /** Default undo window for a softly cancelled dictation take (`5_000` ms). */
 export const DEFAULT_SOFT_CANCEL_GRACE_MS = 5_000;
 
+/** Default grace window after call hangup before finalizing meeting notes (`8_000` ms). */
+export const DEFAULT_MEETING_AUTO_STOP_GRACE_MS = 8_000;
+
 /** Event name emitted whenever the backend `SessionBus` advances. */
 export const SESSION_BUS_EVENT = "session-bus-state";
 
@@ -68,6 +71,18 @@ export type MeetingPhase =
       capture_mode: AudioCaptureMode;
     }
   | {
+      phase: "soft_stopped";
+      meeting_id: string;
+      title: string;
+      started_at_ms: number;
+      stopped_at_ms: number;
+      expires_at_ms: number;
+      grace_ms: number;
+      accumulated_paused_ms: number;
+      app_name: string | null;
+      capture_mode: AudioCaptureMode;
+    }
+  | {
       phase: "summarizing";
       meeting_id: string;
       title: string;
@@ -109,6 +124,16 @@ export type OverlayProjection =
       app_name: string | null;
     }
   | {
+      mode: "meeting_soft_stopped";
+      meeting_id: string;
+      title: string;
+      elapsed_ms: number;
+      stopped_at_ms: number;
+      expires_at_ms: number;
+      grace_ms: number;
+      app_name: string | null;
+    }
+  | {
       mode: "meeting_summarizing";
       meeting_id: string;
       title: string;
@@ -127,6 +152,11 @@ export type OverlayProjection =
 export type MeetingActiveOverlay = Extract<
   OverlayProjection,
   { mode: "meeting_active" }
+>;
+
+export type MeetingSoftStoppedOverlay = Extract<
+  OverlayProjection,
+  { mode: "meeting_soft_stopped" }
 >;
 
 export type MeetingSummarizingOverlay = Extract<
@@ -228,6 +258,13 @@ export function computeMeetingPhaseElapsedMs(
           meeting.started_at_ms -
           meeting.accumulated_paused_ms,
       );
+    case "soft_stopped":
+      return Math.max(
+        0,
+        meeting.stopped_at_ms -
+          meeting.started_at_ms -
+          meeting.accumulated_paused_ms,
+      );
     case "idle":
     case "summarizing":
     default:
@@ -239,7 +276,11 @@ export function computeMeetingPhaseElapsedMs(
 export function projectMeetingOverlay(
   meeting: MeetingPhase,
   nowMs: number,
-): MeetingActiveOverlay | MeetingSummarizingOverlay | null {
+):
+  | MeetingActiveOverlay
+  | MeetingSoftStoppedOverlay
+  | MeetingSummarizingOverlay
+  | null {
   switch (meeting.phase) {
     case "recording":
       return {
@@ -263,6 +304,17 @@ export function projectMeetingOverlay(
         started_at_ms: meeting.started_at_ms,
         accumulated_paused_ms: meeting.accumulated_paused_ms,
         paused_at_ms: meeting.paused_at_ms,
+        app_name: meeting.app_name,
+      };
+    case "soft_stopped":
+      return {
+        mode: "meeting_soft_stopped",
+        meeting_id: meeting.meeting_id,
+        title: meeting.title,
+        elapsed_ms: computeMeetingPhaseElapsedMs(meeting, nowMs),
+        stopped_at_ms: meeting.stopped_at_ms,
+        expires_at_ms: meeting.expires_at_ms,
+        grace_ms: meeting.grace_ms,
         app_name: meeting.app_name,
       };
     case "summarizing":

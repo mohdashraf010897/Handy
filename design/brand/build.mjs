@@ -17,49 +17,95 @@ const trayDir = join(here, "tray");
 export const BRAND = JSON.parse(readFileSync(join(here, "brand.json"), "utf8"));
 export const COLORS = BRAND.colors;
 
-// 64-unit grid. One outline: rounded body whose bottom-left corner drops into a low tail.
-export const BUBBLE =
-  "M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6Z";
-// Inner marks, also on the 64 grid (cut out of the bubble in mono variants).
-export const CURSOR = "M23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z";
+// 64-unit grid — "Low-Frequency Terrace" (V2, locked permanent baseline):
+// Borderless SF-Symbol-weight menu bar cadence terrace + terminal `_` on macOS/Windows,
+// and Machined Carbon keycap housing on colored Linux panels (`handy*.png`).
+export const KEYCAP =
+  "M18 5H46A13 13 0 0 1 59 18V46A13 13 0 0 1 46 59H18A13 13 0 0 1 5 46V18A13 13 0 0 1 18 5Z";
+export const KEYCAP_SKIRT_GROOVE =
+  "M25 52.25H39A1.75 1.75 0 0 1 39 55.75H25A1.75 1.75 0 0 1 25 52.25Z";
+
+const pill = (x, y, w, h) => {
+  const r = Math.min(w, h) / 2;
+  if (w <= h) {
+    const cx = x + r;
+    return `M${x} ${y + r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}A${r} ${r} 0 0 1 ${x} ${y + h - r}Z`;
+  }
+  return `M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+};
+
+// Direct 18pt-optimized Low-Frequency Terrace silhouette (3 asymmetric vocal bars + `_` cursor).
+export const TERRACE_BARS = [
+  pill(8, 26, 7.4, 22),
+  pill(20, 13, 7.4, 35),
+  pill(32, 20, 7.4, 28),
+].join("");
+export const TERRACE_UNDERSCORE = pill(43.5, 46, 15.5, 7.2);
+
+// Inset variant for colored Linux keycap plate (`handy*.png`, inside `5..59` squircle).
+export const PLATE_BARS = [
+  pill(13.5, 25.5, 5.8, 17.5),
+  pill(22.5, 15.5, 5.8, 27.5),
+  pill(31.5, 21.5, 5.8, 21.5),
+].join("");
+export const PLATE_UNDERSCORE = pill(40.5, 42, 11.5, 5.4);
+
 const circle = (cx, cy, r) =>
   `M${cx - r} ${cy}A${r} ${r} 0 1 0 ${cx + r} ${cy}A${r} ${r} 0 1 0 ${cx - r} ${cy}Z`;
-export const DOTS = [19.5, 32, 44.5].map((x) => circle(x, 26, 4.75)).join("");
-// Generous 5.75-unit cutout moat around the 7.5-unit live dot so 18pt macOS menu bars stay crisp.
-export const REC_RING = circle(32, 26, 13.25);
-export const REC_DOT = circle(32, 26, 7.5);
-// Warning badge (top-right), with a gap cut from the bubble.
-const BADGE = { cx: 51, cy: 13, r: 11, gap: 3.5 };
-const BANG = "M49 6.5H53L52.4 15.5H49.6Z" + circle(51, 19, 2.1);
+export const DOTS = [13, 26, 39].map((x) => circle(x, 31, 4.6)).join("");
+export const PLATE_DOTS = [19.5, 32, 44.5].map((x) => circle(x, 28, 4.5)).join("");
+export const REC_DOT = circle(51.25, 23, 6.5);
+export const PLATE_REC_DOT = circle(32, 28, 7.25);
+// Warning badge (top-right), with a clean alpha moat cut from underlying strokes.
+const BADGE = { cx: 51, cy: 14, r: 10.5, gap: 3.25 };
+const BANG = "M49 7.75H53L52.4 16.5H49.6Z" + circle(51, 19.9, 2.05);
 
 const svg = (body, size = 64) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64">${body}</svg>\n`;
 
 /**
- * A tray glyph. `fg` paints the bubble; marks are cut out (template-safe alpha).
- * `accent` (optional) paints the live dot / badge in color (used on Windows, Linux,
- * and non-template macOS active/warning states).
+ * Generates a 64x64 tray glyph SVG.
+ * - Default (`!markFill`): pure SF-Symbol-style borderless Low-Frequency Terrace glyph
+ *   so 18pt macOS Menu Bar icons stay crisp, airy, and non-messenger alongside Wi-Fi/Control Center.
+ * - Colored Linux panel set (`markFill` set): Machined Carbon keycap squircle plate + Warm Stone/Vermilion marks.
  */
 function trayGlyph({ state, fg, accent, warning, badge, markFill }) {
   const parts = [];
-  const maskId = "m";
-  let mask = `<rect width="64" height="64" fill="#fff"/>`;
-  if (warning)
-    mask += `<circle cx="${BADGE.cx}" cy="${BADGE.cy}" r="${BADGE.r + BADGE.gap}" fill="#000"/>`;
-  let marks = "";
-  if (state === "idle") marks = CURSOR;
-  if (state === "transcribing") marks = DOTS;
-  if (state === "recording") marks = REC_RING;
-  if (!markFill) mask += `<path d="${marks}" fill="#000"/>`;
-  parts.push(`<mask id="${maskId}">${mask}</mask>`);
-  parts.push(`<path d="${BUBBLE}" fill="${fg}" mask="url(#${maskId})"/>`);
   if (markFill) {
-    // Colored (Linux) variant: draw marks instead of cutting them out.
-    if (state === "recording")
-      parts.push(`<path d="${REC_DOT}" fill="${accent}"/>`);
-    else parts.push(`<path d="${marks}" fill="${markFill}"/>`);
-  } else if (state === "recording") {
-    parts.push(`<path d="${REC_DOT}" fill="${accent || fg}"/>`);
+    const maskId = "m";
+    let mask = `<rect width="64" height="64" fill="#fff"/><path d="${KEYCAP_SKIRT_GROOVE}" fill="#000"/>`;
+    if (warning) {
+      mask += `<circle cx="${BADGE.cx}" cy="${BADGE.cy}" r="${BADGE.r + BADGE.gap}" fill="#000"/>`;
+    }
+    parts.push(`<mask id="${maskId}">${mask}</mask>`);
+    parts.push(`<path d="${KEYCAP}" fill="${fg}" mask="url(#${maskId})"/>`);
+    if (state === "recording") {
+      parts.push(`<path d="${PLATE_REC_DOT}" fill="${accent}"/>`);
+    } else if (state === "idle") {
+      parts.push(`<path d="${PLATE_BARS}" fill="${markFill}"/>`);
+      parts.push(`<path d="${PLATE_UNDERSCORE}" fill="${accent || markFill}"/>`);
+    } else if (state === "transcribing") {
+      parts.push(`<path d="${PLATE_DOTS}" fill="${markFill}"/>`);
+    }
+  } else {
+    let fgGroup = "";
+    if (state === "idle") {
+      fgGroup = `<path d="${TERRACE_BARS}${TERRACE_UNDERSCORE}" fill="${fg}"/>`;
+    } else if (state === "recording") {
+      fgGroup =
+        `<path d="${TERRACE_BARS}" fill="${fg}"/>` +
+        `<path d="${REC_DOT}${TERRACE_UNDERSCORE}" fill="${accent || fg}"/>`;
+    } else if (state === "transcribing") {
+      fgGroup = `<path d="${DOTS}${TERRACE_UNDERSCORE}" fill="${fg}"/>`;
+    }
+    if (warning) {
+      parts.push(
+        `<mask id="m"><rect width="64" height="64" fill="#fff"/><circle cx="${BADGE.cx}" cy="${BADGE.cy}" r="${BADGE.r + BADGE.gap}" fill="#000"/></mask>`,
+        `<g mask="url(#m)">${fgGroup}</g>`,
+      );
+    } else {
+      parts.push(fgGroup);
+    }
   }
   if (warning) {
     parts.push(
@@ -70,7 +116,7 @@ function trayGlyph({ state, fg, accent, warning, badge, markFill }) {
   return svg(parts.join(""));
 }
 
-const { violet, ink, paper, live, liveDeep, warn, warnDeep } = COLORS;
+const { carbon, vermilion, ink, paper, live, liveDeep, warn, warnDeep } = COLORS;
 // Dark taskbar/menu bar -> light glyph (tray_*.png); light bar -> dark glyph (*_dark.png).
 const TRAY = {
   "tray_idle.png": { state: "idle", fg: paper },
@@ -91,19 +137,20 @@ const TRAY = {
     warning: true,
     badge: warnDeep,
   },
-  // Colored theme (Linux panels of any color): violet bubble with white marks.
-  "handy.png": { state: "idle", fg: violet, markFill: paper },
+  // Colored theme (Linux panels of any color): Machined Carbon keycap with Warm Stone terrace bars + Signal Vermilion `_`.
+  "handy.png": { state: "idle", fg: carbon, markFill: paper, accent: vermilion },
   "recording.png": {
     state: "recording",
-    fg: violet,
+    fg: carbon,
     markFill: paper,
     accent: live,
   },
-  "transcribing.png": { state: "transcribing", fg: violet, markFill: paper },
+  "transcribing.png": { state: "transcribing", fg: carbon, markFill: paper },
   "handy_warning.png": {
     state: "idle",
-    fg: violet,
+    fg: carbon,
     markFill: paper,
+    accent: vermilion,
     warning: true,
     badge: warn,
   },
@@ -120,7 +167,7 @@ function verifyParity() {
     ["src-tauri/tauri.conf.json", BRAND.identifier],
     ["index.html", `<title>${BRAND.name}</title>`],
     ["site/index.html", BRAND.tagline],
-    ["site/index.html", COLORS.violetUi.toLowerCase()],
+    ["site/index.html", COLORS.vermilionUi.toLowerCase()],
   ];
   for (const [rel, needle] of checks) {
     const text = readFileSync(join(repo, rel), "utf8");

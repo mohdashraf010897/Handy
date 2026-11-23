@@ -16,12 +16,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use log::{error, info};
+use log::{error, info, warn};
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, AnyThread, DefinedClass};
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 use objc2_foundation::{NSArray, NSInteger, NSObject, NSString};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use super::{evaluate, send_chord, TxState, WaitDecision};
@@ -193,6 +193,11 @@ fn flush_pending(app_handle: &AppHandle, enigo: &mut enigo::Enigo) {
     }
 }
 
+/// If `Cmd+V` was sent and zero text-cursor reads happen within 900ms, no editable
+/// input consumed the paste. Instead of waiting 8s and erasing the transcript,
+/// keep the transcript on `⌘V` and notify the user immediately.
+const UNREAD_PASTE_RESCUE_TIMEOUT: Duration = Duration::from_millis(900);
+
 fn spawn_waiter(pending: Arc<Mutex<MacPending>>, app_handle: AppHandle) {
     thread::spawn(move || {
         let outcome = loop {
@@ -209,12 +214,20 @@ fn spawn_waiter(pending: Arc<Mutex<MacPending>>, app_handle: AppHandle) {
                 let result = match p.state.lock() {
                     Ok(st) => {
                         let now = Instant::now();
-                        let snapshot = (
-                            st.any_receipt_after_injection(),
-                            st.ownership_lost,
-                            st.injection_failed,
-                        );
-                        (evaluate(&st, now), snapshot)
+                        let receipt_seen = st.any_receipt_after_injection();
+                        let unread_timed_out = !receipt_seen
+                            && !st.ownership_lost
+                            && !st.injection_failed
+                            && st.injected_at.is_some_and(|t| {
+                                now.saturating_duration_since(t) >= UNREAD_PASTE_RESCUE_TIMEOUT
+                            });
+                        let snapshot = (receipt_seen, st.ownership_lost, st.injection_failed);
+                        let decision = if unread_timed_out {
+                            WaitDecision::Finish
+                        } else {
+                            evaluate(&st, now)
+                        };
+                        (decision, snapshot)
                     }
                     Err(_) => return,
                 };
@@ -226,14 +239,23 @@ fn spawn_waiter(pending: Arc<Mutex<MacPending>>, app_handle: AppHandle) {
         };
 
         let (receipt_seen, ownership_lost, injection_failed) = outcome;
+        let mut notify_copied_fallback = false;
         if ownership_lost {
             info!("[reliable-paste] settling: clipboard ownership lost");
         } else if receipt_seen {
             info!("[reliable-paste] settling: reads went quiet");
         } else if injection_failed {
-            info!("[reliable-paste] settling: chord injection failed, restoring quickly");
+            warn!("[reliable-paste] settling: chord injection failed, rescuing transcript to clipboard");
+            if let Ok(mut p) = pending.lock() {
+                p.preserve_transcript = true;
+            }
+            notify_copied_fallback = true;
         } else {
-            info!("[reliable-paste] settling: no read within timeout, restoring anyway");
+            warn!("[reliable-paste] settling: no focused text input read Cmd+V within 900ms; keeping transcript on clipboard");
+            if let Ok(mut p) = pending.lock() {
+                p.preserve_transcript = true;
+            }
+            notify_copied_fallback = true;
         }
 
         let pending_for_finish = pending.clone();
@@ -248,6 +270,13 @@ fn spawn_waiter(pending: Arc<Mutex<MacPending>>, app_handle: AppHandle) {
                 if is_us {
                     *slot = None;
                 }
+            }
+            if notify_copied_fallback {
+                crate::overlay::show_overlay_notice(&app_for_finish, "copied_to_clipboard");
+                let _ = app_for_finish.emit(
+                    "paste-copied-fallback",
+                    crate::flow::paste_guard::latest_dictation_id(),
+                );
             }
         });
     });

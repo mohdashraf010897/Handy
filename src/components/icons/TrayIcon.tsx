@@ -1,13 +1,9 @@
-/** The tray icon (design/brand masters); uses currentColor like a macOS template image. */
+/**
+ * lowyap menu-bar tray icon: "Low-Frequency Terrace" (V2, locked permanent baseline).
+ * Uses `currentColor` like a macOS AppKit template mask (`as_template = true` in idle/transcribing),
+ * with Signal Vermilion live LED + underscore accent during active recording.
+ */
 type TrayIconState = "idle" | "recording" | "transcribing";
-
-const PATHS: Record<TrayIconState, string> = {
-  idle: "M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6ZM23 30H41A4 4 0 0 1 41 38H23A4 4 0 0 1 23 30Z",
-  recording:
-    "M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6ZM18.75 26A13.25 13.25 0 1 0 45.25 26A13.25 13.25 0 1 0 18.75 26Z",
-  transcribing:
-    "M20 6H44A15 15 0 0 1 59 21V31A15 15 0 0 1 44 46H25.5L11.6 56.4Q7.6 59.4 8 54.4L8.6 46.6A15 15 0 0 1 5 37V21A15 15 0 0 1 20 6ZM14.75 26A4.75 4.75 0 1 0 24.25 26A4.75 4.75 0 1 0 14.75 26ZM27.25 26A4.75 4.75 0 1 0 36.75 26A4.75 4.75 0 1 0 27.25 26ZM39.75 26A4.75 4.75 0 1 0 49.25 26A4.75 4.75 0 1 0 39.75 26Z",
-};
 
 const TrayIcon = ({
   state,
@@ -20,11 +16,41 @@ const TrayIcon = ({
     width={size}
     height={size}
     viewBox="0 0 64 64"
-    className="fill-current"
+    fill="none"
     xmlns="http://www.w3.org/2000/svg"
   >
-    <path fillRule="evenodd" d={PATHS[state]} />
-    {state === "recording" && <circle cx="32" cy="26" r="7.5" fill="#FF3B4E" />}
+    {state === "idle" && (
+      <>
+        <rect x="8" y="26" width="7.4" height="22" rx="3.7" fill="currentColor" />
+        <rect x="20" y="13" width="7.4" height="35" rx="3.7" fill="currentColor" />
+        <rect x="32" y="20" width="7.4" height="28" rx="3.7" fill="currentColor" />
+        <rect x="43.5" y="46" width="15.5" height="7.2" rx="3.6" fill="currentColor" />
+      </>
+    )}
+    {state === "recording" && (
+      <>
+        <rect x="8" y="26" width="7.4" height="22" rx="3.7" fill="currentColor" />
+        <rect x="20" y="13" width="7.4" height="35" rx="3.7" fill="currentColor" />
+        <rect x="32" y="20" width="7.4" height="28" rx="3.7" fill="currentColor" />
+        <circle cx="51.25" cy="23" r="6.5" fill="var(--color-logo-primary)" />
+        <rect
+          x="43.5"
+          y="46"
+          width="15.5"
+          height="7.2"
+          rx="3.6"
+          fill="var(--color-logo-primary)"
+        />
+      </>
+    )}
+    {state === "transcribing" && (
+      <>
+        <circle cx="13" cy="31" r="4.6" fill="currentColor" />
+        <circle cx="26" cy="31" r="4.6" fill="currentColor" />
+        <circle cx="39" cy="31" r="4.6" fill="currentColor" />
+        <rect x="43.5" y="46" width="15.5" height="7.2" rx="3.6" fill="currentColor" />
+      </>
+    )}
   </svg>
 );
 

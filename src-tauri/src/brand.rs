@@ -38,12 +38,12 @@ mod tests {
 
         let site = include_str!("../../site/index.html");
         assert!(site.contains(TAGLINE), "site/index.html missing tagline");
-        let violet_ui = brand["colors"]["violetUi"]
+        let vermilion_ui = brand["colors"]["vermilionUi"]
             .as_str()
             .unwrap()
             .to_ascii_lowercase();
         assert!(
-            site.contains(&violet_ui),
+            site.contains(&vermilion_ui),
             "site/index.html primary palette drifted from brand.json"
         );
     }

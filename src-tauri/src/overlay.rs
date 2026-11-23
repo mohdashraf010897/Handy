@@ -59,8 +59,8 @@ fn overlay_dimensions(state: &str) -> (f64, f64) {
     match state {
         "streaming" => (OVERLAY_STREAM_WIDTH, OVERLAY_STREAM_HEIGHT),
         "notice" | "call_detected" => (OVERLAY_STREAM_WIDTH, OVERLAY_HEIGHT),
-        "meeting_active" | "meeting_summarizing" => (400.0, 50.0),
-        "soft_cancelled" => (340.0, 50.0),
+        "meeting_active" | "meeting_summarizing" => (276.0, 44.0),
+        "soft_cancelled" | "meeting_soft_stopped" => (340.0, 50.0),
         _ => (OVERLAY_WIDTH, OVERLAY_HEIGHT),
     }
 }
@@ -670,6 +670,14 @@ pub(crate) fn apply_session_overlay(app: &AppHandle) {
         OverlayProjection::MeetingActive { meeting_id, .. } => {
             Some(("meeting_active", Some(meeting_id)))
         }
+        OverlayProjection::MeetingSoftStopped {
+            meeting_id,
+            expires_at_ms,
+            ..
+        } => Some((
+            "meeting_soft_stopped",
+            Some(format!("{meeting_id}:{expires_at_ms}")),
+        )),
         OverlayProjection::MeetingSummarizing { meeting_id, .. } => {
             Some(("meeting_summarizing", Some(meeting_id)))
         }
@@ -723,12 +731,18 @@ pub(crate) fn restore_recording_after_undo(app: &AppHandle, take_id: u64) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         let snapshot = crate::session_bus::bus().snapshot();
+        let app_settings = settings::get_settings(&handle);
         if matches!(
             snapshot.dictation,
             lowyap_ports::DictationPhase::Recording { take_id: current, locked: true, paused: false, .. } if current == take_id
-        ) && settings::get_settings(&handle).overlay_style != OverlayStyle::None
+        ) && app_settings.overlay_style != OverlayStyle::None
         {
-            show_overlay_state_on_main(&handle, "recording");
+            let target_state = if app_settings.overlay_style == OverlayStyle::Live {
+                "streaming"
+            } else {
+                "recording"
+            };
+            show_overlay_state_on_main(&handle, target_state);
             let _ = handle.emit_to("recording_overlay", "recording-ready", ());
         }
     });

@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Calendar,
   Headphones,
   Mic,
   Pause,
@@ -16,11 +17,16 @@ import { Input } from "../ui/Input";
 import { Switch } from "../ui/Switch";
 import { Textarea } from "../ui/Textarea";
 import {
+  type ActiveCalendarMeeting,
+  type CalendarAccessStatus,
   MEETING_TEMPLATES,
   type MeetingLiveState,
   type MeetingTemplate,
+  connect_calendar_access,
   formatDurationMmSs,
   formatSegmentSpeakerBadge,
+  get_active_calendar_meeting,
+  get_calendar_access_status,
   isolateBidi,
   update_live_rough_notes,
 } from "./api";
@@ -63,6 +69,11 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
   const [displayElapsedMs, setDisplayElapsedMs] = useState(
     liveState.elapsed_ms,
   );
+  const [calendarStatus, setCalendarStatus] =
+    useState<CalendarAccessStatus>("unsupported");
+  const [activeCalendarEvent, setActiveCalendarEvent] =
+    useState<ActiveCalendarMeeting | null>(null);
+  const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const latestRoughNotesRef = useRef(liveState.rough_notes);
   const dirtyRoughNotesRef = useRef(false);
@@ -75,6 +86,43 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
     latestRoughNotesRef.current = liveState.rough_notes;
     dirtyRoughNotesRef.current = false;
   }, [liveState.active_meeting_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshCalendar = async () => {
+      const status = await get_calendar_access_status();
+      if (cancelled) return;
+      setCalendarStatus(status);
+      if (status === "authorized") {
+        const event = await get_active_calendar_meeting();
+        if (!cancelled) setActiveCalendarEvent(event);
+      } else {
+        setActiveCalendarEvent(null);
+      }
+    };
+    void refreshCalendar();
+    const onFocus = () => void refreshCalendar();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [liveState.status]);
+
+  const handleConnectCalendar = async () => {
+    setIsConnectingCalendar(true);
+    try {
+      const next = await connect_calendar_access();
+      setCalendarStatus(next);
+      if (next === "authorized") {
+        setActiveCalendarEvent(await get_active_calendar_meeting());
+      }
+    } catch {
+      // Ignore permission rejection/errors quietly
+    } finally {
+      setIsConnectingCalendar(false);
+    }
+  };
 
   // Smooth 1s local timer while recording, anchored to backend elapsed_ms.
   useEffect(() => {
@@ -179,7 +227,7 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
     >
       {/* Subtle Bot-Free Privacy + Consent + Auto-Detect Bar (D-19) */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-wash/60">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex flex-wrap items-center gap-2.5 min-w-0">
           <ShieldCheck
             className="w-4 h-4 shrink-0 text-moss"
             aria-hidden="true"
@@ -187,6 +235,32 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
           <p className="text-xs text-ink-2">
             {t("meetings.privacyConsentBar")}
           </p>
+          {calendarStatus === "not_determined" && (
+            <button
+              type="button"
+              disabled={isConnectingCalendar || isBusy}
+              onClick={() => void handleConnectCalendar()}
+              className="inline-flex items-center gap-1 rounded-full border border-line bg-background px-2.5 py-0.5 text-[11px] font-medium text-text hover:bg-wash transition-colors"
+            >
+              <Calendar className="w-3 h-3 text-ink-2" aria-hidden="true" />
+              {t("meetings.calendar.connect", {
+                defaultValue: "Connect Apple Calendar",
+              })}
+            </button>
+          )}
+          {calendarStatus === "authorized" && activeCalendarEvent && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-line bg-background px-2.5 py-0.5 text-[11px] font-medium text-ink-2">
+              <Calendar className="w-3 h-3 text-moss" aria-hidden="true" />
+              {t("meetings.calendar.matchedEvent", {
+                title: isolateBidi(activeCalendarEvent.title),
+                count: activeCalendarEvent.attendees.length,
+                defaultValue:
+                  activeCalendarEvent.attendees.length > 0
+                    ? "Calendar: {{title}} ({{count}})"
+                    : "Calendar: {{title}}",
+              })}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs font-medium text-text">
@@ -266,7 +340,14 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
                 value={draftTitle}
                 disabled={isBusy}
                 dir="auto"
-                placeholder={t("meetings.idle.titlePlaceholder")}
+                placeholder={
+                  activeCalendarEvent?.title
+                    ? t("meetings.idle.calendarTitlePlaceholder", {
+                        title: activeCalendarEvent.title,
+                        defaultValue: `Auto-title from Calendar: ${activeCalendarEvent.title}`,
+                      })
+                    : t("meetings.idle.titlePlaceholder")
+                }
                 aria-label={t("meetings.idle.titleAriaLabel")}
                 onChange={(e) => setDraftTitle(e.target.value)}
                 onKeyDown={(e) => {

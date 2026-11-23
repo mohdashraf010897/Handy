@@ -1,4 +1,8 @@
 use crate::managers::audio::AudioRecordingManager;
+use crate::meeting::macos_bridge::{
+    active_calendar_meeting, calendar_access_status, request_calendar_access,
+    ActiveCalendarMeeting, CalendarAccessStatus,
+};
 use crate::meeting::session::MeetingSessionManager;
 use crate::meeting::types::{
     MeetingDetail, MeetingLiveState, MeetingSummaryRecord, MeetingTemplate,
@@ -148,4 +152,24 @@ pub fn copy_meeting_markdown(app: AppHandle, meeting_id: String) -> Result<bool,
 #[specta::specta]
 pub fn delete_meeting(app: AppHandle, meeting_id: String) -> Result<bool, String> {
     meeting_manager(&app)?.delete_meeting(&meeting_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_calendar_access_status() -> CalendarAccessStatus {
+    calendar_access_status()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn connect_calendar_access() -> Result<CalendarAccessStatus, String> {
+    tokio::task::spawn_blocking(request_calendar_access)
+        .await
+        .map_err(|err| format!("Failed to request calendar access: {err}"))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_active_calendar_meeting() -> Option<ActiveCalendarMeeting> {
+    active_calendar_meeting()
 }

@@ -59,11 +59,13 @@ impl<'a> LiveSession<'a> {
                 LiveDecoder::Stream(stream, Box::new(setup))
             }
             LiveDecode::Chunked => {
+                let cancel = tm.engine.cancel_mark();
+                tm.stream_active.store(true, Ordering::Release);
                 info!("Live long-form chunking started (model '{}')", model_id);
                 let backend = settings.vad_backend;
-                LiveDecoder::Chunked(Box::new(ChunkedDecode::new(
+                LiveDecoder::Chunked(Box::new(ChunkedDecode::new_live(
                     tm,
-                    tm.engine.cancel_mark(),
+                    cancel,
                     ChunkSetup::Pending(Box::new(PendingSetup {
                         plan,
                         info: info.clone(),
@@ -115,9 +117,16 @@ fn finish_chunks(
         );
         return Ok(None);
     }
-    let while_recording = chunks.decoded();
+    let while_recording = crate::flow::timing::active_asr_released_at()
+        .map(|released_at| chunks.decoded_before(released_at))
+        .unwrap_or_else(|| chunks.decoded());
     match chunks.finish() {
         Ok((transcripts, setup)) => {
+            super::record_last_decode_chunk_count(transcripts.len() as u32);
+            crate::flow::timing::record_chunk_stats(
+                while_recording as u32,
+                transcripts.len() as u32,
+            );
             if while_recording > 0 {
                 info!(
                     "{} of {} chunks were decoded while recording",
@@ -235,6 +244,7 @@ impl<'a> StreamSession<'a> {
                     info!("Live transcription produced no text; retrying in batch");
                     Ok(None)
                 } else {
+                    crate::flow::timing::record_chunk_stats(0, 1);
                     Ok(Some((finalized.text.full, finalized.language)))
                 }
             }

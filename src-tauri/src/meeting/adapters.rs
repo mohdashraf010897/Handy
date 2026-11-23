@@ -401,7 +401,10 @@ impl CompletionBackend for AppleIntelligenceBackend {
             user_prompt,
             effective_tokens,
         )
-        .map_err(|err| format!("Apple Intelligence failed: {err}"))?;
+        .map_err(|err| {
+            warn!("Apple Intelligence meeting completion failed: {err}");
+            format!("Apple Intelligence failed: {err}")
+        })?;
 
         let trimmed = output.trim();
         if trimmed.is_empty() {
@@ -447,6 +450,9 @@ pub fn build_production_completion_backends(
         }
     }
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let mut apple_added = false;
+
     if let Some(app_handle) = app {
         let settings = get_settings(app_handle);
         if settings.post_process_enabled {
@@ -462,6 +468,7 @@ pub fn build_production_completion_backends(
                     {
                         let token_limit = configured_model.trim().parse::<i32>().unwrap_or(3072);
                         backends.push(Box::new(AppleIntelligenceBackend::new(token_limit)));
+                        apple_added = true;
                     }
                 } else if !provider.base_url.trim().is_empty() {
                     match validate_meeting_endpoint_url(&provider.base_url, cloud_opt_in) {
@@ -500,13 +507,33 @@ pub fn build_production_completion_backends(
         }
     }
 
+    // Always enable on-device Apple Intelligence as a zero-download, zero-egress
+    // local meeting summarizer/titler on supported Macs even when live dictation
+    // post-processing is toggled off for speed.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if !apple_added
+        && app.is_some()
+        && crate::apple_intelligence::check_apple_intelligence_availability()
+    {
+        backends.push(Box::new(AppleIntelligenceBackend::new(3072)));
+    }
+
     backends
 }
 
 /// Constructs the production map-reduce meeting note summarizer with budgeted
 /// context management and automatic local deterministic fallback.
 pub fn build_production_note_summarizer(app: Option<&AppHandle>) -> HybridMapReduceSummarizer {
-    HybridMapReduceSummarizer::with_default_budget(build_production_completion_backends(app))
+    let backends = build_production_completion_backends(app);
+    let min_prompt_chars = backends
+        .iter()
+        .map(|b| b.max_prompt_chars())
+        .min()
+        .unwrap_or(14_000);
+    // Reserve headroom for prompt framing + speaker prefixes so chunks never trip
+    // `prompt_chars > backend.max_prompt_chars()` (e.g. Apple Intelligence's 9,000-char limit).
+    let max_input_chars = min_prompt_chars.saturating_sub(1_600).clamp(2_400, 12_000);
+    HybridMapReduceSummarizer::new(backends, max_input_chars)
 }
 
 impl EchoCanceller for SpeakerEchoGuardAdapter {
