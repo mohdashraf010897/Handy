@@ -70,11 +70,21 @@ pub fn with_tone<'a>(app: &AppHandle, settings: &'a AppSettings) -> Cow<'a, AppS
     prompt_settings(settings, tone, script_instruction)
 }
 
+/// Resolves the active `LinguistMode` from the user's selected post-processing preset.
+pub fn linguist_mode_for_settings(settings: &AppSettings) -> lowyap_ports::LinguistMode {
+    match settings.active_post_process_prompt().map(|p| p.id.as_str()) {
+        None | Some(lowyap_flow::BUILTIN_POLISH_PROMPT_ID) => lowyap_ports::LinguistMode::Polish,
+        Some(lowyap_flow::BUILTIN_PROMPT_ENGINEER_ID) => lowyap_ports::LinguistMode::PromptEngineer,
+        Some(_) => lowyap_ports::LinguistMode::Custom,
+    }
+}
+
 /// Builds the Stage-B `AppSettings` for plug-and-play Linguist rewriting:
-/// - When the user has the built-in default prompt (`default_improve_transcriptions`)
-///   selected, replaces its template with `lowyap_flow::compose_linguist_prompt_template(req)`
-///   so any local or cloud provider gets self-repair, preposition, paragraphing,
-///   lexicon, script-lock, and cursor-continuity instructions.
+/// - When the user has a built-in preset (`default_improve_transcriptions` or
+///   `builtin_prompt_engineer`) selected, replaces its template with
+///   `lowyap_flow::compose_linguist_prompt_template(req)` so any local or cloud
+///   provider gets mode-appropriate instructions, lexicon, script-lock, and
+///   cursor-continuity context.
 /// - When the user intentionally selected a custom prompt, preserves their prompt
 ///   and appends tone + script governance.
 pub fn prepare_linguist_settings<'a>(
@@ -85,7 +95,10 @@ pub fn prepare_linguist_settings<'a>(
     let Some(active_id) = settings.active_post_process_prompt().map(|p| p.id.clone()) else {
         return Cow::Borrowed(settings);
     };
-    if active_id == "default_improve_transcriptions" {
+    if matches!(
+        active_id.as_str(),
+        lowyap_flow::BUILTIN_POLISH_PROMPT_ID | lowyap_flow::BUILTIN_PROMPT_ENGINEER_ID
+    ) {
         let Some(index) = settings
             .post_process_prompts
             .iter()

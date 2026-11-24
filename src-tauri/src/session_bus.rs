@@ -37,6 +37,7 @@ impl SessionEventSink for TauriSessionEventSink {
             if next_snapshot.seq > published_seq.fetch_max(next_snapshot.seq, Ordering::AcqRel) {
                 let _ = handle.emit("session-bus-state", &next_snapshot);
                 crate::overlay::apply_session_overlay(&handle);
+                crate::edge_dock::sync_edge_dock_visibility(&handle);
             }
         });
     }

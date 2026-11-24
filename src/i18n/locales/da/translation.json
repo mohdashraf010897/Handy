@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Genvej til efterbehandling",
             "description": "Valgfrit: En dedikeret genvej, der altid anvender AI-efterbehandling på din transskription."
+          },
+          "transform": {
+            "name": "Genvej til transformering",
+            "description": "Omskriv markeret tekst direkte (eller transformér din seneste diktering) med den aktive forudindstilling."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Opkald registreret"
+      },
+      "edgeDock": {
+        "title": "Kantdok",
+        "description": "Fastgør en diskret genvejsfane ved venstre, nederste eller højre skærmkant. Hold musen over for Dikter, Møde og Transformer, eller træk til en anden kant.",
+        "positions": {
+          "left": "Venstre kant",
+          "bottom": "Nederste kant",
+          "right": "Højre kant",
+          "off": "Skjult"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Åbn mødenoter",
     "minimizeMeetingPill": "Minimer til menulinjen",
     "meetingStopped": "Notattager stoppet",
-    "dismissMeetingStopped": "Gem og luk"
+    "dismissMeetingStopped": "Gem og luk",
+    "transform": "Transformér",
+    "transformMenuAria": "Forudindstillinger for transformering",
+    "transformAutoApply": "Omskriv diktering automatisk",
+    "transformPresetPolish": "Finpuds",
+    "transformPresetPromptEngineer": "Prompt-ingeniør",
+    "transformConfigure": "Konfigurer transformeringer…",
+    "noticeTransformedCopied": "Transformeret — tryk ⌘V for at indsætte",
+    "noticeTransformEmpty": "Marker tekst eller diktér først"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} blokerer muligvis 1 genvej",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Aktiv forudindstilling til transformering",
+      "transformPresetsHint": "Bruges automatisk efter diktering når AI-omskrivning er slået til, eller når som helst på markeret tekst via genvejen eller optagekapslen."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Fejlfinding"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Åbn lowyap-hurtigvalg",
+    "dragHint": "Træk til venstre, nederste eller højre kant",
+    "noBotBadge": "Uden bot",
+    "actions": {
+      "dictate": "Dikter",
+      "meeting": "Mødenoter",
+      "transform": "Transformer"
+    },
+    "runNow": "Transformér nu",
+    "snoozeOneHour": "Udsæt i 1 time",
+    "hideDock": "Skjul kantdok"
   }
 }

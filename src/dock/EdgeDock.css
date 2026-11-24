@@ -1,0 +1,735 @@
+@import "../styles/theme.css";
+
+:root {
+  --dock-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hanken Grotesk Variable",
+    sans-serif;
+  --dock-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", "Azeret Mono Variable", Menlo,
+    monospace;
+  /* Native macOS HUD Vibrancy (NSVisualEffectMaterialHUDWindow) */
+  --dock-glass: rgba(16, 16, 20, 0.88);
+  --dock-glass-hover: rgba(30, 30, 37, 0.94);
+  --dock-glass-active: rgba(42, 42, 52, 0.96);
+  --dock-popover: rgba(22, 22, 27, 0.93);
+  --dock-rim: rgba(255, 255, 255, 0.14);
+  --dock-rim-hover: rgba(255, 255, 255, 0.28);
+  --dock-ink: rgba(255, 255, 255, 0.95);
+  --dock-ink-2: rgba(235, 235, 245, 0.68);
+  --dock-ink-3: rgba(235, 235, 245, 0.44);
+  --dock-kbd-bg: rgba(255, 255, 255, 0.1);
+  --dock-accent: #ff5a4e;
+  --dock-blue: #0a84ff;
+  --dock-hairline: rgba(20, 20, 24, 0.78);
+  --dock-hairline-hover: rgba(14, 14, 18, 0.94);
+  --dock-hairline-rim: rgba(255, 255, 255, 0.28);
+  --dock-pill-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.34),
+    0 1.5px 4px rgba(0, 0, 0, 0.24),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.2);
+  --dock-popover-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.44),
+    0 2px 8px rgba(0, 0, 0, 0.28),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.16);
+  --dock-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --dock-hairline: rgba(232, 232, 238, 0.48);
+    --dock-hairline-hover: rgba(248, 248, 252, 0.78);
+    --dock-hairline-rim: rgba(0, 0, 0, 0.44);
+  }
+}
+
+:root[data-theme="dark"] {
+  --dock-hairline: rgba(232, 232, 238, 0.48);
+  --dock-hairline-hover: rgba(248, 248, 252, 0.78);
+  --dock-hairline-rim: rgba(0, 0, 0, 0.44);
+}
+
+.ed-stage {
+  position: fixed;
+  inset: 0;
+  font-family: var(--dock-font);
+  color: var(--dock-ink);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   1. Resting macOS Edge Bar (46×8px capsule inside 76×24px flush hit zone)
+   ============================================================ */
+.ed-sliver {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 120ms var(--dock-ease-out),
+    transform 140ms var(--dock-ease-out),
+    visibility 0ms linear 0ms;
+}
+
+.ed-sliver[data-visible="false"] {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity 95ms ease,
+    transform 120ms var(--dock-ease-out),
+    visibility 0ms linear 120ms;
+}
+
+.ed-hairline {
+  display: block;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--dock-hairline);
+  border: 1px solid var(--dock-hairline-rim);
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.24),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    background-color 110ms ease,
+    transform 130ms var(--dock-ease-out),
+    opacity 110ms ease;
+}
+
+.ed-sliver[data-edge="bottom"] {
+  bottom: 0;
+  left: 50%;
+  width: 76px;
+  height: 24px;
+  align-items: flex-end;
+  padding-bottom: 7px;
+  transform: translate3d(-50%, 0, 0);
+}
+
+.ed-sliver[data-edge="bottom"] .ed-hairline {
+  width: 46px;
+  height: 8px;
+}
+
+.ed-sliver[data-edge="bottom"]:hover .ed-hairline {
+  background: var(--dock-hairline-hover);
+  transform: scaleX(1.06);
+}
+
+.ed-sliver[data-edge="left"] {
+  left: 0;
+  top: 50%;
+  width: 24px;
+  height: 76px;
+  justify-content: flex-start;
+  padding-left: 6px;
+  transform: translate3d(0, -50%, 0);
+}
+
+.ed-sliver[data-edge="left"] .ed-hairline {
+  width: 8px;
+  height: 46px;
+}
+
+.ed-sliver[data-edge="left"]:hover .ed-hairline {
+  background: var(--dock-hairline-hover);
+  transform: scaleY(1.06);
+}
+
+.ed-sliver[data-edge="right"] {
+  right: 0;
+  top: 50%;
+  width: 24px;
+  height: 76px;
+  justify-content: flex-end;
+  padding-right: 6px;
+  transform: translate3d(0, -50%, 0);
+}
+
+.ed-sliver[data-edge="right"] .ed-hairline {
+  width: 8px;
+  height: 46px;
+}
+
+.ed-sliver[data-edge="right"]:hover .ed-hairline {
+  background: var(--dock-hairline-hover);
+  transform: scaleY(1.06);
+}
+
+.ed-sliver:focus-visible {
+  outline: none;
+}
+
+.ed-sliver:focus-visible .ed-hairline {
+  border-color: var(--dock-blue);
+}
+
+.ed-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   2. 3 Detached macOS Dark-Glass Icon Pills + Hover-Only Tooltip
+   ============================================================ */
+.ed-expanded-wrap {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  gap: 7px;
+  pointer-events: auto;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 135ms var(--dock-ease-out),
+    transform 155ms var(--dock-ease-out),
+    visibility 0ms linear 0ms;
+}
+
+.ed-expanded-wrap[data-visible="false"] {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity 100ms ease,
+    transform 125ms var(--dock-ease-out),
+    visibility 0ms linear 125ms;
+}
+
+.ed-expanded-wrap[data-edge="bottom"] {
+  bottom: 0;
+  left: 50%;
+  padding-bottom: 8px;
+  flex-direction: column-reverse;
+  transform: translate3d(-50%, 0, 0) scale(1);
+  transform-origin: 50% 100%;
+}
+
+.ed-expanded-wrap[data-edge="bottom"][data-visible="false"] {
+  transform: translate3d(-50%, 5px, 0) scale(0.92);
+}
+
+.ed-expanded-wrap[data-edge="left"] {
+  left: 0;
+  top: 50%;
+  padding-left: 7px;
+  flex-direction: row;
+  transform: translate3d(0, -50%, 0) scale(1);
+  transform-origin: 0% 50%;
+}
+
+.ed-expanded-wrap[data-edge="left"][data-visible="false"] {
+  transform: translate3d(-5px, -50%, 0) scale(0.92);
+}
+
+.ed-expanded-wrap[data-edge="right"] {
+  right: 0;
+  top: 50%;
+  padding-right: 7px;
+  flex-direction: row-reverse;
+  transform: translate3d(0, -50%, 0) scale(1);
+  transform-origin: 100% 50%;
+}
+
+.ed-expanded-wrap[data-edge="right"][data-visible="false"] {
+  transform: translate3d(5px, -50%, 0) scale(0.92);
+}
+
+/* Transparent hit bridge so gliding across the 7px gap between detached pills never drops hover */
+.ed-cluster {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  cursor: grab;
+}
+
+.ed-cluster:active {
+  cursor: grabbing;
+}
+
+.ed-expanded-wrap[data-edge="left"] .ed-cluster,
+.ed-expanded-wrap[data-edge="right"] .ed-cluster {
+  flex-direction: column;
+}
+
+/* Individual detached macOS dark-glass pills */
+.ed-pill {
+  position: relative;
+  box-sizing: border-box;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--dock-rim);
+  background: var(--dock-glass);
+  color: var(--dock-ink);
+  box-shadow: var(--dock-pill-shadow);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+  transition:
+    background-color 115ms ease,
+    border-color 115ms ease,
+    transform 125ms var(--dock-ease-out);
+}
+
+/* Elongated primary microphone capsule matching macOS / Wispr Flow dock proportion */
+.ed-pill-dictate {
+  width: 46px;
+  height: 32px;
+}
+
+.ed-expanded-wrap[data-edge="left"] .ed-pill-dictate,
+.ed-expanded-wrap[data-edge="right"] .ed-pill-dictate {
+  width: 32px;
+  height: 44px;
+}
+
+.ed-pill-circle {
+  width: 32px;
+  height: 32px;
+}
+
+.ed-pill-transform {
+  height: 32px;
+  padding: 0 8px 0 9px;
+}
+
+.ed-expanded-wrap[data-edge="left"] .ed-pill-transform,
+.ed-expanded-wrap[data-edge="right"] .ed-pill-transform {
+  width: 32px;
+  height: 38px;
+  padding: 5px 0 4px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ed-pill:hover,
+.ed-pill[data-hovered="true"],
+.ed-pill:focus-visible {
+  outline: none;
+  background: var(--dock-glass-hover);
+  border-color: var(--dock-rim-hover);
+  transform: scale(1.05);
+}
+
+.ed-pill[data-open="true"] {
+  background: var(--dock-glass-active);
+  border-color: var(--dock-rim-hover);
+}
+
+.ed-pill:active {
+  transform: scale(0.95);
+}
+
+.ed-chevron {
+  opacity: 0.68;
+  transition: transform 130ms var(--dock-ease-out);
+}
+
+.ed-pill[data-open="true"] .ed-chevron {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+.ed-armed-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #32d74b;
+}
+
+.ed-live-meeting-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5.5px;
+  height: 5.5px;
+  border-radius: 50%;
+  background: #34c759;
+  box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.55);
+  animation: ed-live-pulse 1.8s infinite;
+}
+
+.ed-sliver[data-meeting-active="true"] .ed-hairline {
+  border-color: rgba(52, 199, 89, 0.65);
+  box-shadow:
+    0 0 8px rgba(52, 199, 89, 0.35),
+    0 1px 4px rgba(0, 0, 0, 0.24),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.24);
+}
+
+@keyframes ed-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+/* Hover-only macOS HUD Vibrancy Tooltip — anchored over active pill & smoothly glides across icons */
+.ed-readout {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--dock-popover);
+  border: 1px solid var(--dock-rim);
+  box-shadow: var(--dock-pill-shadow);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 4;
+    transition: opacity 115ms ease;
+}
+
+.ed-readout[data-gliding="true"] {
+  transition:
+    transform 155ms var(--dock-ease-out),
+    opacity 115ms ease;
+}
+
+.ed-readout[data-edge="bottom"] {
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translate3d(calc(-50% + var(--ed-tip-offset, 0px)), 0, 0);
+}
+
+.ed-readout[data-edge="left"] {
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translate3d(0, calc(-50% + var(--ed-tip-offset, 0px)), 0);
+}
+
+.ed-readout[data-edge="right"] {
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translate3d(0, calc(-50% + var(--ed-tip-offset, 0px)), 0);
+}
+
+.ed-readout-label {
+  font-size: 11.5px;
+  font-weight: 520;
+  letter-spacing: -0.01em;
+  color: var(--dock-ink);
+}
+
+.ed-readout-kbd {
+  font-family: var(--dock-mono);
+  font-size: 10px;
+  font-weight: 520;
+  color: var(--dock-ink-2);
+  background: var(--dock-kbd-bg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4.5px;
+  padding: 1px 5px;
+  line-height: 1.25;
+}
+
+/* ============================================================
+   3. Native macOS HUD Popover (Transform Presets & Context Menu)
+   ============================================================ */
+.ed-popover {
+  pointer-events: auto;
+  position: absolute;
+  box-sizing: border-box;
+  width: 204px;
+  max-height: 224px;
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--dock-popover);
+  border: 1px solid var(--dock-rim);
+  box-shadow: var(--dock-popover-shadow);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: edPopoverIn 130ms var(--dock-ease-out);
+}
+
+.ed-popover[data-kind="context"] {
+  width: 168px;
+}
+
+@keyframes edPopoverIn {
+  from {
+    opacity: 0;
+    transform: translate3d(
+        var(--ed-pop-tx-from, 0),
+        var(--ed-pop-ty-from, 4px),
+        0
+      )
+      scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(var(--ed-pop-tx-to, 0), var(--ed-pop-ty-to, 0), 0)
+      scale(1);
+  }
+}
+
+.ed-popover[data-edge="bottom"] {
+  --ed-pop-tx-from: -50%;
+  --ed-pop-ty-from: 4px;
+  --ed-pop-tx-to: -50%;
+  --ed-pop-ty-to: 0px;
+  bottom: 48px;
+  left: 50%;
+  transform: translate3d(-50%, 0, 0);
+}
+
+.ed-popover[data-edge="left"] {
+  --ed-pop-tx-from: -4px;
+  --ed-pop-ty-from: -50%;
+  --ed-pop-tx-to: 0px;
+  --ed-pop-ty-to: -50%;
+  left: 46px;
+  top: 50%;
+  transform: translate3d(0, -50%, 0);
+}
+
+.ed-popover[data-edge="right"] {
+  --ed-pop-tx-from: 4px;
+  --ed-pop-ty-from: -50%;
+  --ed-pop-tx-to: 0px;
+  --ed-pop-ty-to: -50%;
+  right: 46px;
+  top: 50%;
+  transform: translate3d(0, -50%, 0);
+}
+
+.ed-run-row,
+.ed-auto-row,
+.ed-preset-item,
+.ed-foot-btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--dock-ink);
+  font-family: var(--dock-font);
+  font-size: 12px;
+  line-height: 1.3;
+  padding: 6px 8px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 95ms ease;
+}
+
+.ed-run-row {
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 560;
+}
+
+.ed-run-row:hover,
+.ed-auto-row:hover,
+.ed-preset-item:hover,
+.ed-foot-btn:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.ed-run-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ed-run-label strong {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.ed-check {
+  font-size: 11.5px;
+  font-weight: 640;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.ed-switch {
+  width: 26px;
+  height: 15px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  position: relative;
+  flex-shrink: 0;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.ed-switch[data-on="true"] {
+  background: #32d74b;
+  border-color: #32d74b;
+}
+
+.ed-switch-thumb {
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 130ms var(--dock-ease-out);
+}
+
+.ed-switch[data-on="true"] .ed-switch-thumb {
+  transform: translateX(11px);
+}
+
+.ed-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 2px 4px;
+}
+
+.ed-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ed-preset-item[data-selected="true"] {
+  font-weight: 580;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.ed-preset-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ed-foot-btn {
+  color: var(--dock-ink-2);
+  font-size: 11.5px;
+}
+
+.ed-danger-item {
+  color: #ff6961;
+}
+
+/* ============================================================
+   4. Text-Free Frosted Drag-to-Snap Zones (Left / Bottom / Right)
+   ============================================================ */
+.ed-drag-canvas {
+  pointer-events: auto;
+  position: fixed;
+  inset: 0;
+  cursor: grabbing;
+}
+
+.ed-snap-zone {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(20, 20, 25, 0.34);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.2),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 140ms var(--dock-ease-out);
+}
+
+.ed-snap-zone[data-zone="left"] {
+  left: 10px;
+  top: 50%;
+  width: 28px;
+  height: 104px;
+  transform: translateY(-50%);
+}
+
+.ed-snap-zone[data-zone="right"] {
+  right: 10px;
+  top: 50%;
+  width: 28px;
+  height: 104px;
+  transform: translateY(-50%);
+}
+
+.ed-snap-zone[data-zone="bottom"] {
+  bottom: 10px;
+  left: 50%;
+  width: 116px;
+  height: 28px;
+  transform: translateX(-50%);
+}
+
+.ed-snap-zone[data-active="true"] {
+  border-color: rgba(255, 255, 255, 0.72);
+  background: rgba(24, 24, 30, 0.68);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.32),
+    0 0 0 3px rgba(255, 255, 255, 0.14),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.45);
+}
+
+.ed-snap-zone[data-zone="left"][data-active="true"],
+.ed-snap-zone[data-zone="right"][data-active="true"] {
+  transform: translateY(-50%) scale(1.06);
+}
+
+.ed-snap-zone[data-zone="bottom"][data-active="true"] {
+  transform: translateX(-50%) scale(1.06);
+}
+
+.ed-drag-puck {
+  position: absolute;
+  width: 44px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--dock-glass);
+  color: var(--dock-ink);
+  border: 1px solid var(--dock-rim-hover);
+  box-shadow: var(--dock-pill-shadow);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}

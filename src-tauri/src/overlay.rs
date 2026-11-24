@@ -45,10 +45,124 @@ tauri_panel! {
 // scale (see windows_text_scale_factor), which WebView2 applies as a zoom.
 //
 // Compact overlay (Minimal / transcribing / processing / paused): the 40h pill
-// animates width from 172 (--ov-rest-w) up to 296 (--ov-pause-w) and expands
-// from center, so the window must fit the widest state plus slack.
-const OVERLAY_WIDTH: f64 = 316.0;
+// animates width from 172 (--ov-rest-w) up to 332 (--ov-pause-w) with the
+// tactile Transform trigger, so the window must fit the widest state plus slack.
+const OVERLAY_WIDTH: f64 = 348.0;
 const OVERLAY_HEIGHT: f64 = 50.0;
+
+// Expanded vertical slack when the non-activating Transform popover is open
+// above/below the screen-edge-anchored compact pill.
+const OVERLAY_TRANSFORM_MENU_WIDTH: f64 = 348.0;
+const OVERLAY_TRANSFORM_MENU_HEIGHT: f64 = 252.0;
+
+static TRANSFORM_MENU_OPEN: AtomicBool = AtomicBool::new(false);
+static OVERLAY_HOVER_MONITOR_STARTED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, Copy)]
+struct OverlayHoverGeometry {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    position: OverlayPosition,
+    is_streaming: bool,
+}
+
+static OVERLAY_HOVER_GEOM: std::sync::Mutex<Option<OverlayHoverGeometry>> =
+    std::sync::Mutex::new(None);
+
+fn set_overlay_hover_geom(geom: Option<OverlayHoverGeometry>) {
+    if let Ok(mut guard) = OVERLAY_HOVER_GEOM.lock() {
+        *guard = geom;
+    }
+}
+
+fn spawn_overlay_hover_monitor(app: AppHandle) {
+    if OVERLAY_HOVER_MONITOR_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let mut hovered = false;
+        let mut outside_ticks: u8 = 0;
+
+        loop {
+            let geom = OVERLAY_HOVER_GEOM.lock().ok().and_then(|g| *g);
+            let Some(geom) = geom else {
+                if hovered {
+                    hovered = false;
+                    outside_ticks = 0;
+                    let _ = app.emit_to("recording_overlay", "overlay-cursor-hover", false);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                continue;
+            };
+
+            tokio::time::sleep(std::time::Duration::from_millis(32)).await;
+
+            let Some((cx, cy)) = crate::edge_dock::native_cursor_location(&app) else {
+                continue;
+            };
+
+            let inside = if TRANSFORM_MENU_OPEN.load(Ordering::Acquire) {
+                cx >= geom.x - 10.0
+                    && cx <= geom.x + geom.width + 10.0
+                    && cy >= geom.y - 10.0
+                    && cy <= geom.y + geom.height + 10.0
+            } else {
+                let target_w = if hovered {
+                    if geom.is_streaming {
+                        geom.width
+                    } else {
+                        288.0
+                    }
+                } else if geom.is_streaming {
+                    124.0
+                } else {
+                    112.0
+                };
+                let target_h = if hovered {
+                    if geom.is_streaming {
+                        geom.height
+                    } else {
+                        50.0
+                    }
+                } else {
+                    44.0
+                };
+                let left = geom.x + (geom.width - target_w) * 0.5;
+                let right = left + target_w;
+                let (top, bottom) = match geom.position {
+                    OverlayPosition::Bottom => (
+                        geom.y + geom.height - target_h,
+                        geom.y + geom.height + 10.0,
+                    ),
+                    OverlayPosition::Top => (geom.y - 10.0, geom.y + target_h),
+                };
+                cx >= left && cx <= right && cy >= top && cy <= bottom
+            };
+
+            if inside {
+                outside_ticks = 0;
+                if !hovered {
+                    hovered = true;
+                    let _ = app.emit_to("recording_overlay", "overlay-cursor-hover", true);
+                }
+            } else if hovered {
+                outside_ticks = outside_ticks.saturating_add(1);
+                if outside_ticks >= 4 {
+                    outside_ticks = 0;
+                    hovered = false;
+                    let _ = app.emit_to("recording_overlay", "overlay-cursor-hover", false);
+                }
+            }
+        }
+    });
+}
+
+thread_local! {
+    static LAST_OVERLAY_STATE: std::cell::RefCell<String> =
+        const { std::cell::RefCell::new(String::new()) };
+}
 
 // Actual is 394x118, just a little extra
 const OVERLAY_STREAM_WIDTH: f64 = 400.0;
@@ -246,6 +360,20 @@ fn is_mouse_within_monitor(
 /// converts PhysicalPosition using the scale factor of the monitor the window
 /// is *currently* on, which is wrong when moving cross-monitor. Windows uses
 /// `place_windows_overlay` instead (no single logical space across mixed DPI).
+/// Persistent meeting HUD pills (`meeting_active`, `meeting_soft_stopped`,
+/// `meeting_summarizing`) stay visible for minutes during video calls where
+/// Zoom, Google Meet, Microsoft Teams, and Preply center their `Mic / Cam /
+/// Share / Leave` toolbar at bottom-center. Anchoring meeting pills to a
+/// bottom corner keeps call controls 100% unobstructed.
+fn is_meeting_overlay_state(state: &str) -> bool {
+    matches!(
+        state,
+        "meeting_active" | "meeting_soft_stopped" | "meeting_summarizing"
+    )
+}
+
+const MEETING_CORNER_INSET: f64 = 20.0;
+
 fn calculate_overlay_position(
     app_handle: &AppHandle,
     width: f64,
@@ -258,8 +386,20 @@ fn calculate_overlay_position(
     let monitor_width = monitor.size().width as f64 / scale;
 
     let settings = settings::get_settings(app_handle);
+    let is_meeting = LAST_OVERLAY_STATE.with(|last| is_meeting_overlay_state(&last.borrow()));
 
-    let x = monitor_x + (monitor_width - width) / 2.0;
+    let x = if is_meeting && settings.overlay_position == OverlayPosition::Bottom {
+        let flow = crate::flow::settings::get(app_handle);
+        let dock_on_right = flow.edge_dock_enabled
+            && flow.edge_dock_position == crate::flow::settings::EdgeDockPosition::Right;
+        if dock_on_right {
+            monitor_x + MEETING_CORNER_INSET
+        } else {
+            (monitor_x + monitor_width - width - MEETING_CORNER_INSET).max(monitor_x + 8.0)
+        }
+    } else {
+        monitor_x + (monitor_width - width) / 2.0
+    };
     let y = match settings.overlay_position {
         OverlayPosition::Top => monitor_y + OVERLAY_TOP_OFFSET,
         OverlayPosition::Bottom => {
@@ -480,7 +620,12 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
             .no_activate(true)
             .corner_radius(0.0)
             .style_mask(StyleMask::empty().borderless().nonactivating_panel())
-            .with_window(|w| w.decorations(false).transparent(true).focusable(false))
+            .with_window(|w| {
+                w.decorations(false)
+                    .transparent(true)
+                    .focusable(false)
+                    .accept_first_mouse(true)
+            })
             .collection_behavior(
                 CollectionBehavior::new()
                     .can_join_all_spaces()
@@ -490,6 +635,7 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
         {
             Ok(panel) => {
                 panel.hide();
+                spawn_overlay_hover_monitor(app_handle.clone());
             }
             Err(e) => {
                 log::error!("Failed to create recording overlay panel: {}", e);
@@ -524,6 +670,10 @@ fn show_overlay_state(app_handle: &AppHandle, state: &str) {
 }
 
 fn show_overlay_state_on_main(app_handle: &AppHandle, state: &str) {
+    TRANSFORM_MENU_OPEN.store(false, Ordering::SeqCst);
+    LAST_OVERLAY_STATE.with(|last| {
+        *last.borrow_mut() = state.to_owned();
+    });
     // Size the overlay for this state (compact vs. streaming), then position it.
     let (width, height) = overlay_dimensions(state);
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
@@ -564,8 +714,22 @@ fn show_overlay_state_on_main(app_handle: &AppHandle, state: &str) {
                     let set_pos_started = std::time::Instant::now();
                     let _ = overlay_window
                         .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+                    if state == "recording" || state == "streaming" {
+                        let position = settings::get_settings(app_handle).overlay_position;
+                        set_overlay_hover_geom(Some(OverlayHoverGeometry {
+                            x,
+                            y,
+                            width,
+                            height,
+                            position,
+                            is_streaming: state == "streaming",
+                        }));
+                    } else {
+                        set_overlay_hover_geom(None);
+                    }
                     set_pos_started.elapsed()
                 } else {
+                    set_overlay_hover_geom(None);
                     std::time::Duration::ZERO
                 };
             #[cfg(target_os = "windows")]
@@ -623,6 +787,77 @@ pub fn emit_recording_ready(app_handle: &AppHandle) {
     let handle = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
         let _ = handle.emit_to("recording_overlay", "recording-ready", ());
+    });
+}
+
+/// Expands or collapses the recording overlay window vertically on the main thread
+/// so the Transform popover renders cleanly above/below the screen-edge-anchored pill
+/// without stealing focus or replaying `show-overlay` state resets.
+pub fn set_transform_menu_open(app_handle: &AppHandle, open: bool) {
+    let was_open = TRANSFORM_MENU_OPEN.swap(open, Ordering::SeqCst);
+    if was_open == open {
+        return;
+    }
+    let handle = app_handle.clone();
+    let _ = app_handle.run_on_main_thread(move || {
+        let Some(overlay_window) = handle.get_webview_window("recording_overlay") else {
+            return;
+        };
+        let state = LAST_OVERLAY_STATE.with(|last| {
+            let cur = last.borrow();
+            if cur.is_empty() {
+                "recording".to_owned()
+            } else {
+                cur.clone()
+            }
+        });
+        let (base_w, base_h) = overlay_dimensions(&state);
+        let (width, height) = if open {
+            let expanded_h = if state == "streaming" {
+                base_h + 206.0
+            } else {
+                base_h.max(OVERLAY_TRANSFORM_MENU_HEIGHT)
+            };
+            (base_w.max(OVERLAY_TRANSFORM_MENU_WIDTH), expanded_h)
+        } else {
+            (base_w, base_h)
+        };
+
+        #[cfg(target_os = "linux")]
+        if LAYER_SHELL_ACTIVE.load(Ordering::SeqCst) {
+            let position = settings::get_settings(&handle).overlay_position;
+            if let Ok(gtk_window) = overlay_window.gtk_window() {
+                configure_layer_shell_surface(&gtk_window, position, width, height);
+            }
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            WINDOWS_OVERLAY_SIZE.set((width, height));
+            let _ = place_windows_overlay(&handle, &overlay_window, width, height);
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ =
+                overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+            if let Some((x, y)) = calculate_overlay_position(&handle, width, height) {
+                let _ = overlay_window
+                    .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+                if state == "recording" || state == "streaming" {
+                    let position = settings::get_settings(&handle).overlay_position;
+                    set_overlay_hover_geom(Some(OverlayHoverGeometry {
+                        x,
+                        y,
+                        width,
+                        height,
+                        position,
+                        is_streaming: state == "streaming",
+                    }));
+                }
+            }
+        }
     });
 }
 
@@ -853,7 +1088,8 @@ fn update_overlay_position_on_main(app_handle: &AppHandle) {
 static OVERLAY_SHOW_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Hides the recording overlay window with fade-out animation
-fn hide_recording_overlay(app_handle: &AppHandle) {
+pub fn hide_recording_overlay(app_handle: &AppHandle) {
+    set_overlay_hover_geom(None);
     // Always hide the overlay regardless of settings - if setting was changed while recording,
     // we still want to hide it properly
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {

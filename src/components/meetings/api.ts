@@ -116,6 +116,56 @@ export function isolateBidi(value: string | null | undefined): string {
   return `\u2068${value}\u2069`;
 }
 
+export interface TranscriptTurnGroup {
+  key: string;
+  speaker: SpeakerChannel;
+  speakerBadge: string;
+  start_ms: number;
+  end_ms: number;
+  segments: MeetingSegment[];
+}
+
+/**
+ * Groups consecutive segments from the same speaker (within 25s gap) into
+ * clean conversational turns so transcripts read like human dialogue instead
+ * of repeating `[00:12] [Speaker 1]` on every 3s VAD chunk.
+ */
+export function groupConsecutiveTranscriptTurns(
+  segments: readonly MeetingSegment[],
+  meTranslated: string,
+  othersTranslated: string,
+): TranscriptTurnGroup[] {
+  const groups: TranscriptTurnGroup[] = [];
+  for (const seg of segments) {
+    const badge = formatSegmentSpeakerBadge(
+      seg,
+      meTranslated,
+      othersTranslated,
+    );
+    const prev = groups[groups.length - 1];
+    const gapMs = prev ? Math.max(0, seg.start_ms - prev.end_ms) : 0;
+    if (
+      prev &&
+      prev.speaker === seg.speaker &&
+      prev.speakerBadge === badge &&
+      gapMs <= 25_000
+    ) {
+      prev.end_ms = Math.max(prev.end_ms, seg.end_ms);
+      prev.segments.push(seg);
+    } else {
+      groups.push({
+        key: `${seg.id}-${seg.start_ms}`,
+        speaker: seg.speaker,
+        speakerBadge: badge,
+        start_ms: seg.start_ms,
+        end_ms: seg.end_ms,
+        segments: [seg],
+      });
+    }
+  }
+  return groups;
+}
+
 /**
  * Resolves the display badge text for a transcript segment (`SV-89`).
  * Preserves 26-locale i18n labels for generic `"me"` / `"others"` turns while

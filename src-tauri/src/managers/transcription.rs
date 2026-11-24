@@ -1506,16 +1506,27 @@ impl TranscriptionManager {
             }
         }
 
+        let has_ur = setup
+            .spoken_languages
+            .iter()
+            .any(|l| l.split(['-', '_']).next().is_some_and(|b| b.eq_ignore_ascii_case("ur")));
+        let has_hi = setup
+            .spoken_languages
+            .iter()
+            .any(|l| l.split(['-', '_']).next().is_some_and(|b| b.eq_ignore_ascii_case("hi")));
+        let has_ar = setup
+            .spoken_languages
+            .iter()
+            .any(|l| l.split(['-', '_']).next().is_some_and(|b| b.eq_ignore_ascii_case("ar")));
+
+        // Only skip `<|ur|>` retry when `"hi"` is explicitly selected without `"ur"`.
+        // When `"ur"` is configured (e.g. `["en", "ur"]`), Whisper's `<|hi|>` LM hallucinates
+        // Sanskrit words (`शीघ्र` for Urdu/Arabic `صیغے`), so `<|ur|>` must run first.
         let skip_auto_urdu_retry_for_roman_hinglish = setup.script_pref
             == crate::flow::multilingual::HindustaniScript::Auto
-            && setup
-                .spoken_languages
-                .iter()
-                .any(|l| l.split(['-', '_']).next() == Some("en"))
-            && !setup
-                .spoken_languages
-                .iter()
-                .any(|l| l.split(['-', '_']).next() == Some("ar"))
+            && has_hi
+            && !has_ur
+            && !has_ar
             && transcript.language.as_deref() == Some("hi")
             && !lowyap_flow::contains_perso_arabic(&transcript.text);
 
@@ -1524,16 +1535,41 @@ impl TranscriptionManager {
             .clone()
             .filter(|_| !skip_auto_urdu_retry_for_roman_hinglish)
         {
-            if crate::flow::multilingual::should_retry_chunk_as_urdu(
-                transcript.language.as_deref(),
-                &transcript.text,
-                &setup.spoken_languages,
-                setup.script_pref,
-                &setup.selected_language,
-            ) {
+            // Also guard `["en", "ur", "ar"]` mixed Urdu+Arabic lessons: if Pass 1 guessed `<|ar|>`,
+            // Whisper's Arabic LM translates spoken Urdu explanations into Modern Standard Arabic.
+            // Only trigger when `<|ar|>` lacks genuine Arabic-distinct orthography (`ال`, `ة`, `أ`, `إ`, `ى`)
+            // so authentic Classical/MSA Arabic recitations (`بلى سمعت الأذان`) are never overwritten.
+            let has_distinct_arabic_orthography = transcript.text.starts_with("ال")
+                || transcript.text.contains(" ال")
+                || transcript.text.chars().any(|ch| {
+                    matches!(
+                        ch,
+                        '\u{0629}' // ة ta marbuta
+                        | '\u{0623}' // أ alif hamza above
+                        | '\u{0625}' // إ alif hamza below
+                        | '\u{0624}' // ؤ waw hamza
+                        | '\u{0626}' // ئ ya hamza
+                        | '\u{0649}' // ى alif maqsura (dotless, vs Urdu ی U+06CC)
+                    )
+                });
+            let ar_erased_urdu = has_ur
+                && has_ar
+                && transcript.language.as_deref() == Some("ar")
+                && !lowyap_flow::contains_urdu_specific_perso_arabic(&transcript.text)
+                && !has_distinct_arabic_orthography;
+
+            if ar_erased_urdu
+                || crate::flow::multilingual::should_retry_chunk_as_urdu(
+                    transcript.language.as_deref(),
+                    &transcript.text,
+                    &setup.spoken_languages,
+                    setup.script_pref,
+                    &setup.selected_language,
+                )
+            {
                 info!(
-                    "Retrying transcription clause as Urdu ('ur') after Hindi/Devanagari output (detected={:?})",
-                    transcript.language
+                    "Retrying transcription clause as Urdu ('ur') (detected={:?}, ar_guard={})",
+                    transcript.language, ar_erased_urdu
                 );
                 let mut retried = self.run_batch(mark, retry_pcm, &urdu_options, active_model)?;
                 let guarded = lowyap_flow::guard_transcript_text(
@@ -1545,7 +1581,11 @@ impl TranscriptionManager {
                         ..Default::default()
                     },
                 );
-                if !guarded.trim().is_empty() && lowyap_flow::contains_perso_arabic(&guarded) {
+                let accept_retried = !guarded.trim().is_empty()
+                    && lowyap_flow::contains_perso_arabic(&guarded)
+                    && (!ar_erased_urdu
+                        || lowyap_flow::contains_urdu_specific_perso_arabic(&guarded));
+                if accept_retried {
                     retried.text = guarded;
                     if retried.language.is_none() {
                         retried.language = Some("ur".to_string());
@@ -1772,8 +1812,9 @@ fn run_setup(
     };
 
     let is_whisper = info.arch.eq_ignore_ascii_case("whisper");
-    let vocabulary =
-        vocabulary_for_model(&info.arch, info.supports_vocabulary, &settings.custom_words);
+    let ax_identifiers = crate::flow::peek_field_context_identifiers();
+    let bias_terms = lowyap_flow::merged_asr_bias_terms(&settings.custom_words, &ax_identifiers, 32);
+    let vocabulary = vocabulary_for_model(&info.arch, info.supports_vocabulary, &bias_terms);
     let all_custom_words_prompted =
         info.supports_vocabulary && !is_whisper && !settings.custom_words.is_empty();
     let prompt = crate::flow::multilingual::build_initial_prompt(
@@ -1782,7 +1823,7 @@ fn run_setup(
         run_plan.language.as_deref(),
         &settings.spoken_languages,
         script_pref,
-        &settings.custom_words,
+        &bias_terms,
     );
 
     let token_timestamps = if info.capabilities.max_timestamp_kind == TimestampKind::Token {

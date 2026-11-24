@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "קיצור לעיבוד משלים",
             "description": "אופציונלי: קיצור מקשים ייעודי שתמיד מפעיל עיבוד AI על התמלול."
+          },
+          "transform": {
+            "name": "קיצור מקשים להמרה",
+            "description": "שכתוב טקסט מסומן במקום (או המרת ההכתבה האחרונה) באמצעות התבנית הפעילה."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "זוהתה שיחה"
+      },
+      "edgeDock": {
+        "title": "מעגן קצה",
+        "description": "הצמד לשונית פעולות מהירות זעירה לקצה השמאלי, התחתון או הימני של המסך. רחף להכתבה, פגישה והמרה, או גרור כדי להחליף קצה.",
+        "positions": {
+          "left": "קצה שמאלי",
+          "bottom": "קצה תחתון",
+          "right": "קצה ימני",
+          "off": "מוסתר"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "פתח הערות פגישה",
     "minimizeMeetingPill": "מזער לשורת התפריטים",
     "meetingStopped": "רישום ההערות נעצר",
-    "dismissMeetingStopped": "שמירה וסגירה"
+    "dismissMeetingStopped": "שמירה וסגירה",
+    "transform": "המרה",
+    "transformMenuAria": "תבניות המרה",
+    "transformAutoApply": "שכתוב הכתבה אוטומטי",
+    "transformPresetPolish": "ליטוש",
+    "transformPresetPromptEngineer": "מהנדס פרומפטים",
+    "transformConfigure": "הגדרת המרות…",
+    "noticeTransformedCopied": "הומר — הקש ⌘V להדבקה",
+    "noticeTransformEmpty": "סמן טקסט או הכתב תחילה"
   },
   "secureInput": {
     "blockedWithCulprit_one": "ייתכן ש-{{name}} חוסם קיצור דרך אחד",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "תבנית המרה פעילה",
+      "transformPresetsHint": "מופעל אוטומטית לאחר הכתבה כששכתוב AI פעיל, או בכל עת על טקסט מסומן דרך קיצור המקשים או קפסולת ההקלטה."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "ניפוי שגיאות"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "פתח פעולות מהירות של lowyap",
+    "dragHint": "גרור לקצה השמאלי, התחתון או הימני",
+    "noBotBadge": "ללא בוט",
+    "actions": {
+      "dictate": "הכתבה",
+      "meeting": "סיכום פגישה",
+      "transform": "המרה"
+    },
+    "runNow": "המר עכשיו",
+    "snoozeOneHour": "השהה לשעה",
+    "hideDock": "הסתר סרגל קצה"
   }
 }

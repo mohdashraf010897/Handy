@@ -34,13 +34,14 @@
      the card's max footprint (--ov-work-w for compact, --ov-open-w for Live),
      since the card is anchored flush to the screen edge in CSS. Keep overlay.rs
      in sync when these change. */
-  --ov-rest-w: 172px; /* resting compact pill (minimal, recording) -- roomy enough
-                         for the English working label before the grow starts */
-  --ov-pill-w: 184px; /* base width / Live pill before it opens or collapses */
+  --ov-listen-mini-w: 94px; /* kinetic sound-bars-only resting capsule */
+  --ov-rest-w: 94px; /* resting compact pill (minimal, recording) */
+  --ov-pill-w: 94px; /* base width / Live pill before it opens or hovers */
   --ov-work-w: 216px; /* working pill (transcribing / polishing) -- wide enough to
                          center longer labels; shared by Live (collapsed) + minimal */
   --ov-open-w: 392px; /* Live panel, expanded */
-  --ov-base-h: 40px; /* control-row height (.sbase) */
+  --ov-base-h: 40px; /* expanded control-row height (.sbase) */
+  --ov-mini-h: 36px; /* resting kinetic sound-bar capsule height */
   --ov-cap-max-h: 64px; /* max height of the scrolling live-text region */
 }
 
@@ -78,6 +79,18 @@
 }
 .ov-stage.top {
   align-items: flex-start; /* top placement: flush to the top edge */
+}
+
+.ov-pill-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  flex: none;
+}
+.ov-stage.top .ov-pill-stack {
+  flex-direction: column-reverse;
 }
 
 /* Compact pill: fade the whole container in/out (the pill itself never pops or
@@ -163,13 +176,23 @@
     opacity 240ms ease,
     transform 300ms ease;
 }
-.scard.is-capturing {
-  width: min(260px, calc(100vw - 8px));
+.scard.is-arming:not(.open)[data-controls-expanded="false"],
+.scard.is-capturing:not(.open)[data-controls-expanded="false"] {
+  width: var(--ov-listen-mini-w);
+  border-radius: 999px;
+}
+.scard.is-arming:not(.open)[data-controls-expanded="true"] {
+  width: min(148px, calc(100vw - 8px));
+}
+.scard.is-capturing:not(.open)[data-controls-expanded="true"] {
+  width: min(268px, calc(100vw - 8px));
 }
 .scard.is-capturing.cpaused {
-  width: min(296px, calc(100vw - 8px));
+  width: min(318px, calc(100vw - 8px));
 }
-.scard.open {
+.scard.open,
+.scard.open.is-capturing,
+.scard.open.is-capturing.cpaused {
   width: min(var(--ov-open-w), calc(100vw - 8px));
   border-radius: 16px;
 }
@@ -178,17 +201,28 @@
   border-radius: 18px;
 }
 
-/* Compact form: fixed widths per state so transitions remain smooth while
-   staying comfortably inside Minimal (280x44 / 256x50) and Live (360-400w). */
+/* Compact form: kinetic sound-bar micro-capsule (94x36) at rest, blooming
+   smoothly to 268x40 on hover / pause / open Transform popover. */
 .scard.compact {
   animation: none;
-  width: var(--ov-rest-w);
+  width: var(--ov-listen-mini-w);
+  transition:
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.scard.compact.is-capturing {
-  width: min(286px, calc(100vw - 6px));
+.scard.compact.is-arming[data-controls-expanded="false"],
+.scard.compact.is-capturing[data-controls-expanded="false"] {
+  width: var(--ov-listen-mini-w);
+  border-radius: 999px;
+}
+.scard.compact.is-arming[data-controls-expanded="true"] {
+  width: min(148px, calc(100vw - 6px));
+}
+.scard.compact.is-capturing[data-controls-expanded="true"] {
+  width: min(268px, calc(100vw - 6px));
 }
 .scard.compact.is-capturing.cpaused {
-  width: min(296px, calc(100vw - 6px));
+  width: min(318px, calc(100vw - 6px));
 }
 .scard.compact.cworking {
   width: var(--ov-work-w);
@@ -212,6 +246,10 @@
 }
 .sdot.notice {
   background: #e5534b;
+  opacity: 1;
+}
+.sdot.success {
+  background: var(--color-moss);
   opacity: 1;
 }
 .sdot.call {
@@ -411,6 +449,50 @@
   padding: 0 8px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 6px;
+}
+.sbase.is-listening-row {
+  transition:
+    height 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    gap 180ms ease;
+}
+.sbase.is-listening-row[data-controls-expanded="false"] {
+  height: var(--ov-mini-h);
+  padding: 0 12px;
+  grid-template-columns: 0px minmax(0, 1fr) 0px;
+  gap: 0;
+}
+.sbase.is-listening-row[data-controls-expanded="false"] .sbase-l,
+.sbase.is-listening-row[data-controls-expanded="false"] .sbase-r {
+  max-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+  transition:
+    max-width 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease,
+    visibility 0s linear 120ms;
+}
+.sbase.is-listening-row[data-controls-expanded="true"] .sbase-l,
+.sbase.is-listening-row[data-controls-expanded="true"] .sbase-r {
+  max-width: 240px;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    max-width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease,
+    visibility 0s linear 0s;
+}
+.sbase.is-listening-row[data-controls-expanded="false"] .sbase-mid {
+  justify-content: center;
+}
+.sbase.is-listening-row[data-controls-expanded="false"] .swave {
+  padding-right: 0;
+  gap: 2.5px;
 }
 .sbase-l {
   display: flex;
@@ -726,6 +808,228 @@
 .sctrl-btn.is-done:hover {
   background: color-mix(in srgb, var(--color-moss) 24%, transparent);
   color: var(--color-moss);
+}
+.sctrl-btn.is-transform {
+  position: relative;
+}
+.sctrl-btn.is-transform.is-armed {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--s-accent) 14%, var(--s-hair));
+}
+.sctrl-btn.is-transform.is-armed:hover {
+  background: color-mix(in srgb, var(--s-accent) 24%, var(--s-hair));
+  color: var(--color-text);
+}
+.sctrl-btn.is-transform.is-open {
+  color: #ffffff;
+  background: var(--s-accent);
+}
+.sctrl-btn.is-transform.is-open:hover {
+  color: #ffffff;
+  background: var(--s-accent);
+}
+.stransform-preset-pip {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--s-accent);
+  pointer-events: none;
+}
+
+/* ============================================================
+   Wave 6 — Recording Pill Transform Preset Popover
+   Sized strictly inside 252px expanded overlay height (max 196px + 6px gap + 42px pill).
+   ============================================================ */
+.stransform-popover {
+  box-sizing: border-box;
+  width: min(252px, calc(100vw - 12px));
+  max-height: 196px;
+  border-radius: 14px;
+  background: var(--s-surface);
+  border: 1px solid var(--s-border);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: stransform-pop 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: bottom center;
+}
+.ov-stage.top .stransform-popover {
+  transform-origin: top center;
+}
+@keyframes stransform-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.stransform-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 7px;
+  border-bottom: 1px solid var(--s-border);
+  flex: none;
+}
+.stransform-head-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--s-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stransform-switch {
+  width: 28px;
+  height: 16px;
+  padding: 2px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  border: 1px solid var(--s-border);
+  background: var(--s-hair);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  cursor: pointer;
+  flex: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.stransform-switch.is-on {
+  background: var(--s-accent);
+  border-color: var(--s-accent);
+}
+.stransform-switch:focus-visible,
+.stransform-item:focus-visible,
+.stransform-config-btn:focus-visible,
+.sctrl-btn:focus-visible,
+.sx:focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 1px;
+}
+.stransform-switch-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--s-muted);
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease;
+}
+.stransform-switch.is-on .stransform-switch-thumb {
+  background: #ffffff;
+  transform: translateX(12px);
+}
+[dir="rtl"] .stransform-switch.is-on .stransform-switch-thumb {
+  transform: translateX(-12px);
+}
+.stransform-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  max-height: 106px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.stransform-item {
+  width: 100%;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: start;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.stransform-item:hover {
+  background: var(--s-hair);
+}
+.stransform-item.is-selected {
+  background: color-mix(in srgb, var(--s-accent) 13%, transparent);
+  font-weight: 600;
+}
+.stransform-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stransform-check {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--s-accent);
+}
+.stransform-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px 7px;
+  border-top: 1px solid var(--s-border);
+  flex: none;
+}
+.stransform-config-btn {
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--s-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: color 120ms ease;
+}
+.stransform-config-btn:hover {
+  color: var(--color-text);
+}
+.stransform-kbd {
+  padding: 2px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--s-border);
+  background: var(--s-hair);
+  color: var(--s-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.1;
+  white-space: nowrap;
+  flex: none;
 }
 
 /* working state (transcribing / polishing) — spinner + label */
@@ -1123,6 +1427,11 @@
   .swave i,
   .sx,
   .sctrl-btn,
+  .stransform-popover,
+  .stransform-switch,
+  .stransform-switch-thumb,
+  .stransform-item,
+  .stransform-config-btn,
   .scall-btn,
   .sundo-btn,
   .smeeting-btn,

@@ -128,6 +128,7 @@ impl HybridMapReduceSummarizer {
             .saturating_add(user_prompt.chars().count());
         let has_blocked_script = contains_apple_intelligence_blocked_script(system_prompt)
             || contains_apple_intelligence_blocked_script(user_prompt);
+        let mut saw_latin_locale_rejection = false;
 
         for backend in &self.backends {
             if !backend.supports_non_latin_scripts() && has_blocked_script {
@@ -138,41 +139,65 @@ impl HybridMapReduceSummarizer {
             } else {
                 std::borrow::Cow::Owned(sanitize_system_prompt_for_latin_backend(system_prompt))
             };
+            let effective_user = if backend.supports_non_latin_scripts() {
+                std::borrow::Cow::Borrowed(user_prompt)
+            } else {
+                std::borrow::Cow::Owned(
+                    crate::budget::fold_latin_diacritics_for_apple_intelligence(user_prompt),
+                )
+            };
             let effective_chars = if backend.supports_non_latin_scripts() {
                 prompt_chars
             } else {
                 effective_sys
                     .chars()
                     .count()
-                    .saturating_add(user_prompt.chars().count())
+                    .saturating_add(effective_user.chars().count())
             };
             if effective_chars > backend.max_prompt_chars() {
                 continue;
             }
 
-            if let Ok(raw) = backend.complete(&effective_sys, user_prompt, max_tokens) {
-                let cleaned = strip_reasoning_and_fences(&raw);
-                let normalized = map_output(&cleaned);
-                if (!backend.supports_non_latin_scripts()
-                    && contains_apple_intelligence_blocked_script(&normalized))
-                    || !validator(&normalized)
-                {
-                    continue;
+            match backend.complete(&effective_sys, &effective_user, max_tokens) {
+                Ok(raw) => {
+                    let cleaned = strip_reasoning_and_fences(&raw);
+                    let normalized = map_output(&cleaned);
+                    if (!backend.supports_non_latin_scripts()
+                        && contains_apple_intelligence_blocked_script(&normalized))
+                        || !validator(&normalized)
+                    {
+                        continue;
+                    }
+                    return Some(SummaryOutput {
+                        markdown: normalized,
+                        source_id: backend.source_id().to_owned(),
+                    });
                 }
-                return Some(SummaryOutput {
-                    markdown: normalized,
-                    source_id: backend.source_id().to_owned(),
-                });
+                Err(err) if !backend.supports_non_latin_scripts() => {
+                    let lower = err.to_ascii_lowercase();
+                    if lower.contains("unsupported language")
+                        || lower.contains("locale")
+                        || lower.contains("guardrail")
+                    {
+                        saw_latin_locale_rejection = true;
+                    }
+                }
+                Err(_) => {}
             }
         }
 
         // Second pass: when no non-Latin-capable backend succeeded (e.g. only
-        // on-device Apple Intelligence is available) and a predominantly English
-        // meeting contains minor Hindustani script islands, Romanize those spans
-        // so Apple Intelligence can still produce a structured abstractive summary.
-        if has_blocked_script && is_predominantly_english_meeting_text(user_prompt) {
-            let roman_sys = sanitize_system_prompt_for_latin_backend(system_prompt);
-            let roman_user = lowyap_flow::hindustani_to_roman_hinglish(user_prompt);
+        // on-device Apple Intelligence is available without local_gguf) and the
+        // meeting has Perso-Arabic/Devanagari speech or triggered a locale block,
+        // Romanize + ASCII-fold the prompt so Apple Intelligence produces clean
+        // structured English notes preserving Romanized multilingual terms.
+        if (has_blocked_script || saw_latin_locale_rejection)
+            && has_substantive_meeting_content_for_romanized_pass(user_prompt)
+        {
+            let roman_sys = crate::budget::fold_latin_diacritics_for_apple_intelligence(
+                &sanitize_system_prompt_for_latin_backend(system_prompt),
+            );
+            let roman_user = crate::budget::romanize_and_fold_for_apple_intelligence(user_prompt);
             if !contains_apple_intelligence_blocked_script(&roman_sys)
                 && !contains_apple_intelligence_blocked_script(&roman_user)
             {
@@ -840,20 +865,25 @@ fn select_diverse_bullets(candidates: &[CandidateBullet], limit: usize) -> Vec<S
         .collect()
 }
 
-fn is_predominantly_english_meeting_text(text: &str) -> bool {
-    let mut latin = 0usize;
-    let mut non_latin = 0usize;
+fn has_substantive_meeting_content_for_romanized_pass(text: &str) -> bool {
+    let mut latin_alpha = 0usize;
+    let mut non_latin_alpha = 0usize;
     for ch in text.chars() {
-        if ch.is_ascii_alphabetic() {
-            latin += 1;
+        if ch.is_ascii_alphabetic() || ('\u{00C0}'..='\u{024F}').contains(&ch) {
+            latin_alpha += 1;
         } else if ch.is_alphabetic() {
-            non_latin += 1;
+            non_latin_alpha += 1;
         }
     }
-    // Exclude short boilerplate-only prompts; require substantial English content
-    // (`>= 240` Latin letters and `>= 3x` non-Latin letters) before Romanizing
-    // minor Hindustani spans for a Latin-only backend.
-    latin >= 240 && latin >= non_latin.saturating_mul(3)
+    let total_alpha = latin_alpha + non_latin_alpha;
+    // Only Romanize for a Latin-only 3B backend when the transcript is
+    // predominantly English (>= 120 alphabetic chars AND <= 25% non-Latin script).
+    // Heavy Arabic/Urdu/Hindi meetings (> 25% non-Latin) become phonetic
+    // transliteration that an English-only 3B model cannot comprehend—causing
+    // either 45s locale-guard timeouts or hallucinated generic corporate notes.
+    // Falling through to `local_extractive` preserves original script, speaker
+    // attribution, and verbatim bilingual highlights in <100ms.
+    total_alpha >= 120 && non_latin_alpha.saturating_mul(4) <= total_alpha
 }
 
 /// Replaces non-Latin script instructions (`Perso-Arabic` / `Devanagari`) with an
@@ -1806,5 +1836,68 @@ mod tests {
         ));
         assert!(out.markdown.contains("## Key Decisions & Discussion"));
         assert!(out.markdown.contains("## Expanded from Your Notes"));
+    }
+
+    #[test]
+    fn heavy_arabic_or_urdu_meeting_skips_latin_only_backend_and_preserves_extractive_script() {
+        struct PanicIfCalledAppleBackend;
+        impl CompletionBackend for PanicIfCalledAppleBackend {
+            fn source_id(&self) -> &'static str {
+                "apple_intelligence"
+            }
+            fn max_prompt_chars(&self) -> usize {
+                9_000
+            }
+            fn supports_non_latin_scripts(&self) -> bool {
+                false
+            }
+            fn complete(&self, _sys: &str, _user: &str, _max_tokens: u32) -> Result<String, PortError> {
+                panic!("Latin-only 3B backend must not be invoked on heavy Perso-Arabic transcripts");
+            }
+        }
+
+        let summarizer = HybridMapReduceSummarizer::with_default_budget(vec![Box::new(
+            PanicIfCalledAppleBackend,
+        )]);
+        let segments = vec![
+            TranscriptSegment {
+                speaker: lowyap_ports::SpeakerIdentity {
+                    channel: SpeakerChannel::Others,
+                    speaker_id: "speaker_1".into(),
+                    display_label: "Speaker 1".into(),
+                    confidence: Some(0.95),
+                },
+                start_ms: 0,
+                end_ms: 15_000,
+                text: "سمعت الأذانة فذهبت إلى المسجد، هذه الجملة الفعلية في الدرس الخامس.".into(),
+                language: Some("ar".into()),
+            },
+            TranscriptSegment {
+                speaker: lowyap_ports::SpeakerIdentity {
+                    channel: SpeakerChannel::Me,
+                    speaker_id: "me".into(),
+                    display_label: "Me".into(),
+                    confidence: Some(1.0),
+                },
+                start_ms: 16_000,
+                end_ms: 28_000,
+                text: "نعم فهمت، الفاعل ضمير مستتر والمفعول به الأذانة منصوبة بالفتحة.".into(),
+                language: Some("ar".into()),
+            },
+        ];
+
+        let out = summarizer
+            .expand_hybrid_notes(&HybridNotesRequest {
+                title: "Arabic Grammar Lesson".into(),
+                template: MeetingTemplate::General,
+                rough_notes: String::new(),
+                rollups: Vec::new(),
+                tail_segments: segments,
+                language_instruction: None,
+            })
+            .expect("heavy Arabic meeting should deterministically fall back to local_extractive");
+
+        assert_eq!(out.source_id, SOURCE_LOCAL_EXTRACTIVE);
+        assert!(out.markdown.contains("سمعت الأذانة"));
     }
 }

@@ -553,6 +553,25 @@ test.describe("Wave 4A — Floating Overlay UX Controls (Headless)", () => {
       window.__wave4Emit("mic-level", new Array(16).fill(0.45));
     }, IDLE_TRAY);
 
+    // Resting Listening state: ultra-minimal moving sound-bars capsule (no "Listening" text, controls hidden until hovered)
+    const capturingCard = page.locator(".scard.compact.is-capturing");
+    await expect(capturingCard).toBeVisible();
+    await expect(capturingCard).toHaveAttribute(
+      "data-controls-expanded",
+      "false",
+    );
+    await expect(page.getByTestId("overlay-stage-label")).toHaveCount(0);
+    await expect(page.getByTestId("overlay-pause-resume-btn")).toBeHidden();
+    const restingBox = await capturingCard.boundingBox();
+    expect(restingBox).not.toBeNull();
+    expect(restingBox!.width).toBeLessThanOrEqual(104);
+
+    // Hovering the sound-bars capsule reveals controls
+    await capturingCard.hover();
+    await expect(capturingCard).toHaveAttribute(
+      "data-controls-expanded",
+      "true",
+    );
     await expect(page.getByTestId("overlay-pause-resume-btn")).toBeVisible();
     await expect(page.getByTestId("overlay-done-btn")).toBeVisible();
 
@@ -639,6 +658,9 @@ test.describe("Wave 4A — Floating Overlay UX Controls (Headless)", () => {
     }, IDLE_TRAY);
 
     await expect(pill).toHaveCount(0);
+    await page.evaluate(() =>
+      window.__wave4Emit("overlay-cursor-hover", true),
+    );
     await expect(page.getByTestId("overlay-pause-resume-btn")).toBeVisible();
     await expect(page.getByTestId("overlay-done-btn")).toBeVisible();
   });
@@ -971,6 +993,7 @@ test.describe("Wave 4A — Floating Overlay UX Controls (Headless)", () => {
     await expect(page.getByTestId("overlay-meeting-active-pill")).toHaveCount(
       0,
     );
+    await page.locator(".scard.compact.is-capturing").hover();
     await expect(page.getByTestId("overlay-done-btn")).toBeVisible();
 
     // 3. Dictation is soft-cancelled (seq = 12), while meeting remains active underneath

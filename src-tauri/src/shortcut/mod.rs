@@ -1105,6 +1105,7 @@ pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Res
     }
 
     crate::secure_input::reconcile_fallback(&app);
+    let _ = app.emit("transform-settings-changed", ());
     Ok(())
 }
 
@@ -1243,6 +1244,7 @@ pub fn add_post_process_prompt(
 
     settings.post_process_prompts.push(new_prompt.clone());
     settings::write_settings(&app, settings);
+    let _ = app.emit("transform-settings-changed", ());
 
     Ok(new_prompt)
 }
@@ -1265,6 +1267,7 @@ pub fn update_post_process_prompt(
         existing_prompt.name = name;
         existing_prompt.prompt = prompt;
         settings::write_settings(&app, settings);
+        let _ = app.emit("transform-settings-changed", ());
         Ok(())
     } else {
         Err(format!("Prompt with id '{}' not found", id))
@@ -1296,6 +1299,7 @@ pub fn delete_post_process_prompt(app: AppHandle, id: String) -> Result<(), Stri
     }
 
     settings::write_settings(&app, settings);
+    let _ = app.emit("transform-settings-changed", ());
     Ok(())
 }
 
@@ -1349,6 +1353,21 @@ pub async fn fetch_post_process_models(
 pub fn set_post_process_selected_prompt(app: AppHandle, id: String) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
 
+    // Ensure built-in presets always exist so switching back to Polish or Prompt Engineer
+    // never fails even if an older settings file lacked one of the built-in entries.
+    if id == lowyap_flow::BUILTIN_POLISH_PROMPT_ID
+        && !settings.post_process_prompts.iter().any(|p| p.id == id)
+    {
+        settings.post_process_prompts.insert(
+            0,
+            settings::get_default_settings()
+                .post_process_prompts
+                .into_iter()
+                .find(|p| p.id == lowyap_flow::BUILTIN_POLISH_PROMPT_ID)
+                .expect("default Polish prompt"),
+        );
+    }
+
     // Verify the prompt exists
     if !settings.post_process_prompts.iter().any(|p| p.id == id) {
         return Err(format!("Prompt with id '{}' not found", id));
@@ -1356,6 +1375,8 @@ pub fn set_post_process_selected_prompt(app: AppHandle, id: String) -> Result<()
 
     settings.post_process_selected_prompt_id = Some(id);
     settings::write_settings(&app, settings);
+    let _ = app.emit("transform-settings-changed", ());
+    crate::edge_dock::sync_edge_dock_visibility(&app);
     Ok(())
 }
 

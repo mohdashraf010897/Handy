@@ -258,7 +258,161 @@ impl MeetingSessionManager {
         };
 
         manager.spawn_detector_loop();
+        let recovery_manager = manager.clone();
+        thread::spawn(move || {
+            let recovered = recovery_manager.recover_orphaned_meetings();
+            if recovered > 0 {
+                log::info!("meeting: recovered {recovered} orphaned meeting session(s) on startup");
+            }
+        });
         manager
+    }
+
+    /// Recovers meetings left with `ended_at_ms IS NULL` after a crash or force-quit:
+    /// discards 0-segment empty stubs and finalizes substantive sessions with
+    /// segment-derived `duration_ms`, hybrid notes, and auto-title.
+    pub fn recover_orphaned_meetings(&self) -> usize {
+        let orphan_ids = match self.inner.store.list_orphaned_meeting_ids() {
+            Ok(ids) => ids,
+            Err(err) => {
+                warn!("meeting: failed to inspect orphaned meetings: {err}");
+                return 0;
+            }
+        };
+        if orphan_ids.is_empty() {
+            return 0;
+        }
+
+        let active_id = self
+            .inner
+            .live_state
+            .lock()
+            .ok()
+            .and_then(|live| live.active_meeting_id.clone());
+
+        let mut handled = 0usize;
+        for meeting_id in orphan_ids {
+            if active_id.as_deref() == Some(meeting_id.as_str()) {
+                continue;
+            }
+            let Ok(detail_before) = self.inner.store.get_meeting_detail(&meeting_id) else {
+                continue;
+            };
+            if Self::should_discard_empty_meeting(
+                &detail_before.segments,
+                detail_before.rollups.len(),
+                &detail_before.rough_notes,
+            ) {
+                if self.inner.store.delete_meeting(&meeting_id).unwrap_or(false) {
+                    handled += 1;
+                }
+                continue;
+            }
+
+            let max_seg_end_ms = detail_before
+                .segments
+                .iter()
+                .map(|s| s.end_ms)
+                .max()
+                .unwrap_or(0);
+            let max_rollup_end_ms = detail_before
+                .rollups
+                .iter()
+                .map(|r| r.end_ms)
+                .max()
+                .unwrap_or(0);
+            let inferred_duration_ms = detail_before
+                .summary
+                .duration_ms
+                .max(max_seg_end_ms)
+                .max(max_rollup_end_ms)
+                .max(1_000);
+            let ended_at_ms = detail_before
+                .summary
+                .started_at_ms
+                .saturating_add(i64::try_from(inferred_duration_ms).unwrap_or(1_000));
+
+            if let Err(err) =
+                self.inner
+                    .store
+                    .finalize_meeting(&meeting_id, ended_at_ms, inferred_duration_ms)
+            {
+                warn!("meeting: failed to finalize orphan {meeting_id}: {err}");
+                continue;
+            }
+
+            if detail_before.expanded_notes_md.trim().is_empty() {
+                let tail_segments = self
+                    .inner
+                    .store
+                    .get_tail_segments(&meeting_id, 160)
+                    .unwrap_or_else(|_| detail_before.segments.clone());
+                let summary = self.generate_hybrid_summary(
+                    &detail_before.summary,
+                    &detail_before.rough_notes,
+                    &detail_before.rollups,
+                    &tail_segments,
+                );
+                let _ = self.inner.store.update_expanded_notes(
+                    &meeting_id,
+                    &summary.text,
+                    &summary.summary_source,
+                );
+
+                if let Ok(fresh_detail) = self.inner.store.get_meeting_detail(&meeting_id) {
+                    if lowyap_summarize::is_placeholder_meeting_title(&fresh_detail.summary.title) {
+                        let mut rollup_strings = to_rollup_strings(&fresh_detail.rollups);
+                        if rollup_strings.is_empty()
+                            && summary.summary_source != "local_extractive"
+                            && !summary.text.trim().is_empty()
+                        {
+                            rollup_strings.push(summary.text.clone());
+                        }
+                        let port_segments = to_port_segments(&fresh_detail.segments);
+                        let backends =
+                            build_production_completion_backends(self.inner.app_handle.as_ref());
+                        if let Some(generated_title) = lowyap_summarize::generate_meeting_title(
+                            &fresh_detail.rough_notes,
+                            &rollup_strings,
+                            &port_segments,
+                            backends.first().map(|b| b.as_ref()),
+                        ) {
+                            let placeholder_title = fresh_detail.summary.title.clone();
+                            if self
+                                .inner
+                                .store
+                                .update_placeholder_title_if_unchanged(
+                                    &meeting_id,
+                                    &placeholder_title,
+                                    &generated_title,
+                                )
+                                .unwrap_or(false)
+                            {
+                                let old_h1 = format!("# {}", placeholder_title.trim());
+                                let trimmed_md = summary.text.trim_start();
+                                if let Some(rest) = trimmed_md.strip_prefix(&old_h1) {
+                                    if rest.is_empty()
+                                        || rest.starts_with('\n')
+                                        || rest.starts_with('\r')
+                                    {
+                                        let synced_md = format!("# {generated_title}{rest}");
+                                        let _ = self.inner.store.update_expanded_notes(
+                                            &meeting_id,
+                                            &synced_md,
+                                            &summary.summary_source,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            handled += 1;
+        }
+
+        handled
     }
 
     #[cfg(test)]
@@ -789,6 +943,22 @@ impl MeetingSessionManager {
 
             let detail_before = self.inner.store.get_meeting_detail(&meeting_id)?;
             let tail_segments = self.inner.store.get_tail_segments(&meeting_id, 160)?;
+
+            // Hygiene guard: if a meeting ended with zero detected speech segments,
+            // zero rollups, and zero user-typed rough notes, discard the empty row
+            // instead of polluting the user's Meetings workspace with blank entries.
+            if Self::should_discard_empty_meeting(
+                &detail_before.segments,
+                detail_before.rollups.len(),
+                &detail_before.rough_notes,
+            ) {
+                log::info!(
+                    "meeting: discarding empty meeting {} (0 spoken segments, 0 rollups, empty rough notes)",
+                    meeting_id
+                );
+                let _ = self.inner.store.delete_meeting(&meeting_id);
+                return Ok(detail_before);
+            }
 
             let summary = self.generate_hybrid_summary(
                 &detail_before.summary,
@@ -1410,7 +1580,7 @@ struct EchoDeduplicator {
 
 impl EchoDeduplicator {
     const WINDOW_MS: u64 = 18_000;
-    const OVERLAP_SLACK_MS: u64 = 1_800;
+    const OVERLAP_SLACK_MS: u64 = 2_600;
 
     fn normalize_tokens(text: &str) -> Vec<String> {
         let roman = lowyap_flow::hindustani_to_roman_hinglish(text);
@@ -1419,6 +1589,29 @@ impl EchoDeduplicator {
             .map(|tok| tok.trim().to_ascii_lowercase())
             .filter(|tok| tok.chars().count() >= 2)
             .collect()
+    }
+
+    fn consonant_skeleton(token: &str) -> String {
+        let mut out = String::with_capacity(token.len());
+        let mut prev: Option<char> = None;
+        for ch in token.chars() {
+            if !ch.is_ascii_alphabetic() {
+                continue;
+            }
+            let mapped = match ch {
+                'a' | 'e' | 'i' | 'o' | 'u' | 'w' | 'y' | 'h' => continue,
+                'v' => 'f',
+                'q' => 'k',
+                'c' => 's',
+                'z' => 's',
+                other => other,
+            };
+            if prev != Some(mapped) {
+                out.push(mapped);
+                prev = Some(mapped);
+            }
+        }
+        out
     }
 
     fn windows_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
@@ -1435,11 +1628,21 @@ impl EchoDeduplicator {
         let matched = me_tokens
             .iter()
             .filter(|mt| {
+                let mt_skel = Self::consonant_skeleton(mt);
                 others_tokens.iter().any(|ot| {
-                    ot == *mt
-                        || (mt.len() >= 4
-                            && ot.len() >= 4
-                            && lowyap_flow::is_accent_phonetic_match(mt, ot))
+                    if ot == *mt {
+                        return true;
+                    }
+                    if mt.len() >= 4 && ot.len() >= 4 && lowyap_flow::is_accent_phonetic_match(mt, ot) {
+                        return true;
+                    }
+                    if mt_skel.len() >= 4 {
+                        let ot_skel = Self::consonant_skeleton(ot);
+                        if ot_skel == mt_skel {
+                            return true;
+                        }
+                    }
+                    false
                 })
             })
             .count();
@@ -1798,6 +2001,23 @@ fn format_mm_ss(ms: u64) -> String {
     format!("{minutes:02}:{seconds:02}")
 }
 
+impl MeetingSessionManager {
+    /// Returns `true` when a stopped meeting has zero real spoken words (ignoring
+    /// synthetic `[Paused ...]` markers), zero rollups, and empty rough notes,
+    /// so we discard it instead of saving a blank "Meeting YYYY-MM-DD" entry.
+    pub(crate) fn should_discard_empty_meeting(
+        segments: &[MeetingSegment],
+        rollup_count: usize,
+        rough_notes: &str,
+    ) -> bool {
+        let has_spoken_segment = segments.iter().any(|seg| {
+            let trimmed = seg.text.trim();
+            !trimmed.is_empty() && !(trimmed.starts_with("[Paused") && trimmed.ends_with(']'))
+        });
+        !has_spoken_segment && rollup_count == 0 && rough_notes.trim().is_empty()
+    }
+}
+
 /// Ensures single-script Roman Hinglish + English consistency in bilingual
 /// `en` + `ur`/`hi` meetings when `script_pref` is `Auto` or `RomanHinglish`
 /// (unless the user explicitly selected `UrduPersoArabic`, `Devanagari`, or `"ar"`).
@@ -1812,12 +2032,18 @@ pub(crate) fn normalize_meeting_segment_script(
     let has_ar = spoken_languages
         .iter()
         .any(|l| l.eq_ignore_ascii_case("ar"));
-    if has_ar {
-        return lowyap_flow::normalize_script_output(text, spoken_languages, script_pref.into());
-    }
     let has_en = spoken_languages
         .iter()
         .any(|l| l.eq_ignore_ascii_case("en"));
+    if has_ar {
+        let normalized =
+            lowyap_flow::normalize_script_output(text, spoken_languages, script_pref.into());
+        return if has_en {
+            lowyap_flow::restore_english_loanwords_in_perso_arabic(&normalized)
+        } else {
+            normalized
+        };
+    }
     let has_hindustani = spoken_languages
         .iter()
         .any(|l| l.eq_ignore_ascii_case("ur") || l.eq_ignore_ascii_case("hi"));
@@ -1825,7 +2051,7 @@ pub(crate) fn normalize_meeting_segment_script(
     match script_pref {
         HindustaniScript::RomanHinglish => lowyap_flow::hindustani_to_roman_hinglish(text),
         HindustaniScript::Auto if has_en && has_hindustani => {
-            lowyap_flow::hindustani_to_roman_hinglish(text)
+            lowyap_flow::hindustani_to_roman_preserving_arabic(text)
         }
         _ => lowyap_flow::normalize_script_output(text, spoken_languages, script_pref.into()),
     }
@@ -2036,6 +2262,31 @@ mod tests {
 
         let detail = manager.stop_meeting().expect("stop");
         assert!(detail.segments.is_empty());
+        let saved = manager.list_meetings(None).expect("list");
+        assert!(
+            saved.is_empty(),
+            "zero-word silence meeting must be discarded instead of saved in meetings.db"
+        );
+    }
+
+    #[test]
+    fn should_preserve_zero_audio_meeting_when_user_typed_rough_notes() {
+        let backend = Arc::new(MockBackend::new(
+            AudioCaptureMode::DualStream,
+            OutputRouteKind::Headphones,
+        ));
+        let (manager, _store, _dir) = make_manager(Arc::clone(&backend));
+
+        let live = manager.start_meeting(None, None).expect("start");
+        let meeting_id = live.active_meeting_id.expect("meeting id");
+        manager
+            .update_live_rough_notes("- Action item typed manually".to_string())
+            .expect("rough notes");
+
+        let _detail = manager.stop_meeting().expect("stop");
+        let saved = manager.list_meetings(None).expect("list");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].id, meeting_id);
     }
 
     #[test]

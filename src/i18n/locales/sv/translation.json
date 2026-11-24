@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Snabbkommando för efterbearbetning",
             "description": "Valfritt: En dedikerad snabbknapp som alltid tillämpar AI-efterbearbetning på din transkription."
+          },
+          "transform": {
+            "name": "Genväg för transformering",
+            "description": "Skriv om markerad text direkt på plats (eller transformera din senaste diktering) med det aktiva förvalet."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Samtal upptäckt"
+      },
+      "edgeDock": {
+        "title": "Kantdocka",
+        "description": "Fäst en diskret snabbflik vid vänster, nedre eller höger skärmkant. Hovra för Diktera, Möte och Transformera, eller dra för att byta kant.",
+        "positions": {
+          "left": "Vänster kant",
+          "bottom": "Nedre kant",
+          "right": "Höger kant",
+          "off": "Dold"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Öppna mötesanteckningar",
     "minimizeMeetingPill": "Minimera till menyraden",
     "meetingStopped": "Anteckningar stoppade",
-    "dismissMeetingStopped": "Spara och stäng"
+    "dismissMeetingStopped": "Spara och stäng",
+    "transform": "Transformera",
+    "transformMenuAria": "Förval för transformering",
+    "transformAutoApply": "Skriv om diktering automatiskt",
+    "transformPresetPolish": "Putsa",
+    "transformPresetPromptEngineer": "Prompt-ingenjör",
+    "transformConfigure": "Konfigurera transformeringar…",
+    "noticeTransformedCopied": "Transformerat — tryck ⌘V för att klistra in",
+    "noticeTransformEmpty": "Markera text eller diktera först"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} kanske blockerar 1 kortkommando",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Aktivt förval för transformering",
+      "transformPresetsHint": "Används automatiskt efter diktering när AI-omskrivning är på, eller när som helst på markerad text via genvägen eller inspelningspuckeln."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Felsökning"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Öppna lowyap-snabbåtgärder",
+    "dragHint": "Dra till vänster, nedre eller höger kant",
+    "noBotBadge": "Utan bot",
+    "actions": {
+      "dictate": "Diktera",
+      "meeting": "Mötesanteckningar",
+      "transform": "Transformera"
+    },
+    "runNow": "Omvandla nu",
+    "snoozeOneHour": "Snooza 1 timme",
+    "hideDock": "Dölj kantdocka"
   }
 }

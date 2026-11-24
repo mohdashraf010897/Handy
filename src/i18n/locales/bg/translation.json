@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Бърз клавиш за постобработка",
             "description": "По избор: отделна комбинация, която винаги прилага ИИ постобработка върху транскрипцията."
+          },
+          "transform": {
+            "name": "Клавишна комбинация за трансформиране",
+            "description": "Пренапишете маркирания текст на място (или трансформирайте последната диктовка) с активния шаблон."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Открито е обаждане"
+      },
+      "edgeDock": {
+        "title": "Edge Dock",
+        "description": "Tuck a minimal quick-action sliver onto the Left, Bottom, or Right screen edge. Hover for Dictate, Meeting, and Transform, or drag to snap edges.",
+        "positions": {
+          "left": "Left edge",
+          "bottom": "Bottom edge",
+          "right": "Right edge",
+          "off": "Hidden"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Отвори бележките от срещата",
     "minimizeMeetingPill": "Минимизирай в лентата с менюта",
     "meetingStopped": "Бележникът спря",
-    "dismissMeetingStopped": "Запази и затвори"
+    "dismissMeetingStopped": "Запази и затвори",
+    "transform": "Трансформиране",
+    "transformMenuAria": "Шаблони за трансформиране",
+    "transformAutoApply": "Автоматично пренаписване на диктовка",
+    "transformPresetPolish": "Изглаждане",
+    "transformPresetPromptEngineer": "Промпт инженер",
+    "transformConfigure": "Настройване на трансформациите…",
+    "noticeTransformedCopied": "Трансформирано — натиснете ⌘V за поставяне",
+    "noticeTransformEmpty": "Първо маркирайте текст или диктувайте"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} може да блокира 1 бърз клавиш",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Активен шаблон за трансформиране",
+      "transformPresetsHint": "Използва се автоматично след диктовка при включено AI пренаписване или по всяко време върху маркиран текст чрез клавишната комбинация или капсулата за запис."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Отстраняване"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Open lowyap quick actions",
+    "dragHint": "Drag to Left, Bottom, or Right edge",
+    "noBotBadge": "No bot",
+    "actions": {
+      "dictate": "Dictate",
+      "meeting": "Meeting notes",
+      "transform": "Transform"
+    },
+    "runNow": "Преобразувай сега",
+    "snoozeOneHour": "Отложи с 1 час",
+    "hideDock": "Скрий страничния док"
   }
 }

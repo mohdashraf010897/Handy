@@ -631,6 +631,35 @@ fn short_30ms_click_burst_on_others_does_not_spawn_phantom_speaker() {
 }
 
 #[test]
+fn single_teacher_melodic_pitch_shift_with_same_formants_stays_single_speaker() {
+    let teacher_formants = [
+        (420.0, 100.0, 1.25),
+        (1_180.0, 160.0, 0.95),
+        (2_450.0, 240.0, 0.35),
+    ];
+    let calm_urdu_1 = synth_formant_voice(2_200, 136.0, teacher_formants, 3.2, 0.44, 1101);
+    let calm_urdu_2 = synth_formant_voice(2_000, 140.0, teacher_formants, 3.5, 0.42, 1102);
+    // Melodic Arabic recitation (+32% F0 shift, identical vocal-tract formants)
+    let recitation = synth_formant_voice(2_400, 180.0, teacher_formants, 2.7, 0.48, 1103);
+
+    let mut diarizer = HybridSpeakerDiarizer::default();
+    for (idx, samples) in [calm_urdu_1, calm_urdu_2, recitation].into_iter().enumerate() {
+        let id = diarizer.identify(&UtteranceSpan {
+            channel: SpeakerChannel::Others,
+            samples_16k: samples,
+            start_ms: idx as u64 * 2_600,
+            end_ms: idx as u64 * 2_600 + 2_000,
+        });
+        assert_eq!(
+            id.speaker_id, "speaker_1",
+            "turn {idx} split single teacher into {}",
+            id.speaker_id
+        );
+    }
+    assert_eq!(diarizer.remote_speaker_count(), 1);
+}
+
+#[test]
 fn max_remote_speakers_cap_is_strictly_respected() {
     let config = DiarizerConfig {
         max_remote_speakers: 2,

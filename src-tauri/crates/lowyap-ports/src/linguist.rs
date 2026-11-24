@@ -93,6 +93,19 @@ pub enum LinguistTone {
     Code,
 }
 
+/// Built-in or custom rewrite intent for Stage-B post-processing and Transform (`⌥1`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinguistMode {
+    /// Faithful dictation polish: grammar, self-corrections, homophone repair, paragraphs.
+    #[default]
+    Polish,
+    /// Structured prompt engineering: turns spoken rough thoughts into crisp LLM instructions.
+    PromptEngineer,
+    /// User-authored custom prompt template (`${output}`).
+    Custom,
+}
+
 /// Privacy-bounded snapshot of text immediately surrounding the insertion cursor.
 ///
 /// Window titles, URLs, and app bundle identifiers are intentionally excluded
@@ -144,6 +157,9 @@ pub struct LinguistRequest {
     pub field_context: Option<FieldContextSnapshot>,
     /// Optional user-configured custom base prompt template.
     pub custom_prompt_override: Option<String>,
+    /// Rewrite mode governing prompt composition and output-guard bounds.
+    #[serde(default)]
+    pub mode: LinguistMode,
 }
 
 /// Output returned by a [`LinguistRewriter`] adapter prior to output-guard validation.

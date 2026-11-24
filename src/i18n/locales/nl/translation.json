@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Sneltoets voor naverwerking",
             "description": "Optioneel: Een specifieke sneltoets die altijd AI-naverwerking toepast op je transcriptie."
+          },
+          "transform": {
+            "name": "Transformatie-sneltoets",
+            "description": "Herschrijf geselecteerde tekst direct ter plekke (of transformeer je laatste dictaat) met de actieve preset."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Gesprek gedetecteerd"
+      },
+      "edgeDock": {
+        "title": "Randdock",
+        "description": "Plaats een subtiel snelmenu aan de linker-, onder- of rechterrand. Zweef voor Dicteren, Vergadering en Transformeren, of sleep naar een andere rand.",
+        "positions": {
+          "left": "Linkerrand",
+          "bottom": "Onderrand",
+          "right": "Rechterrand",
+          "off": "Verborgen"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Vergadernotities openen",
     "minimizeMeetingPill": "Minimaliseer naar menubalk",
     "meetingStopped": "Notulist gestopt",
-    "dismissMeetingStopped": "Opslaan en sluiten"
+    "dismissMeetingStopped": "Opslaan en sluiten",
+    "transform": "Transformeren",
+    "transformMenuAria": "Transformatie-presets",
+    "transformAutoApply": "Dictaat automatisch herschrijven",
+    "transformPresetPolish": "Bijschaven",
+    "transformPresetPromptEngineer": "Prompt-engineer",
+    "transformConfigure": "Transformaties instellen…",
+    "noticeTransformedCopied": "Getransformeerd — druk op ⌘V om te plakken",
+    "noticeTransformEmpty": "Selecteer eerst tekst of dicteer iets"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} blokkeert mogelijk 1 sneltoets",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Actieve transformatie-preset",
+      "transformPresetsHint": "Wordt automatisch toegepast na dicteren wanneer AI-herschrijven aan staat, of op elk moment op geselecteerde tekst via de sneltoets of opnamepil."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Probleemoplossing"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "lowyap-snelacties openen",
+    "dragHint": "Sleep naar linker-, onder- of rechterrand",
+    "noBotBadge": "Zonder bot",
+    "actions": {
+      "dictate": "Dicteren",
+      "meeting": "Vergadernotities",
+      "transform": "Transformeren"
+    },
+    "runNow": "Nu transformeren",
+    "snoozeOneHour": "1 uur sluimeren",
+    "hideDock": "Randdock verbergen"
   }
 }

@@ -1,8 +1,13 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw } from "lucide-react";
+import { Check, ChevronDown, Download, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useModelStore } from "@/stores/modelStore";
+import { useSettings } from "@/hooks/useSettings";
+import { useModelCatalog } from "@/hooks/useModelCatalog";
+import { useLanguageDetector } from "@/hooks/useLanguageDetector";
+import { routeAsrWithJev } from "@/lib/models/jevRouter";
+import { suggestedLanguages } from "@/lib/utils/languageSuggestions";
 import {
   ModelTable,
   Note,
@@ -12,7 +17,12 @@ import {
 import RetiredModelsNotice from "./RetiredModelsNotice";
 import { ModelRow } from "./ModelRow";
 import { Legend } from "./Legend";
-import { useModelEntries } from "./modelEntries";
+import {
+  cancelDownload,
+  pickModel,
+  useModelEntries,
+  usePlace,
+} from "./modelEntries";
 
 /** Past this many models on disk, the rest fold under "Show N more". */
 const YOURS_LIMIT = 5;
@@ -44,7 +54,340 @@ interface ModelsSettingsProps {
   onChangeLanguages?: () => void;
 }
 
-/** The Models page: onboarding's model table, filling the window. */
+const LANGUAGE_PRESETS: ReadonlyArray<{
+  id: string;
+  label: string;
+  badge?: string;
+  langs: string[];
+}> = [
+  {
+    id: "en",
+    label: "English",
+    badge: "Max Precision",
+    langs: ["en"],
+  },
+  {
+    id: "en-hi",
+    label: "English + Hindi",
+    badge: "Hinglish",
+    langs: ["en", "hi"],
+  },
+  {
+    id: "en-ur",
+    label: "English + Urdu",
+    langs: ["en", "ur"],
+  },
+  {
+    id: "en-ar",
+    label: "English + Arabic",
+    badge: "العربية",
+    langs: ["en", "ar"],
+  },
+  {
+    id: "en-ur-ar",
+    label: "English + Urdu + Arabic",
+    badge: "Lesson / Deen",
+    langs: ["en", "ur", "ar"],
+  },
+];
+
+function sameLanguageSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setA = new Set(a.map((x) => x.split(/[-_]/)[0].toLowerCase()));
+  const setB = new Set(b.map((x) => x.split(/[-_]/)[0].toLowerCase()));
+  if (setA.size !== setB.size) return false;
+  for (const item of setA) {
+    if (!setB.has(item)) return false;
+  }
+  return true;
+}
+
+const RecommendedModuleAction: React.FC<{
+  runtimeId: string;
+  sizeMb: number;
+  routingAligned: boolean;
+  onActivate: () => void;
+}> = ({ runtimeId, sizeMb, routingAligned, onActivate }) => {
+  const place = usePlace(runtimeId);
+  const progress = useModelStore(
+    (s) => s.downloadProgress[runtimeId]?.percentage ?? 0,
+  );
+
+  if (place === "downloading" || place === "checking") {
+    const pct = Math.max(1, Math.min(99, Math.round(progress)));
+    return (
+      <button
+        type="button"
+        data-testid="voice-module-primary-action"
+        onClick={() => cancelDownload(runtimeId)}
+        className="inline-flex h-[32px] shrink-0 cursor-pointer items-center gap-[8px] rounded-[8px] border border-line-strong bg-wash px-[12px] text-xs font-medium text-text hover:border-ink-3"
+      >
+        <span>
+          {place === "checking" ? "Verifying…" : `Downloading ${pct}%`}
+        </span>
+        <span className="text-ink-3">Cancel</span>
+      </button>
+    );
+  }
+
+  if (place === "loading") {
+    return (
+      <span
+        data-testid="voice-module-primary-action"
+        className="inline-flex h-[32px] shrink-0 items-center rounded-[8px] bg-wash px-[12px] text-xs font-medium text-ink-2"
+      >
+        Activating…
+      </span>
+    );
+  }
+
+  if (place === "active" && routingAligned) {
+    return (
+      <span
+        data-testid="voice-module-primary-action"
+        className="inline-flex h-[30px] shrink-0 items-center gap-[5px] rounded-full border border-line-strong bg-wash px-[11px] text-xs font-medium text-text"
+      >
+        <Check className="size-[13px]" aria-hidden="true" />
+        Active on this Mac
+      </span>
+    );
+  }
+
+  if (place === "active" && !routingAligned) {
+    return (
+      <button
+        type="button"
+        data-testid="voice-module-primary-action"
+        onClick={onActivate}
+        className="inline-flex h-[32px] shrink-0 cursor-pointer items-center gap-[6px] rounded-[8px] bg-text px-[13px] text-xs font-medium text-background hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-logo-primary"
+      >
+        Optimize Audio Routing
+      </button>
+    );
+  }
+
+  if (place === "ready") {
+    return (
+      <button
+        type="button"
+        data-testid="voice-module-primary-action"
+        onClick={onActivate}
+        className="inline-flex h-[32px] shrink-0 cursor-pointer items-center gap-[6px] rounded-[8px] bg-text px-[13px] text-xs font-medium text-background hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-logo-primary"
+      >
+        Use Recommended Module
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      data-testid="voice-module-primary-action"
+      onClick={onActivate}
+      className="inline-flex h-[32px] shrink-0 cursor-pointer items-center gap-[6px] rounded-[8px] bg-text px-[13px] text-xs font-medium text-background hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-logo-primary"
+    >
+      <Download className="size-[13px]" aria-hidden="true" />
+      <span>Download Module ({sizeMb} MB)</span>
+    </button>
+  );
+};
+
+/** Consumer-first Language & Automatic Voice Module card powered by Jev router. */
+const VoiceModuleSetupCard: React.FC<{
+  onChangeLanguages?: () => void;
+}> = ({ onChangeLanguages }) => {
+  const { getSetting, updateSetting } = useSettings();
+  const spokenRaw = getSetting("spoken_languages");
+  const selectedLanguage = getSetting("selected_language") ?? "auto";
+  const detectionMode = getSetting("language_detection") ?? "when_needed";
+  const langs = spokenRaw?.length ? spokenRaw : suggestedLanguages();
+
+  const { tier, offered, infoFor } = useModelCatalog(langs);
+  const infos = useModelStore((s) => s.models);
+  const detector = useLanguageDetector();
+
+  const downloadedCatalogIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const model of offered) {
+      if (infoFor(model)?.is_downloaded) {
+        set.add(model.id);
+      }
+    }
+    return set;
+  }, [offered, infos]);
+
+  const decision = useMemo(
+    () =>
+      routeAsrWithJev({
+        spokenLanguages: langs,
+        offered,
+        tier,
+        downloadedCatalogIds,
+      }),
+    [langs, offered, tier, downloadedCatalogIds],
+  );
+
+  const primaryCatalog = decision.primary;
+  const primaryInfo = primaryCatalog ? infoFor(primaryCatalog) : undefined;
+  const primaryCandidate = decision.ranked[0];
+
+  const applyAudioPolicy = async (nextLangs: string[]) => {
+    const nextDecision = routeAsrWithJev({
+      spokenLanguages: nextLangs,
+      offered,
+      tier,
+      downloadedCatalogIds,
+    });
+    await updateSetting("spoken_languages", nextLangs);
+    await updateSetting(
+      "selected_language",
+      nextDecision.audioPolicy.recommendedSelectedLanguage,
+    );
+    await updateSetting(
+      "language_detection",
+      nextDecision.audioPolicy.recommendedDetectionMode,
+    );
+    if (
+      nextDecision.audioPolicy.requiresConstrainedDetector &&
+      detector.downloaded === false &&
+      !detector.downloading
+    ) {
+      void detector.download();
+    }
+    const nextRuntime = nextDecision.primary
+      ? infoFor(nextDecision.primary)
+      : undefined;
+    if (nextRuntime?.is_downloaded) {
+      pickModel(nextRuntime.id);
+    }
+  };
+
+  const handleActivatePrimary = () => {
+    void updateSetting(
+      "selected_language",
+      decision.audioPolicy.recommendedSelectedLanguage,
+    );
+    void updateSetting(
+      "language_detection",
+      decision.audioPolicy.recommendedDetectionMode,
+    );
+    if (
+      decision.audioPolicy.requiresConstrainedDetector &&
+      detector.downloaded === false &&
+      !detector.downloading
+    ) {
+      void detector.download();
+    }
+    if (primaryInfo) {
+      pickModel(primaryInfo.id);
+    }
+  };
+
+  const detectorReady =
+    !decision.audioPolicy.requiresConstrainedDetector ||
+    detector.downloaded === true ||
+    detector.downloading;
+  const routingAligned =
+    selectedLanguage === decision.audioPolicy.recommendedSelectedLanguage &&
+    (!decision.audioPolicy.requiresConstrainedDetector ||
+      detectionMode === "always") &&
+    detectorReady;
+
+  const matchesPreset = LANGUAGE_PRESETS.some((p) =>
+    sameLanguageSet(langs, p.langs),
+  );
+
+  return (
+    <section
+      data-testid="voice-module-setup-card"
+      className="mx-[12px] mb-[16px] rounded-card border border-line-strong bg-surface p-[16px]"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-[8px]">
+        <div>
+          <div className="text-xs font-medium tracking-wide text-ink-3 uppercase">
+            Languages you speak
+          </div>
+          <p className="mt-[2px] text-xs text-ink-2">
+            Pick your speaking profile and lowyap automatically prepares the
+            right offline voice module.
+          </p>
+        </div>
+        {onChangeLanguages && (
+          <button
+            type="button"
+            onClick={onChangeLanguages}
+            className="shrink-0 cursor-pointer text-xs font-medium text-ink-2 underline decoration-line-strong underline-offset-[3px] hover:text-text"
+          >
+            More languages…
+          </button>
+        )}
+      </div>
+
+      <div className="mt-[12px] flex flex-wrap items-center gap-[8px]">
+        {LANGUAGE_PRESETS.map((preset) => {
+          const active = sameLanguageSet(langs, preset.langs);
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              data-testid={`voice-profile-${preset.id}`}
+              onClick={() => void applyAudioPolicy(preset.langs)}
+              className={`inline-flex h-[30px] cursor-pointer items-center gap-[6px] rounded-full border px-[12px] text-xs font-medium transition-colors ${
+                active
+                  ? "border-text bg-text text-background"
+                  : "border-line-strong bg-background text-text hover:border-ink-3"
+              }`}
+            >
+              <span>{preset.label}</span>
+              {preset.badge && (
+                <span
+                  className={`rounded-full px-[6px] py-[1px] text-[10px] ${
+                    active
+                      ? "bg-background/20 text-background"
+                      : "bg-wash text-ink-2"
+                  }`}
+                >
+                  {preset.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        {!matchesPreset && (
+          <span className="inline-flex h-[30px] items-center rounded-full border border-text bg-text px-[12px] text-xs font-medium text-background">
+            {decision.normalizedLanguages.map((c) => c.toUpperCase()).join(" + ")}
+          </span>
+        )}
+      </div>
+
+      {primaryCatalog && primaryInfo && (
+        <div className="mt-[14px] flex flex-col justify-between gap-[12px] rounded-[10px] border border-line bg-background p-[13px] sm:flex-row sm:items-center">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-[8px]">
+              <span className="text-sm font-semibold text-text">
+                {decision.moduleTitle}
+              </span>
+              <span className="rounded-[5px] bg-wash px-[6px] py-[1px] text-[11px] font-medium text-ink-2">
+                {primaryCatalog.name}
+              </span>
+            </div>
+            <p className="mt-[3px] text-xs text-ink-2">
+              {decision.moduleSubtitle}
+            </p>
+          </div>
+          <RecommendedModuleAction
+            runtimeId={primaryInfo.id}
+            sizeMb={primaryCandidate?.sizeMb ?? Math.round(primaryInfo.size_mb)}
+            routingAligned={routingAligned}
+            onActivate={handleActivatePrimary}
+          />
+        </div>
+      )}
+    </section>
+  );
+};
+
+/** The Models page: simple Voice Module setup up top, custom open-weight catalog on demand. */
 export const ModelsSettings: React.FC<ModelsSettingsProps> = ({
   onChangeLanguages,
 }) => {
@@ -53,6 +396,8 @@ export const ModelsSettings: React.FC<ModelsSettingsProps> = ({
   const { facts, lists } = useModelEntries();
   const { filters, setFilters, searching, matches } = useModelFilters();
   const [more, setMore] = useState(false);
+  const [catalogExpanded, setCatalogExpanded] = useState(false);
+  const showCatalog = catalogExpanded || searching;
 
   if (loading) {
     return (
@@ -154,28 +499,58 @@ export const ModelsSettings: React.FC<ModelsSettingsProps> = ({
       <div className="mx-[12px] mb-[16px] flex-none empty:hidden">
         <RetiredModelsNotice />
       </div>
-      <ModelTable
-        grading={facts}
-        filters={filters}
-        setFilters={setFilters}
-        // "Yours" always shows at rest; a search hides empty sections.
-        sections={sections.filter(
-          (s) => s.rows.length || (s.key === "yours" && !searching),
-        )}
-        renderRow={(e) => <ModelRow key={e.id} entry={e} />}
-        actionsHead={<Legend tier={facts.tier} />}
-        footer={
-          !searching &&
-          lists.untested.length > 0 && (
-            <Note>
-              {t("settings.models.untestedHidden", {
-                count: lists.untested.length,
-              })}
-            </Note>
-          )
-        }
-        thinEdge
-      />
+      <VoiceModuleSetupCard onChangeLanguages={onChangeLanguages} />
+
+      <div className="mx-[12px] mb-[10px] flex-none">
+        <button
+          type="button"
+          data-testid="toggle-custom-catalog"
+          aria-expanded={showCatalog}
+          onClick={() => setCatalogExpanded((open) => !open)}
+          className="flex w-full cursor-pointer items-center justify-between rounded-[10px] border border-line bg-wash/50 px-[13px] py-[9px] text-left transition-colors hover:border-line-strong hover:bg-wash focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary"
+        >
+          <div className="flex flex-wrap items-center gap-[8px]">
+            <span className="text-xs font-medium text-text">
+              Custom Engine &amp; Open-Weight Catalog
+            </span>
+            <span className="text-xs text-ink-3">
+              {lists.yours.length} installed · Bring your own GGUF or compare
+              all engines
+            </span>
+          </div>
+          <ChevronDown
+            className={`size-[15px] shrink-0 text-ink-2 transition-transform duration-200 ${
+              showCatalog ? "rotate-180" : ""
+            }`}
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+
+      {showCatalog && (
+        <ModelTable
+          grading={facts}
+          filters={filters}
+          setFilters={setFilters}
+          // "Yours" always shows at rest; a search hides empty sections.
+          sections={sections.filter(
+            (s) => s.rows.length || (s.key === "yours" && !searching),
+          )}
+          renderRow={(e) => <ModelRow key={e.id} entry={e} />}
+          actionsHead={<Legend tier={facts.tier} />}
+          footer={
+            !searching &&
+            lists.untested.length > 0 && (
+              <Note>
+                {t("settings.models.untestedHidden", {
+                  count: lists.untested.length,
+                })}
+              </Note>
+            )
+          }
+          thinEdge
+        />
+      )}
     </div>
   );
 };

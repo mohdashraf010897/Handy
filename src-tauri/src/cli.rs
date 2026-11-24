@@ -70,4 +70,14 @@ pub struct CliArgs {
     /// Replay --transcribe-file through the live push-to-talk chunker (200 ms frames).
     #[arg(long)]
     pub simulate_live: bool,
+
+    /// Also run the 2-stage Linguist pipeline (`finalize_dictation`: Stage A + Stage B)
+    /// on `--transcribe-file` output (read-only; never writes history or clipboard).
+    #[arg(long)]
+    pub with_linguist: bool,
+
+    /// Run a read-only batch evaluation manifest (`{ clips: [...], meetings: [...] }`)
+    /// with a single ASR model load and emit structured JSON metrics to stdout.
+    #[arg(long, value_name = "MANIFEST_JSON")]
+    pub eval_batch: Option<PathBuf>,
 }

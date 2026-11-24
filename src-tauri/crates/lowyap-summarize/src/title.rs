@@ -106,17 +106,20 @@ fn try_llm_title(
     let budget = backend.max_prompt_chars().clamp(128, 1_800);
     let mut bounded = truncate_chars_with_ellipsis(&snippet, budget);
 
-    if !backend.supports_non_latin_scripts() && contains_apple_intelligence_blocked_script(&bounded)
-    {
-        if is_predominantly_english_title_context(&bounded) {
-            let roman = lowyap_flow::hindustani_to_roman_hinglish(&bounded);
-            if !contains_apple_intelligence_blocked_script(&roman) {
-                bounded = roman;
+    if !backend.supports_non_latin_scripts() {
+        if contains_apple_intelligence_blocked_script(&bounded) {
+            if is_predominantly_english_title_context(&bounded) {
+                let roman = crate::budget::romanize_and_fold_for_apple_intelligence(&bounded);
+                if !contains_apple_intelligence_blocked_script(&roman) {
+                    bounded = roman;
+                } else {
+                    return None;
+                }
             } else {
                 return None;
             }
         } else {
-            return None;
+            bounded = crate::budget::fold_latin_diacritics_for_apple_intelligence(&bounded);
         }
     }
 

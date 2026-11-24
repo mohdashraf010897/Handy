@@ -14,6 +14,7 @@ import { resolveStudioEgressState } from "@/lib/utils/egressState";
 import { useModelStore } from "@/stores/modelStore";
 import { MEETINGS_SECTION } from "./meetings";
 import type { StudioSettingsTab } from "./settings/StudioSettingsWorkspace";
+import type { VoiceStyleTab } from "./voice";
 
 export type SidebarSection =
   | "desk"
@@ -72,6 +73,7 @@ export const STUDIO_NAV_ITEMS: readonly StudioNavEntry[] = [
 export function resolveStudioNavigation(raw: string): {
   section: SidebarSection;
   settingsTab?: StudioSettingsTab;
+  voiceTab?: VoiceStyleTab;
 } | null {
   switch (raw) {
     case "desk":
@@ -85,6 +87,8 @@ export function resolveStudioNavigation(raw: string): {
     case "flowTone":
     case "postprocessing":
       return { section: "voice" };
+    case "transforms":
+      return { section: "voice", voiceTab: "linguistEngine" };
     case "settings":
     case "general":
       return { section: "settings", settingsTab: "shortcuts" };
@@ -122,7 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const settingsShortcutLabel = osType === "macos" ? "⌘," : "Ctrl+,";
 
   return (
-    <aside className="flex h-full w-[208px] shrink-0 flex-col justify-between border-e border-line bg-rail px-3 pb-3 select-none">
+    <aside className="flex h-full w-[56px] md:w-[208px] shrink-0 flex-col justify-between border-e border-line bg-rail px-1.5 md:px-3 pb-3 select-none transition-[width,padding] duration-150">
       <div className="flex flex-col">
         {osType === "macos" ? (
           <div
@@ -134,12 +138,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="h-3 w-full shrink-0" aria-hidden="true" />
         )}
 
-        <div data-tauri-drag-region className="px-2 pb-4 pt-0.5">
-          <div className="flex items-center gap-2">
+        <div data-tauri-drag-region className="px-1 md:px-2 pb-4 pt-0.5">
+          <div className="flex items-center justify-center md:justify-start gap-2">
             <VocalKeycapMark size={22} className="shrink-0" />
-            <HandyTextLogo width={90} className="text-text" />
+            <HandyTextLogo width={90} className="hidden md:block text-text" />
           </div>
-          <p className="mt-1.5 font-mono text-[10.5px] leading-snug text-ink-3">
+          <p className="hidden md:block mt-1.5 font-mono text-[10.5px] leading-snug text-ink-3">
             {t("studio.sidebar.tagline", {
               defaultValue: "lowkey yap. it types.",
             })}
@@ -161,9 +165,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 type="button"
+                aria-label={label}
+                title={label}
                 aria-current={isActive ? "page" : undefined}
                 onClick={() => onSectionChange(item.id)}
-                className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-start text-[13px] focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary ${
+                className={`flex w-full cursor-pointer items-center justify-center md:justify-between gap-2 rounded-lg px-2 md:px-2.5 py-2 text-start text-[13px] focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary ${
                   isActive
                     ? "bg-surface font-semibold text-text shadow-2xs ring-1 ring-inset ring-line"
                     : "font-medium text-ink-2 hover:bg-wash hover:text-text"
@@ -177,14 +183,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     strokeWidth={1.85}
                     className="shrink-0"
                   />
-                  <span className="truncate" title={label}>
+                  <span className="hidden md:inline truncate" title={label}>
                     {label}
                   </span>
                 </span>
                 {isActive && (
                   <span
                     aria-hidden="true"
-                    className="h-[3px] w-[11px] shrink-0 rounded-full bg-logo-primary"
+                    className="hidden md:inline-block h-[3px] w-[11px] shrink-0 rounded-full bg-logo-primary"
                   />
                 )}
               </button>
@@ -196,9 +202,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex flex-col gap-2.5 border-t border-line pt-2.5">
         <button
           type="button"
+          aria-label={t("studio.sidebar.settings", { defaultValue: "Settings" })}
+          title={t("studio.sidebar.settings", { defaultValue: "Settings" })}
           aria-current={activeSection === "settings" ? "page" : undefined}
           onClick={() => onSectionChange("settings", "shortcuts")}
-          className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-start text-[13px] focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary ${
+          className={`flex w-full cursor-pointer items-center justify-center md:justify-between gap-2 rounded-lg px-2 md:px-2.5 py-2 text-start text-[13px] focus:outline-none focus-visible:ring-1 focus-visible:ring-logo-primary ${
             activeSection === "settings"
               ? "bg-surface font-semibold text-text shadow-2xs ring-1 ring-inset ring-line"
               : "font-medium text-ink-2 hover:bg-wash hover:text-text"
@@ -206,23 +214,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <span className="flex min-w-0 items-center gap-2.5">
             <Settings size={16} strokeWidth={1.85} className="shrink-0" />
-            <span className="truncate">
+            <span className="hidden md:inline truncate">
               {t("studio.sidebar.settings", { defaultValue: "Settings" })}
             </span>
           </span>
           {activeSection === "settings" ? (
             <span
               aria-hidden="true"
-              className="h-[3px] w-[11px] shrink-0 rounded-full bg-logo-primary"
+              className="hidden md:inline-block h-[3px] w-[11px] shrink-0 rounded-full bg-logo-primary"
             />
           ) : (
-            <kbd className="font-mono text-[11px] font-normal text-ink-3">
+            <kbd className="hidden md:inline font-mono text-[11px] font-normal text-ink-3">
               {settingsShortcutLabel}
             </kbd>
           )}
         </button>
 
-        <div className="rounded-lg border border-line bg-surface px-2.5 py-2">
+        <div className="hidden md:block rounded-lg border border-line bg-surface px-2.5 py-2">
           <div className="flex items-center justify-between gap-1.5 text-[11px]">
             <span className="truncate font-medium text-text">
               {t("studio.sidebar.vaultLabel", {

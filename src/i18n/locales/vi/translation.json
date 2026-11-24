@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Phím tắt xử lý sau",
             "description": "Tùy chọn: Phím tắt chuyên dụng luôn áp dụng xử lý sau bằng AI cho bản chuyển đổi của bạn."
+          },
+          "transform": {
+            "name": "Phím tắt Biến đổi",
+            "description": "Viết lại văn bản đang bôi đen ngay tại chỗ (hoặc biến đổi bản đọc gần nhất) bằng mẫu đang chọn."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Phát hiện cuộc gọi"
+      },
+      "edgeDock": {
+        "title": "Thanh cạnh màn hình",
+        "description": "Gắn thanh tác vụ siêu gọn ở cạnh trái, dưới hoặc phải. Di chuột để mở Đọc chính tả, Cuộc họp và Biến đổi, hoặc kéo để đổi cạnh.",
+        "positions": {
+          "left": "Cạnh trái",
+          "bottom": "Cạnh dưới",
+          "right": "Cạnh phải",
+          "off": "Ẩn"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Mở ghi chú cuộc họp",
     "minimizeMeetingPill": "Thu nhỏ vào thanh menu",
     "meetingStopped": "Đã dừng ghi chú",
-    "dismissMeetingStopped": "Lưu & đóng"
+    "dismissMeetingStopped": "Lưu & đóng",
+    "transform": "Biến đổi",
+    "transformMenuAria": "Các mẫu biến đổi",
+    "transformAutoApply": "Tự động viết lại bản đọc",
+    "transformPresetPolish": "Trau chuốt",
+    "transformPresetPromptEngineer": "Kỹ sư Prompt",
+    "transformConfigure": "Cấu hình biến đổi…",
+    "noticeTransformedCopied": "Đã biến đổi — nhấn ⌘V để dán",
+    "noticeTransformEmpty": "Hãy bôi đen văn bản hoặc đọc trước"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} có thể đang chặn 1 phím tắt",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Mẫu Biến đổi Đang dùng",
+      "transformPresetsHint": "Tự động áp dụng sau khi đọc lúc bật Viết lại bằng AI, hoặc dùng bất cứ lúc nào trên văn bản bôi đen qua phím tắt hay viên nang ghi âm."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Gỡ lỗi"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Mở thao tác nhanh lowyap",
+    "dragHint": "Kéo tới cạnh trái, dưới hoặc phải",
+    "noBotBadge": "Không bot",
+    "actions": {
+      "dictate": "Đọc chính tả",
+      "meeting": "Ghi chú họp",
+      "transform": "Biến đổi"
+    },
+    "runNow": "Biến đổi ngay",
+    "snoozeOneHour": "Tạm ẩn 1 giờ",
+    "hideDock": "Ẩn thanh cạnh"
   }
 }

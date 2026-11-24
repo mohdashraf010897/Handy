@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Skrót postprocessingu",
             "description": "Opcjonalnie: Dedykowany skrót klawiszowy, który zawsze stosuje postprocessing AI do transkrypcji."
+          },
+          "transform": {
+            "name": "Skrót przekształcania",
+            "description": "Przepisz zaznaczony tekst w miejscu (lub przekształć ostatnie dyktowanie) przy użyciu aktywnego presetu."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Wykryto połączenie"
+      },
+      "edgeDock": {
+        "title": "Dok krawędziowy",
+        "description": "Przypnij dyskretny pasek przy lewej, dolnej lub prawej krawędzi ekranu. Najedź, aby dyktować, nagrać spotkanie lub przekształcić tekst; przeciągnij, aby zmienić krawędź.",
+        "positions": {
+          "left": "Lewa krawędź",
+          "bottom": "Dolna krawędź",
+          "right": "Prawa krawędź",
+          "off": "Ukryty"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Otwórz notatki ze spotkania",
     "minimizeMeetingPill": "Minimalizuj do paska menu",
     "meetingStopped": "Notatnik zatrzymany",
-    "dismissMeetingStopped": "Zapisz i zamknij"
+    "dismissMeetingStopped": "Zapisz i zamknij",
+    "transform": "Przekształć",
+    "transformMenuAria": "Presety przekształcania",
+    "transformAutoApply": "Automatycznie przeredaguj dyktowanie",
+    "transformPresetPolish": "Wygładź",
+    "transformPresetPromptEngineer": "Inżynier promptów",
+    "transformConfigure": "Konfiguruj przekształcenia…",
+    "noticeTransformedCopied": "Przekształcono — naciśnij ⌘V, aby wkleić",
+    "noticeTransformEmpty": "Najpierw zaznacz tekst lub podyktuj"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} może blokować 1 skrót",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Aktywny preset przekształcania",
+      "transformPresetsHint": "Stosowany automatycznie po dyktowaniu przy włączonym przeredagowywaniu AI lub w dowolnej chwili na zaznaczonym tekście przez skrót albo kapsułę nagrywania."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Debugowanie"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Otwórz szybkie akcje lowyap",
+    "dragHint": "Przeciągnij do lewej, dolnej lub prawej krawędzi",
+    "noBotBadge": "Bez bota",
+    "actions": {
+      "dictate": "Dyktuj",
+      "meeting": "Notatki ze spotkania",
+      "transform": "Przekształć"
+    },
+    "runNow": "Przekształć teraz",
+    "snoozeOneHour": "Wycisz na 1 godzinę",
+    "hideDock": "Ukryj pasek krawędzi"
   }
 }

@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "後處理快捷鍵",
             "description": "可選：專用快捷鍵，使用時一律對轉錄結果套用 AI 後處理"
+          },
+          "transform": {
+            "name": "轉換快捷鍵",
+            "description": "使用目前預設就地改寫選取文字（或轉換最近一次語音聽寫）。"
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "偵測到通話"
+      },
+      "edgeDock": {
+        "title": "邊緣停靠列",
+        "description": "在螢幕左側、底部或右側邊緣停靠極簡快捷列。游標停留在上方即可開啟聽寫、會議與改寫，拖曳可切換邊緣。",
+        "positions": {
+          "left": "左側邊緣",
+          "bottom": "底部邊緣",
+          "right": "右側邊緣",
+          "off": "隱藏"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "開啟會議筆記",
     "minimizeMeetingPill": "最小化至選單列",
     "meetingStopped": "筆記記錄已停止",
-    "dismissMeetingStopped": "儲存並關閉"
+    "dismissMeetingStopped": "儲存並關閉",
+    "transform": "轉換",
+    "transformMenuAria": "轉換預設",
+    "transformAutoApply": "自動潤飾聽寫內容",
+    "transformPresetPolish": "潤飾",
+    "transformPresetPromptEngineer": "提示詞工程師",
+    "transformConfigure": "設定轉換…",
+    "noticeTransformedCopied": "已轉換 — 按 ⌘V 貼上",
+    "noticeTransformEmpty": "請先選取文字或進行語音聽寫"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} 可能正在阻擋 1 個快捷鍵",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "應用程式語調與片段",
         "linguistEngine": "潤飾引擎與提示詞"
-      }
+      },
+      "transformPresetsTitle": "目前轉換預設",
+      "transformPresetsHint": "開啟 AI 改寫後會在聽寫結束時自動套用，也可隨時透過轉換快捷鍵或錄音膠囊對選取文字執行。"
     },
     "settings": {
       "title": "設定",
@@ -1433,5 +1457,18 @@
         "debug": "除錯"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "開啟 lowyap 快捷操作",
+    "dragHint": "拖曳至左側、底部或右側邊緣",
+    "noBotBadge": "免機器人",
+    "actions": {
+      "dictate": "聽寫",
+      "meeting": "會議筆記",
+      "transform": "改寫"
+    },
+    "runNow": "立即轉換",
+    "snoozeOneHour": "暫停 1 小時",
+    "hideDock": "隱藏邊緣列"
   }
 }

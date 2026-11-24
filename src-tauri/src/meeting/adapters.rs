@@ -218,12 +218,29 @@ pub fn to_hybrid_notes_request(
     tail_segments: &[types::MeetingSegment],
     language_instruction: Option<String>,
 ) -> HybridNotesRequest {
+    let effective_tail: &[types::MeetingSegment] =
+        if let Some(covered_end_ms) = rollups.iter().map(|r| r.end_ms).max() {
+            let first_uncovered = tail_segments
+                .iter()
+                .position(|s| s.end_ms > covered_end_ms)
+                .unwrap_or(tail_segments.len());
+            let uncovered = &tail_segments[first_uncovered..];
+            if uncovered.is_empty() {
+                let closing_start = tail_segments.len().saturating_sub(20);
+                &tail_segments[closing_start..]
+            } else {
+                uncovered
+            }
+        } else {
+            tail_segments
+        };
+
     HybridNotesRequest {
         title: title.to_owned(),
         template: template.into(),
         rough_notes: rough_notes.to_owned(),
         rollups: to_rollup_strings(rollups),
-        tail_segments: to_port_segments(tail_segments),
+        tail_segments: to_port_segments(effective_tail),
         language_instruction,
     }
 }
@@ -395,11 +412,18 @@ impl CompletionBackend for AppleIntelligenceBackend {
         }
 
         let requested = i32::try_from(max_tokens).unwrap_or(self.max_output_tokens);
-        let effective_tokens = requested.clamp(256, self.max_output_tokens.max(1_536));
-        let output = crate::apple_intelligence::process_text_with_system_prompt(
+        let effective_tokens = requested.clamp(64, self.max_output_tokens.max(1_536));
+        let timeout_ms = if effective_tokens <= 96 {
+            5_500
+        } else {
+            14_000
+        };
+        let output = crate::apple_intelligence::process_text_with_options(
             system_prompt,
             user_prompt,
             effective_tokens,
+            true,
+            timeout_ms,
         )
         .map_err(|err| {
             warn!("Apple Intelligence meeting completion failed: {err}");

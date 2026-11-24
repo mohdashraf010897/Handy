@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   RefreshCw,
+  Search,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import {
   type MeetingTemplate,
   formatDurationMmSs,
   formatSegmentSpeakerBadge,
+  groupConsecutiveTranscriptTurns,
   isolateBidi,
 } from "./api";
 
@@ -173,14 +175,18 @@ export const MeetingDetailPane: React.FC<MeetingDetailPaneProps> = ({
     useState<MeetingTemplate>("general");
   const [draftBullets, setDraftBullets] = useState("");
   const [copied, setCopied] = useState(false);
+  const [transcriptCopied, setTranscriptCopied] = useState(false);
+  const [transcriptQuery, setTranscriptQuery] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const transcriptCopyTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (!detail) return;
     setDraftTitle(detail.summary.title);
     setDraftTemplate(detail.summary.template);
     setDraftBullets(detail.rough_notes);
+    setTranscriptQuery("");
     setConfirmDelete(false);
   }, [
     detail?.summary.id,
@@ -192,6 +198,7 @@ export const MeetingDetailPane: React.FC<MeetingDetailPaneProps> = ({
   useEffect(() => {
     return () => {
       clearTimeout(copyTimerRef.current);
+      clearTimeout(transcriptCopyTimerRef.current);
     };
   }, []);
 
@@ -505,50 +512,154 @@ export const MeetingDetailPane: React.FC<MeetingDetailPaneProps> = ({
         )}
 
         {activeTab === "transcript" && (
-          <div className="max-h-[360px] overflow-y-auto space-y-2.5 pe-1">
-            {detail.segments.length === 0 ? (
-              <p className="text-sm text-ink-3 italic">
-                {t("meetings.detail.transcriptEmpty")}
-              </p>
-            ) : (
-              detail.segments.map((seg) => {
-                const isMe = seg.speaker === "me";
-                const timeTag = `[${formatDurationMmSs(seg.start_ms)}]`;
-                return (
-                  <div
-                    key={seg.id}
-                    className="flex items-start gap-2.5 text-sm leading-relaxed"
-                  >
-                    <span className="font-mono text-xs text-ink-3 shrink-0 pt-0.5 tabular-nums">
-                      {timeTag}
-                    </span>
-                    <span
-                      title={formatSegmentSpeakerBadge(
-                        seg,
-                        t("meetings.speaker.me"),
-                        t("meetings.speaker.others"),
-                      )}
-                      className={`px-2 py-0.5 rounded text-xs font-semibold shrink-0 max-w-44 truncate ${
-                        isMe
-                          ? "bg-logo-primary/20 text-text"
-                          : "bg-line text-ink-2"
-                      }`}
-                    >
-                      {isolateBidi(
-                        formatSegmentSpeakerBadge(
+          <div className="space-y-3">
+            {detail.segments.length > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search
+                    className="w-3.5 h-3.5 text-ink-3 absolute start-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    type="search"
+                    value={transcriptQuery}
+                    onChange={(e) => setTranscriptQuery(e.target.value)}
+                    placeholder={t("meetings.detail.searchTranscript", {
+                      defaultValue: "Filter transcript…",
+                    })}
+                    aria-label={t("meetings.detail.searchTranscript", {
+                      defaultValue: "Filter transcript",
+                    })}
+                    className="w-full ps-8 h-8 text-xs"
+                  />
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label={t("meetings.detail.copyTranscript", {
+                    defaultValue: "Copy transcript",
+                  })}
+                  onClick={() => {
+                    const plain = detail.segments
+                      .map((seg) => {
+                        const speaker = formatSegmentSpeakerBadge(
                           seg,
                           t("meetings.speaker.me"),
                           t("meetings.speaker.others"),
-                        ),
-                      )}
-                    </span>
-                    <p dir="auto" className="text-text flex-1 break-words">
-                      {isolateBidi(seg.text)}
-                    </p>
-                  </div>
-                );
-              })
+                        );
+                        return `[${formatDurationMmSs(seg.start_ms)}] ${speaker}: ${seg.text}`;
+                      })
+                      .join("\n");
+                    void navigator.clipboard?.writeText(plain);
+                    setTranscriptCopied(true);
+                    clearTimeout(transcriptCopyTimerRef.current);
+                    transcriptCopyTimerRef.current = setTimeout(
+                      () => setTranscriptCopied(false),
+                      1800,
+                    );
+                  }}
+                  className="flex items-center gap-1.5 shrink-0"
+                >
+                  {transcriptCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>
+                        {t("meetings.detail.copied", {
+                          defaultValue: "Copied",
+                        })}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>
+                        {t("meetings.detail.copyTranscriptShort", {
+                          defaultValue: "Copy",
+                        })}
+                      </span>
+                    </>
+                  )}
+                </Button>
+              </div>
             )}
+
+            <div className="max-h-[380px] overflow-y-auto space-y-3.5 pe-1">
+              {detail.segments.length === 0 ? (
+                <p className="text-sm text-ink-3 italic">
+                  {t("meetings.detail.transcriptEmpty")}
+                </p>
+              ) : (
+                (() => {
+                  const q = transcriptQuery.trim().toLowerCase();
+                  const filtered = q
+                    ? detail.segments.filter(
+                        (seg) =>
+                          seg.text.toLowerCase().includes(q) ||
+                          (seg.speaker_label?.toLowerCase().includes(q) ??
+                            false),
+                      )
+                    : detail.segments;
+                  if (filtered.length === 0) {
+                    return (
+                      <p className="text-sm text-ink-3 italic">
+                        {t("meetings.detail.noMatchingSegments", {
+                          defaultValue: "No matching transcript lines.",
+                        })}
+                      </p>
+                    );
+                  }
+                  return groupConsecutiveTranscriptTurns(
+                    filtered,
+                    t("meetings.speaker.me"),
+                    t("meetings.speaker.others"),
+                  ).map((turn) => {
+                    const isMe = turn.speaker === "me";
+                    const timeTag = formatDurationMmSs(turn.start_ms);
+                    return (
+                      <div
+                        key={turn.key}
+                        className={`flex flex-col space-y-1 ${
+                          isMe ? "items-end" : "items-stretch"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 text-xs text-ink-3">
+                          <span
+                            title={turn.speakerBadge}
+                            className={`px-2 py-0.5 rounded font-semibold max-w-48 truncate ${
+                              isMe
+                                ? "bg-logo-primary/20 text-text"
+                                : "bg-line text-ink-2"
+                            }`}
+                          >
+                            {isolateBidi(turn.speakerBadge)}
+                          </span>
+                          <span className="font-mono tabular-nums">
+                            [{timeTag}]
+                          </span>
+                        </div>
+                        <div
+                          className={
+                            isMe
+                              ? "max-w-[88%] rounded-2xl rounded-tr-sm border border-logo-primary/25 bg-logo-primary/12 px-3.5 py-2 space-y-1.5"
+                              : "w-full space-y-1.5 ps-0.5"
+                          }
+                        >
+                          {turn.segments.map((seg) => (
+                            <p
+                              key={seg.id}
+                              dir="auto"
+                              className="text-sm text-text leading-relaxed break-words"
+                            >
+                              {seg.text}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()
+              )}
+            </div>
           </div>
         )}
       </div>

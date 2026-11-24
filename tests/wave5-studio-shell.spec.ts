@@ -365,7 +365,7 @@ test.describe("Wave 5 Studio Shell — Quiet Tactile Studio Instrument", () => {
       page.getByRole("heading", { name: "Voice & Style", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("tab", { name: "App Tone & Snippets" }),
+      page.getByRole("tab", { name: "App Tone & Shortcuts" }),
     ).toHaveAttribute("aria-selected", "true");
     if (screenshotDir) {
       await page.screenshot({
@@ -373,10 +373,8 @@ test.describe("Wave 5 Studio Shell — Quiet Tactile Studio Instrument", () => {
         animations: "disabled",
       });
     }
-    await page.getByRole("tab", { name: "Linguist Engine & Prompts" }).click();
-    await expect(
-      page.getByText(/Stage-A deterministic cleanup/i),
-    ).toBeVisible();
+    await page.getByRole("tab", { name: "AI Rewriting & Prompts" }).click();
+    await expect(page.getByText(/Instant cleanup is always on/i)).toBeVisible();
 
     // 4. Press Cmd/Ctrl+, -> opens Settings -> Shortcuts & Audio without duplicating Lexicon/Voice controls
     await page.keyboard.press("ControlOrMeta+,");

@@ -50,6 +50,68 @@ pub fn contains_apple_intelligence_blocked_script(text: &str) -> bool {
     text.chars().any(is_apple_intelligence_blocked_char)
 }
 
+/// Folds extended Latin academic transliteration diacritics, macrons, and
+/// underdots (e.g. `Jīla'ān suraṁ` -> `Jila'an suram`) into clean ASCII so
+/// macOS `FoundationModels` does not reject transliterated Arabic/Sanskrit/Urdu
+/// terms with `An unsupported language or locale was used`.
+pub fn fold_latin_diacritics_for_apple_intelligence(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ('\u{0300}'..='\u{036F}').contains(&ch) {
+            continue;
+        }
+        match ch {
+            'ā' | 'á' | 'à' | 'â' | 'ä' | 'ã' | 'å' | 'ă' | 'ą' => out.push('a'),
+            'Ā' | 'Á' | 'À' | 'Â' | 'Ä' | 'Ã' | 'Å' => out.push('A'),
+            'ī' | 'í' | 'ì' | 'î' | 'ï' | 'ĭ' => out.push('i'),
+            'Ī' | 'Í' | 'Ì' | 'Î' | 'Ï' => out.push('I'),
+            'ū' | 'ú' | 'ù' | 'û' | 'ü' | 'ŭ' => out.push('u'),
+            'Ū' | 'Ú' | 'Ù' | 'Û' | 'Ü' => out.push('U'),
+            'ē' | 'é' | 'è' | 'ê' | 'ë' | 'ě' | 'ę' => out.push('e'),
+            'Ē' | 'É' | 'È' | 'Ê' | 'Ë' => out.push('E'),
+            'ō' | 'ó' | 'ò' | 'ô' | 'ö' | 'õ' => out.push('o'),
+            'Ō' | 'Ó' | 'Ò' | 'Ô' | 'Ö' | 'Õ' => out.push('O'),
+            'ṁ' | 'ṃ' => out.push('m'),
+            'Ṁ' | 'Ṃ' => out.push('M'),
+            'ṇ' | 'ñ' | 'ń' => out.push('n'),
+            'Ṇ' | 'Ñ' | 'Ń' => out.push('N'),
+            'ṭ' => out.push('t'),
+            'Ṭ' => out.push('T'),
+            'ḍ' => out.push('d'),
+            'Ḍ' => out.push('D'),
+            'ṣ' | 'ś' | 'š' => out.push_str("sh"),
+            'Ṣ' | 'Ś' | 'Š' => out.push_str("Sh"),
+            'ḥ' => out.push('h'),
+            'Ḥ' => out.push('H'),
+            'ẓ' | 'ž' | 'ź' | 'ż' => out.push('z'),
+            'Ẓ' | 'Ž' | 'Ź' | 'Ż' => out.push('Z'),
+            'ṛ' | 'ṟ' => out.push('r'),
+            'Ṛ' | 'Ṟ' => out.push('R'),
+            'ḷ' => out.push('l'),
+            'Ḷ' => out.push('L'),
+            'ç' | 'ć' | 'č' => out.push('c'),
+            'Ç' | 'Ć' | 'Č' => out.push('C'),
+            'ʿ' | 'ʾ' | '‘' | '’' | 'ʼ' => out.push('\''),
+            '“' | '”' => out.push('"'),
+            '–' | '—' => out.push('-'),
+            '…' => out.push_str("..."),
+            '•' => out.push('*'),
+            _ if ch.is_ascii() || is_apple_intelligence_blocked_char(ch) => out.push(ch),
+            _ if ch.is_alphabetic() => {}
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Romanizes Perso-Arabic and Devanagari spans via [`lowyap_flow::hindustani_to_roman_hinglish`]
+/// and folds extended Latin transliteration diacritics into clean ASCII for
+/// Latin-only on-device summarizers (`apple_intelligence`).
+pub fn romanize_and_fold_for_apple_intelligence(text: &str) -> String {
+    let roman = lowyap_flow::hindustani_to_roman_hinglish(text);
+    fold_latin_diacritics_for_apple_intelligence(&roman)
+}
+
 /// Splits transcript segments into UTF-8-safe chunks whose estimated formatted
 /// character footprint stays within `max_chars`.
 ///

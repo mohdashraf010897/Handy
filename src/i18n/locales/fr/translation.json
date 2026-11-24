@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Raccourci de post-traitement",
             "description": "Facultatif : Un raccourci dédié qui applique toujours le post-traitement IA à votre transcription."
+          },
+          "transform": {
+            "name": "Raccourci de transformation",
+            "description": "Réécrit le texte sélectionné sur place (ou transforme votre dernière dictée) avec le préréglage actif."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Appel détecté"
+      },
+      "edgeDock": {
+        "title": "Barre de bord",
+        "description": "Logez un onglet discret sur le bord gauche, inférieur ou droit. Survolez pour Dicter, Réunion et Transformer, ou glissez pour changer de bord.",
+        "positions": {
+          "left": "Bord gauche",
+          "bottom": "Bord inférieur",
+          "right": "Bord droit",
+          "off": "Masquée"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Ouvrir les notes de réunion",
     "minimizeMeetingPill": "Réduire dans la barre des menus",
     "meetingStopped": "Prise de notes arrêtée",
-    "dismissMeetingStopped": "Enregistrer et fermer"
+    "dismissMeetingStopped": "Enregistrer et fermer",
+    "transform": "Transformer",
+    "transformMenuAria": "Préréglages de transformation",
+    "transformAutoApply": "Réécrire la dictée automatiquement",
+    "transformPresetPolish": "Peaufiner",
+    "transformPresetPromptEngineer": "Ingénieur de prompts",
+    "transformConfigure": "Configurer les transformations…",
+    "noticeTransformedCopied": "Transformé — appuyez sur ⌘V pour coller",
+    "noticeTransformEmpty": "Sélectionnez du texte ou dictez d’abord"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} bloque peut-être 1 raccourci",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "Ton par app et extraits",
         "linguistEngine": "Moteur linguistique et prompts"
-      }
+      },
+      "transformPresetsTitle": "Préréglage de transformation actif",
+      "transformPresetsHint": "Appliqué automatiquement après la dictée lorsque la réécriture IA est activée, ou à tout moment sur du texte sélectionné via le raccourci ou la pilule d’enregistrement."
     },
     "settings": {
       "title": "Réglages",
@@ -1433,5 +1457,18 @@
         "debug": "Débogage"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Ouvrir les actions rapides lowyap",
+    "dragHint": "Glisser vers le bord gauche, inférieur ou droit",
+    "noBotBadge": "Sans bot",
+    "actions": {
+      "dictate": "Dicter",
+      "meeting": "Notes de réunion",
+      "transform": "Transformer"
+    },
+    "runNow": "Transformer maintenant",
+    "snoozeOneHour": "Masquer pendant 1 h",
+    "hideDock": "Masquer la barre de bord"
   }
 }

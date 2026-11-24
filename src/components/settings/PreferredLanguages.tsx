@@ -42,6 +42,11 @@ export const PreferredLanguages: React.FC<PreferredLanguagesProps> = ({
     languages,
     onChange: (next) => {
       updateSetting("spoken_languages", next);
+      if (next.length === 1) {
+        updateSetting("selected_language", next[0]);
+      } else if (next.length > 1) {
+        updateSetting("selected_language", "auto");
+      }
       gridRef.current?.scrollTo({ top: 0 });
     },
     // At least one language, once there is one.

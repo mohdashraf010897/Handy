@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Drecera de postprocessament",
             "description": "Opcional: una drecera específica que sempre aplica postprocessament amb IA a la transcripció."
+          },
+          "transform": {
+            "name": "Drecera de transformació",
+            "description": "Reescriu el text seleccionat al moment (o transforma l’últim dictat) amb el preajust actiu."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Trucada detectada"
+      },
+      "edgeDock": {
+        "title": "Edge Dock",
+        "description": "Tuck a minimal quick-action sliver onto the Left, Bottom, or Right screen edge. Hover for Dictate, Meeting, and Transform, or drag to snap edges.",
+        "positions": {
+          "left": "Left edge",
+          "bottom": "Bottom edge",
+          "right": "Right edge",
+          "off": "Hidden"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Obre les notes de la reunió",
     "minimizeMeetingPill": "Minimitza a la barra de menús",
     "meetingStopped": "Notes aturades",
-    "dismissMeetingStopped": "Desa i tanca"
+    "dismissMeetingStopped": "Desa i tanca",
+    "transform": "Transforma",
+    "transformMenuAria": "Preajustos de transformació",
+    "transformAutoApply": "Reescriu el dictat automàticament",
+    "transformPresetPolish": "Polir",
+    "transformPresetPromptEngineer": "Enginyer de prompts",
+    "transformConfigure": "Configura les transformacions…",
+    "noticeTransformedCopied": "Transformat — prem ⌘V per enganxar",
+    "noticeTransformEmpty": "Selecciona text o dicta primer"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} pot estar blocant 1 drecera",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Preajust de transformació actiu",
+      "transformPresetsHint": "S’aplica automàticament després del dictat quan la reescriptura amb IA està activada, o en qualsevol moment sobre text seleccionat amb la drecera o la càpsula d’enregistrament."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Depuració"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Open lowyap quick actions",
+    "dragHint": "Drag to Left, Bottom, or Right edge",
+    "noBotBadge": "No bot",
+    "actions": {
+      "dictate": "Dictate",
+      "meeting": "Meeting notes",
+      "transform": "Transform"
+    },
+    "runNow": "Transforma ara",
+    "snoozeOneHour": "Posa en pausa 1 hora",
+    "hideDock": "Amaga la barra lateral"
   }
 }

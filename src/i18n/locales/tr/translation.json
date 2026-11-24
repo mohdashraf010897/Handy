@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Son İşlem Kısayolu",
             "description": "İsteğe bağlı: Transkripsiyonunuza her zaman yapay zekâ ile son işlem uygulayan özel bir kısayol tuşu."
+          },
+          "transform": {
+            "name": "Dönüştürme Kısayolu",
+            "description": "Etkin ön ayarı kullanarak seçili metni yerinde yeniden yazın (veya son diktenizi dönüştürün)."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Arama algılandı"
+      },
+      "edgeDock": {
+        "title": "Kenar Yuvası",
+        "description": "Ekranın sol, alt veya sağ kenarına minimal bir hızlı işlem sekmesi yerleştirin. Dikte, Toplantı ve Dönüştür için üzerine gelin veya sürükleyip taşıyın.",
+        "positions": {
+          "left": "Sol kenar",
+          "bottom": "Alt kenar",
+          "right": "Sağ kenar",
+          "off": "Gizli"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Toplantı notlarını aç",
     "minimizeMeetingPill": "Menü çubuğuna küçült",
     "meetingStopped": "Not kaydedici durdu",
-    "dismissMeetingStopped": "Kaydet ve kapat"
+    "dismissMeetingStopped": "Kaydet ve kapat",
+    "transform": "Dönüştür",
+    "transformMenuAria": "Dönüştürme ön ayarları",
+    "transformAutoApply": "Dikteyi otomatik yeniden yaz",
+    "transformPresetPolish": "Akıcılaştır",
+    "transformPresetPromptEngineer": "İstem Mühendisi",
+    "transformConfigure": "Dönüştürmeleri yapılandır…",
+    "noticeTransformedCopied": "Dönüştürüldü — yapıştırmak için ⌘V tuşuna basın",
+    "noticeTransformEmpty": "Önce metin seçin veya dikte edin"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} 1 kısayolu engelliyor olabilir",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Etkin Dönüştürme Ön Ayarı",
+      "transformPresetsHint": "Yapay Zekâ Yeniden Yazma açıkken dikteden sonra otomatik uygulanır; ayrıca kısayol veya kayıt kapsülüyle seçili metinde istediğiniz an kullanılabilir."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Hata Ayıklama"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "lowyap hızlı işlemlerini aç",
+    "dragHint": "Sol, alt veya sağ kenara sürükleyin",
+    "noBotBadge": "Botsuz",
+    "actions": {
+      "dictate": "Dikte et",
+      "meeting": "Toplantı notları",
+      "transform": "Dönüştür"
+    },
+    "runNow": "Şimdi dönüştür",
+    "snoozeOneHour": "1 saat ertele",
+    "hideDock": "Kenar Çubuğunu gizle"
   }
 }

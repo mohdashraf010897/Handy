@@ -91,13 +91,13 @@
         "step1Pill": "1. Allow Microphone",
         "step2Pill": "2. Flip lowyap ON in Accessibility",
         "step1Badge": "macOS Prompt",
-        "step2Badge": "Privacy & Security \u203a Accessibility",
+        "step2Badge": "Privacy & Security › Accessibility",
         "livePollingBadge": "Live auto-detect",
-        "autoAdvanceHint": "Flip the switch in System Settings \u2014 this screen updates automatically",
-        "allGrantedCue": "Both permissions granted \u2713 \u2014 click Continue below",
+        "autoAdvanceHint": "Flip the switch in System Settings — this screen updates automatically",
+        "allGrantedCue": "Both permissions granted ✓ — click Continue below",
         "videoLabel": "8-second visual walkthrough showing how to click Allow on the macOS Microphone prompt and flip the lowyap switch ON in System Settings under Privacy and Security, Accessibility.",
-        "staticStep1Title": "Step 1: Click \u201cAllow\u201d when macOS asks for Microphone access",
-        "staticStep2Title": "Step 2: In System Settings \u2192 Privacy & Security \u2192 Accessibility, flip the lowyap switch ON",
+        "staticStep1Title": "Step 1: Click “Allow” when macOS asks for Microphone access",
+        "staticStep2Title": "Step 2: In System Settings → Privacy & Security → Accessibility, flip the lowyap switch ON",
         "staticSub": "Once both switches are enabled, the green Allowed checkmarks light up automatically.",
         "posterAlt": "macOS System Settings showing lowyap enabled in Privacy and Security Accessibility"
       }
@@ -174,22 +174,22 @@
         "advancedToggleHide": "Hide model comparison"
       },
       "consumer": {
-        "heading": "Start dictating right away \u2014 zero waiting",
+        "heading": "Start dictating right away — zero waiting",
         "recommendedBadge": "Recommended",
         "instantHdTitle": "Start Instantly + Prepare HD Offline Voice in Background",
-        "instantHdDescEnglish": "Try \u2325 Space right away with built-in macOS voice while lowyap quietly prepares your high-accuracy English voice pack in the background.",
-        "instantHdDescMultilingual": "Try \u2325 Space right away with built-in macOS voice while lowyap quietly prepares your 100+ language HD voice pack in the background.",
-        "instantHdTag": "0s wait \u00b7 Auto-upgrades when ready",
+        "instantHdDescEnglish": "Try ⌥ Space right away with built-in macOS voice while lowyap quietly prepares your high-accuracy English voice pack in the background.",
+        "instantHdDescMultilingual": "Try ⌥ Space right away with built-in macOS voice while lowyap quietly prepares your 100+ language HD voice pack in the background.",
+        "instantHdTag": "0s wait · Auto-upgrades when ready",
         "zeroMbBadge": "0 MB download",
         "nativeOnlyTitle": "Built-in macOS Voice Only (0 MB download)",
-        "nativeOnlyDesc": "Uses Apple\u2019s built-in on-device speech engine with zero extra disk space and zero downloads. 100% private on your Mac.",
-        "nativeOnlyTag": "0 MB disk space \u00b7 100% on-device",
+        "nativeOnlyDesc": "Uses Apple’s built-in on-device speech engine with zero extra disk space and zero downloads. 100% private on your Mac.",
+        "nativeOnlyTag": "0 MB disk space · 100% on-device",
         "nativeShortName": "Built-in macOS Voice",
         "advancedShow": "Choose a specific voice engine (Advanced)",
         "advancedHide": "Hide advanced voice engines",
         "startInstantlyCta": "Start instantly",
-        "nativeHint": "0 MB download \u00b7 100% on-device macOS voice",
-        "hdBackgroundHint": "Dictate right away \u00b7 HD voice prepares quietly in the background"
+        "nativeHint": "0 MB download · 100% on-device macOS voice",
+        "hdBackgroundHint": "Dictate right away · HD voice prepares quietly in the background"
       }
     },
     "demo": {
@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Post-Processing Hotkey",
             "description": "Optional: A dedicated hotkey that always applies AI post-processing to your transcription."
+          },
+          "transform": {
+            "name": "Transform Shortcut",
+            "description": "Rewrite highlighted text in-place (or transform your latest dictation) using the active preset."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Call detected"
+      },
+      "edgeDock": {
+        "title": "Edge Dock",
+        "description": "Tuck a minimal quick-action sliver onto the Left, Bottom, or Right screen edge. Hover for Dictate, Meeting, and Transform, or drag to snap edges.",
+        "positions": {
+          "left": "Left edge",
+          "bottom": "Bottom edge",
+          "right": "Right edge",
+          "off": "Hidden"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "resumeMeeting": "Resume",
     "stopMeeting": "Stop",
     "openMeetingNotes": "Open meeting notes",
-    "minimizeMeetingPill": "Minimize to menu bar"
+    "minimizeMeetingPill": "Minimize to menu bar",
+    "transform": "Transform",
+    "transformMenuAria": "Transform presets",
+    "transformAutoApply": "Auto-rewrite dictation",
+    "transformPresetPolish": "Polish",
+    "transformPresetPromptEngineer": "Prompt Engineer",
+    "transformConfigure": "Configure transforms…",
+    "noticeTransformedCopied": "Transformed — press ⌘V to paste",
+    "noticeTransformEmpty": "Select text or dictate first"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} may be blocking 1 shortcut",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Shortcuts",
         "linguistEngine": "AI Rewriting & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Active Transform Preset",
+      "transformPresetsHint": "Used automatically after dictation when AI Rewriting is on, or anytime on highlighted text via the Transform shortcut or recording pill."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Debug"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Open lowyap quick actions",
+    "dragHint": "Drag to Left, Bottom, or Right edge",
+    "noBotBadge": "No bot",
+    "actions": {
+      "dictate": "Dictate",
+      "meeting": "Meeting notes",
+      "transform": "Transform"
+    },
+    "runNow": "Transform now",
+    "snoozeOneHour": "Snooze 1 hour",
+    "hideDock": "Hide Edge Dock"
   }
 }

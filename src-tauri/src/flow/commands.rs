@@ -18,7 +18,14 @@ pub fn get_flow_settings(app: AppHandle) -> FlowSettings {
 #[tauri::command]
 #[specta::specta]
 pub fn set_flow_settings(app: AppHandle, settings: FlowSettings) -> Result<FlowSettings, String> {
-    settings::set(&app, settings)
+    use tauri::Emitter;
+    let saved = settings::set(&app, settings)?;
+    if saved.edge_dock_enabled {
+        crate::edge_dock::clear_edge_dock_snooze();
+    }
+    let _ = app.emit("flow-settings-changed", &saved);
+    crate::edge_dock::sync_edge_dock_visibility(&app);
+    Ok(saved)
 }
 
 /// The built-in app → tone presets, applied after the user's rules.
@@ -87,6 +94,8 @@ const VALID_PREVIEW_NOTICES: &[&str] = &[
     "restart_required",
     "transcription_failed",
     "call_detected",
+    "transformed_copied",
+    "transform_empty",
 ];
 
 /// Triggers an on-demand preview of a floating menu-bar status notice pill.
@@ -141,6 +150,34 @@ pub fn finish_recording(app: AppHandle) -> bool {
     }
     app.try_state::<crate::transcription_coordinator::TranscriptionCoordinator>()
         .is_some_and(|coord| coord.finish_active())
+}
+
+/// Resizes the non-activating recording overlay panel to fit the Transform popover.
+#[tauri::command]
+#[specta::specta]
+pub fn set_overlay_transform_menu_open(app: AppHandle, open: bool) {
+    crate::overlay::set_transform_menu_open(&app, open);
+}
+
+/// Transforms currently highlighted text (replacing in-place) or the latest
+/// dictation (copied to clipboard) using `prompt_id` or the active preset.
+#[tauri::command(async)]
+#[specta::specta]
+pub async fn run_transform_now(
+    app: AppHandle,
+    prompt_id: Option<String>,
+) -> Result<crate::flow::TransformOutcome, String> {
+    crate::flow::run_transform_action(app, prompt_id).await
+}
+
+/// Opens the Studio window directly to the Voice & Transforms workspace.
+#[tauri::command]
+#[specta::specta]
+pub fn open_transforms_workspace(app: AppHandle) {
+    use tauri::Emitter;
+    crate::show_main_window(&app);
+    let _ = app.emit("navigate-section", "transforms");
+    let _ = app.emit("open-voice-tab", "linguistEngine");
 }
 
 fn last_flow_app(context: AppContext, settings: &FlowSettings) -> Option<LastFlowApp> {

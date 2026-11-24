@@ -47,6 +47,19 @@ pub struct VoiceSnippet {
     pub expansion: String,
 }
 
+/// Screen edge where the non-activating micro-launcher docks when idle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeDockPosition {
+    /// Tucked flush against the left screen edge (vertical hairline).
+    Left,
+    /// Tucked centered near the bottom edge above the macOS Dock.
+    #[default]
+    Bottom,
+    /// Tucked flush against the right screen edge (vertical hairline).
+    Right,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(default)]
 pub struct FlowSettings {
@@ -70,6 +83,12 @@ pub struct FlowSettings {
     pub mic_boost_target_percent: u8,
     /// Apply noise-gated automatic gain control (AGC) to soft/distant speech frames.
     pub quiet_speech_agc_enabled: bool,
+    /// Show the minimal non-activating 3-edge micro-dock launcher when idle.
+    pub edge_dock_enabled: bool,
+    /// Active screen edge (`left`, `bottom`, or `right`) for the micro-dock.
+    pub edge_dock_position: EdgeDockPosition,
+    /// One-time migration marker ensuring pre-v2 `left` test defaults move to `bottom`.
+    pub edge_dock_v2_seeded: bool,
 }
 
 impl Default for FlowSettings {
@@ -83,6 +102,9 @@ impl Default for FlowSettings {
             auto_boost_mic_volume: true,
             mic_boost_target_percent: crate::flow::mic_gain::DEFAULT_TARGET_PERCENT,
             quiet_speech_agc_enabled: true,
+            edge_dock_enabled: true,
+            edge_dock_position: EdgeDockPosition::Bottom,
+            edge_dock_v2_seeded: false,
         }
     }
 }

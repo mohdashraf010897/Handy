@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "后处理快捷键",
             "description": "可选：一个专用快捷键，始终对您的转录应用 AI 后处理。"
+          },
+          "transform": {
+            "name": "转换快捷键",
+            "description": "使用当前预设就地重写选中文本（或转换最近一次语音听写）。"
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "检测到通话"
+      },
+      "edgeDock": {
+        "title": "边缘停靠栏",
+        "description": "在屏幕左侧、底部或右侧边缘停靠极简快捷条。悬停即可呼出听写、会议与改写，按住拖动可切换边缘。",
+        "positions": {
+          "left": "左侧边缘",
+          "bottom": "底部边缘",
+          "right": "右侧边缘",
+          "off": "隐藏"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "打开会议笔记",
     "minimizeMeetingPill": "最小化到菜单栏",
     "meetingStopped": "会议记录已停止",
-    "dismissMeetingStopped": "保存并关闭"
+    "dismissMeetingStopped": "保存并关闭",
+    "transform": "转换",
+    "transformMenuAria": "转换预设",
+    "transformAutoApply": "自动润色听写内容",
+    "transformPresetPolish": "润色",
+    "transformPresetPromptEngineer": "提示词工程师",
+    "transformConfigure": "配置转换…",
+    "noticeTransformedCopied": "已转换 — 按 ⌘V 粘贴",
+    "noticeTransformEmpty": "请先选中文本或进行语音听写"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} 可能正在阻止 1 个快捷键",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "应用语调与快捷短语",
         "linguistEngine": "润色引擎与提示词"
-      }
+      },
+      "transformPresetsTitle": "当前转换预设",
+      "transformPresetsHint": "开启 AI 重写后会在听写结束时自动应用，也可随时通过转换快捷键或录音胶囊对选中文本执行。"
     },
     "settings": {
       "title": "设置",
@@ -1433,5 +1457,18 @@
         "debug": "调试"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "打开 lowyap 快捷操作",
+    "dragHint": "拖动至左侧、底部或右侧边缘",
+    "noBotBadge": "无机器人",
+    "actions": {
+      "dictate": "听写",
+      "meeting": "会议笔记",
+      "transform": "改写"
+    },
+    "runNow": "立即转换",
+    "snoozeOneHour": "暂停 1 小时",
+    "hideDock": "隐藏边缘栏"
   }
 }

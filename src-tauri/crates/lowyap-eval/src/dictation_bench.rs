@@ -289,6 +289,7 @@ fn replay_fixtures() -> Vec<LinguistReplay> {
             lexicon_terms: merged_lexicon_terms(&[]),
             field_context: None,
             custom_prompt_override: None,
+            mode: Default::default(),
         };
         let stage_a = apply_stage_a_linguist(raw, req.tone, &req.lexicon_terms, audio_duration_s);
         let mut samples = [0; TIMING_RUNS];

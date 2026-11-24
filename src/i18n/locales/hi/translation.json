@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "पोस्ट-प्रोसेसिंग हॉटकी",
             "description": "वैकल्पिक: एक अलग हॉटकी जो आपके ट्रांसक्रिप्शन पर हमेशा AI पोस्ट-प्रोसेसिंग लागू करती है."
+          },
+          "transform": {
+            "name": "ट्रांसफ़ॉर्म शॉर्टकट",
+            "description": "सक्रिय प्रीसेट का उपयोग करके चुने गए टेक्स्ट को वहीं रीराइट करें (या अपनी पिछली डिक्टेशन बदलें)।"
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "कॉल का पता चला"
+      },
+      "edgeDock": {
+        "title": "एज डॉक",
+        "description": "स्क्रीन के बाएँ, नीचे या दाएँ किनारे पर सूक्ष्म क्विक-ऐक्शन टैब रखें। डिक्टेट, मीटिंग और ट्रांसफ़ॉर्म के लिए होवर करें या खींचकर जगह बदलें।",
+        "positions": {
+          "left": "बायाँ किनारा",
+          "bottom": "निचला किनारा",
+          "right": "दायाँ किनारा",
+          "off": "छुपा हुआ"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "मीटिंग नोट्स खोलें",
     "minimizeMeetingPill": "मेनू बार में छोटा करें",
     "meetingStopped": "नोटटेकर रुक गया",
-    "dismissMeetingStopped": "सेव करें और बंद करें"
+    "dismissMeetingStopped": "सेव करें और बंद करें",
+    "transform": "ट्रांसफ़ॉर्म",
+    "transformMenuAria": "ट्रांसफ़ॉर्म प्रीसेट",
+    "transformAutoApply": "डिक्टेशन अपने-आप रीराइट करें",
+    "transformPresetPolish": "पॉलिश",
+    "transformPresetPromptEngineer": "प्रॉम्प्ट इंजीनियर",
+    "transformConfigure": "ट्रांसफ़ॉर्म सेट करें…",
+    "noticeTransformedCopied": "ट्रांसफ़ॉर्म हो गया — पेस्ट करने के लिए ⌘V दबाएँ",
+    "noticeTransformEmpty": "पहले टेक्स्ट चुनें या बोलकर लिखें"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} शायद 1 शॉर्टकट को ब्लॉक कर रहा है",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "ऐप टोन और स्निपेट",
         "linguistEngine": "लिंग्विस्ट इंजन और प्रॉम्प्ट"
-      }
+      },
+      "transformPresetsTitle": "सक्रिय ट्रांसफ़ॉर्म प्रीसेट",
+      "transformPresetsHint": "AI रीराइटिंग चालू होने पर डिक्टेशन के बाद अपने-आप लागू होता है, या ट्रांसफ़ॉर्म शॉर्टकट व रिकॉर्डिंग पिल से चुने गए टेक्स्ट पर कभी भी।"
     },
     "settings": {
       "title": "सेटिंग्स",
@@ -1433,5 +1457,18 @@
         "debug": "डीबग"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "lowyap त्वरित क्रियाएँ खोलें",
+    "dragHint": "बाएँ, निचले या दाएँ किनारे पर खींचें",
+    "noBotBadge": "बिना बॉट",
+    "actions": {
+      "dictate": "बोलकर लिखें",
+      "meeting": "मीटिंग नोट्स",
+      "transform": "ट्रांसफ़ॉर्म"
+    },
+    "runNow": "अभी रूपांतरित करें",
+    "snoozeOneHour": "1 घंटे के लिए रोकें",
+    "hideDock": "एज डॉक छिपाएँ"
   }
 }

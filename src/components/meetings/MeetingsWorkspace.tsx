@@ -346,8 +346,24 @@ export const MeetingsWorkspace: React.FC = () => {
     setErrorMessage(null);
     try {
       const detail = await stop_meeting_notes();
-      setSelectedId(detail.summary.id);
-      setSelectedDetail(detail);
+      const hasSpokenSegment = detail.segments.some((seg) => {
+        const trimmed = seg.text.trim();
+        return (
+          trimmed.length > 0 &&
+          !(trimmed.startsWith("[Paused") && trimmed.endsWith("]"))
+        );
+      });
+      const hasCapturedContent =
+        hasSpokenSegment ||
+        detail.rollups.length > 0 ||
+        detail.rough_notes.trim().length > 0;
+      if (hasCapturedContent) {
+        setSelectedId(detail.summary.id);
+        setSelectedDetail(detail);
+      } else {
+        setSelectedId(null);
+        setSelectedDetail(null);
+      }
       await refreshLiveState();
       await refreshArchive(searchQuery);
     } catch (err) {

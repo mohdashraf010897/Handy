@@ -692,6 +692,27 @@ impl MeetingStore {
         Ok(affected > 0)
     }
 
+    /// Lists meeting IDs whose session exited or crashed before `finalize_meeting`
+    /// set `ended_at_ms`.
+    pub fn list_orphaned_meeting_ids(&self) -> Result<Vec<String>, String> {
+        let conn = self.open_connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM meetings
+                 WHERE ended_at_ms IS NULL
+                 ORDER BY started_at_ms ASC",
+            )
+            .map_err(|e| format!("Failed to prepare list_orphaned_meeting_ids query: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("Failed to query orphaned meeting ids: {e}"))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row.map_err(|e| format!("Failed to read orphaned meeting id: {e}"))?);
+        }
+        Ok(ids)
+    }
+
     pub fn format_meeting_markdown(detail: &MeetingDetail) -> String {
         let mut out = String::new();
         let summary = &detail.summary;

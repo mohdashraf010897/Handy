@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 const SAMPLE_RATE_16K: usize = 16_000;
 const FRAME_MS: usize = 20;
 pub const FRAME_SAMPLES_16K: usize = SAMPLE_RATE_16K * FRAME_MS / 1_000;
-const MAX_DELAY_MS: usize = 180;
+const MAX_DELAY_MS: usize = 340;
 const MAX_DELAY_FRAMES: usize = MAX_DELAY_MS / FRAME_MS;
 const ACTIVE_RMS_FLOOR: f32 = 0.008;
 const ACTIVE_PEAK_FLOOR: f32 = 0.03;

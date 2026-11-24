@@ -10,6 +10,9 @@ export const DEFAULT_FLOW_SETTINGS: FlowSettings = {
   auto_boost_mic_volume: true,
   mic_boost_target_percent: 85,
   quiet_speech_agc_enabled: true,
+  edge_dock_enabled: true,
+  edge_dock_position: "bottom",
+  edge_dock_v2_seeded: false,
 };
 
 /** Display order of the tone presets. */

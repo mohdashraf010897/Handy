@@ -35,7 +35,7 @@ import {
   StudioSettingsWorkspace,
   type StudioSettingsTab,
 } from "./components/settings/StudioSettingsWorkspace";
-import { VoiceStyleWorkspace } from "./components/voice";
+import { VoiceStyleWorkspace, type VoiceStyleTab } from "./components/voice";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FileDropOverlay } from "./components/FileDropOverlay";
 import {
@@ -62,12 +62,14 @@ type OnboardingStep =
 const renderStudioSurface = (
   section: SidebarSection,
   settingsTab: StudioSettingsTab,
+  voiceTab: VoiceStyleTab,
   onPreviewOnboarding: (step: OnboardingPreviewStep) => void,
   onRunOnboarding: () => void,
   onRunModelMigration: () => void,
   onNavigate: (
     section: SidebarSection,
     nextSettingsTab?: StudioSettingsTab,
+    nextVoiceTab?: VoiceStyleTab,
   ) => void,
 ) => {
   switch (section) {
@@ -87,7 +89,7 @@ const renderStudioSurface = (
     case "lexicon":
       return <LexiconWorkspace />;
     case "voice":
-      return <VoiceStyleWorkspace />;
+      return <VoiceStyleWorkspace initialTab={voiceTab} />;
     case "settings":
       return (
         <StudioSettingsWorkspace
@@ -115,12 +117,20 @@ function App() {
   const [currentSection, setCurrentSection] = useState<SidebarSection>("desk");
   const [settingsTab, setSettingsTab] =
     useState<StudioSettingsTab>("shortcuts");
+  const [voiceTab, setVoiceTab] = useState<VoiceStyleTab>("toneAndSnippets");
 
   const handleSectionChange = useCallback(
-    (section: SidebarSection, nextSettingsTab?: StudioSettingsTab) => {
+    (
+      section: SidebarSection,
+      nextSettingsTab?: StudioSettingsTab,
+      nextVoiceTab?: VoiceStyleTab,
+    ) => {
       setCurrentSection(section);
       if (nextSettingsTab) {
         setSettingsTab(nextSettingsTab);
+      }
+      if (nextVoiceTab) {
+        setVoiceTab(nextVoiceTab);
       }
     },
     [],
@@ -212,7 +222,11 @@ function App() {
     const unlisten = listen<string>("navigate-section", (event) => {
       const resolved = resolveStudioNavigation(event.payload);
       if (resolved) {
-        handleSectionChange(resolved.section, resolved.settingsTab);
+        handleSectionChange(
+          resolved.section,
+          resolved.settingsTab,
+          resolved.voiceTab,
+        );
       }
     });
     return () => {
@@ -574,6 +588,7 @@ function App() {
                 {renderStudioSurface(
                   currentSection,
                   settingsTab,
+                  voiceTab,
                   setOnboardingPreview,
                   runOnboarding,
                   runModelMigration,

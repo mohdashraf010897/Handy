@@ -59,14 +59,16 @@ impl From<flow_core::HindustaniScript> for HindustaniScript {
 /// honoring non-persisted `--transcribe-file --language` overrides first.
 pub fn active_hindustani_script(app: &AppHandle) -> HindustaniScript {
     if let Some(cli_lang) = crate::settings::cli_language_override() {
-        let primary = cli_lang.split(['-', '_']).next().unwrap_or(cli_lang);
-        return if primary.eq_ignore_ascii_case("hi") {
-            HindustaniScript::Devanagari
-        } else if primary.eq_ignore_ascii_case("ur") {
-            HindustaniScript::UrduPersoArabic
-        } else {
-            HindustaniScript::Auto
-        };
+        if !cli_lang.contains(',') {
+            let primary = cli_lang.split(['-', '_']).next().unwrap_or(&cli_lang);
+            return if primary.eq_ignore_ascii_case("hi") {
+                HindustaniScript::Devanagari
+            } else if primary.eq_ignore_ascii_case("ur") {
+                HindustaniScript::UrduPersoArabic
+            } else {
+                HindustaniScript::Auto
+            };
+        }
     }
     crate::flow::settings::get(app).hindustani_script
 }

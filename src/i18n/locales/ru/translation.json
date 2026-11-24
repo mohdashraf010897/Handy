@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Горячая клавиша постобработки",
             "description": "Специальное сочетание клавиш для ИИ-постобработки вашей транскрипции."
+          },
+          "transform": {
+            "name": "Сочетание клавиш трансформации",
+            "description": "Переписать выделенный текст на месте (или преобразовать последнюю диктовку) с помощью активного пресета."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Обнаружен звонок"
+      },
+      "edgeDock": {
+        "title": "Боковая панель",
+        "description": "Компактный ярлык у левого, нижнего или правого края экрана. Наведите курсор для диктовки, встречи и правки, либо перетащите к другому краю.",
+        "positions": {
+          "left": "Левый край",
+          "bottom": "Нижний край",
+          "right": "Правый край",
+          "off": "Скрыта"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Открыть заметки встречи",
     "minimizeMeetingPill": "Свернуть в строку меню",
     "meetingStopped": "Запись заметок остановлена",
-    "dismissMeetingStopped": "Сохранить и закрыть"
+    "dismissMeetingStopped": "Сохранить и закрыть",
+    "transform": "Преобразовать",
+    "transformMenuAria": "Пресеты трансформации",
+    "transformAutoApply": "Автоматически переписывать диктовку",
+    "transformPresetPolish": "Шлифовка",
+    "transformPresetPromptEngineer": "Промпт-инженер",
+    "transformConfigure": "Настроить трансформации…",
+    "noticeTransformedCopied": "Преобразовано — нажмите ⌘V для вставки",
+    "noticeTransformEmpty": "Сначала выделите текст или надиктуйте"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} может блокировать 1 сочетание клавиш",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Активный пресет трансформации",
+      "transformPresetsHint": "Применяется автоматически после диктовки при включённом ИИ-переписывании или в любой момент к выделенному тексту по горячей клавише либо из капсулы записи."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Отладка"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Открыть быстрые действия lowyap",
+    "dragHint": "Перетащите к левому, нижнему или правому краю",
+    "noBotBadge": "Без бота",
+    "actions": {
+      "dictate": "Диктовать",
+      "meeting": "Заметки встречи",
+      "transform": "Преобразовать"
+    },
+    "runNow": "Преобразовать сейчас",
+    "snoozeOneHour": "Отложить на 1 час",
+    "hideDock": "Скрыть боковую панель"
   }
 }

@@ -12,7 +12,8 @@ pub mod title;
 
 pub use budget::{
     chunk_rollups_by_budget, chunk_segments_by_budget, contains_apple_intelligence_blocked_script,
-    estimate_multilingual_tokens,
+    estimate_multilingual_tokens, fold_latin_diacritics_for_apple_intelligence,
+    romanize_and_fold_for_apple_intelligence,
 };
 pub use local_gguf::{
     strip_reasoning_and_fences, validate_meeting_endpoint_url, CompletionBackend,

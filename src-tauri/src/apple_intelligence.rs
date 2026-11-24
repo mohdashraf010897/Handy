@@ -22,24 +22,51 @@ pub fn check_apple_intelligence_availability() -> bool {
 
 // Link to the Swift function for system prompt support
 extern "C" {
+    #[allow(dead_code)]
     pub fn process_text_with_system_prompt_apple(
         system_prompt: *const c_char,
         user_content: *const c_char,
         max_tokens: i32,
     ) -> *mut AppleLLMResponse;
+
+    pub fn process_text_with_options_apple(
+        system_prompt: *const c_char,
+        user_content: *const c_char,
+        max_tokens: i32,
+        plain_text_only: c_int,
+        timeout_ms: c_int,
+    ) -> *mut AppleLLMResponse;
 }
 
 /// Process text with Apple Intelligence using separate system prompt and user content
+#[allow(dead_code)]
 pub fn process_text_with_system_prompt(
     system_prompt: &str,
     user_content: &str,
     max_tokens: i32,
 ) -> Result<String, String> {
+    process_text_with_options(system_prompt, user_content, max_tokens, max_tokens < 0, 0)
+}
+
+/// Process text with Apple Intelligence with explicit plain-text mode and wall-clock timeout (ms).
+pub fn process_text_with_options(
+    system_prompt: &str,
+    user_content: &str,
+    max_tokens: i32,
+    plain_text_only: bool,
+    timeout_ms: i32,
+) -> Result<String, String> {
     let system_cstr = CString::new(system_prompt).map_err(|e| e.to_string())?;
     let user_cstr = CString::new(user_content).map_err(|e| e.to_string())?;
 
     let response_ptr = unsafe {
-        process_text_with_system_prompt_apple(system_cstr.as_ptr(), user_cstr.as_ptr(), max_tokens)
+        process_text_with_options_apple(
+            system_cstr.as_ptr(),
+            user_cstr.as_ptr(),
+            max_tokens,
+            c_int::from(plain_text_only),
+            timeout_ms as c_int,
+        )
     };
 
     if response_ptr.is_null() {

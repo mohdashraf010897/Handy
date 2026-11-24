@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "후처리 단축키",
             "description": "선택 사항: 항상 AI 후처리를 적용하는 전용 단축키입니다."
+          },
+          "transform": {
+            "name": "변환 단축키",
+            "description": "활성 프리셋으로 선택한 텍스트를 즉시 다시 쓰거나 최근 받아쓰기를 변환합니다."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "통화 감지됨"
+      },
+      "edgeDock": {
+        "title": "엣지 독",
+        "description": "화면 왼쪽, 아래쪽 또는 오른쪽 가장자리에 초소형 빠른 실행 탭을 둡니다. 마우스를 올려 받아쓰기·회의·변환을 실행하거나 드래그해 이동하세요.",
+        "positions": {
+          "left": "왼쪽 가장자리",
+          "bottom": "아래쪽 가장자리",
+          "right": "오른쪽 가장자리",
+          "off": "숨김"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "회의 노트 열기",
     "minimizeMeetingPill": "메뉴 막대로 최소화",
     "meetingStopped": "노트 기록 중지됨",
-    "dismissMeetingStopped": "저장 후 닫기"
+    "dismissMeetingStopped": "저장 후 닫기",
+    "transform": "변환",
+    "transformMenuAria": "변환 프리셋",
+    "transformAutoApply": "받아쓰기 자동 다듬기",
+    "transformPresetPolish": "다듬기",
+    "transformPresetPromptEngineer": "프롬프트 엔지니어",
+    "transformConfigure": "변환 설정…",
+    "noticeTransformedCopied": "변환됨 — ⌘V를 눌러 붙여넣기",
+    "noticeTransformEmpty": "먼저 텍스트를 선택하거나 받아쓰기를 해주세요"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}}이(가) 단축키 1개를 차단하고 있을 수 있습니다",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "앱별 톤 및 스니펫",
         "linguistEngine": "링귀스트 엔진 및 프롬프트"
-      }
+      },
+      "transformPresetsTitle": "활성 변환 프리셋",
+      "transformPresetsHint": "AI 다시 쓰기가 켜져 있으면 받아쓰기 후 자동 적용되며, 변환 단축키나 녹음 필에서 선택한 텍스트에 언제든 실행할 수 있습니다."
     },
     "settings": {
       "title": "설정",
@@ -1433,5 +1457,18 @@
         "debug": "디버그"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "lowyap 빠른 작업 열기",
+    "dragHint": "왼쪽, 아래쪽 또는 오른쪽 가장자리로 드래그",
+    "noBotBadge": "봇 없음",
+    "actions": {
+      "dictate": "받아쓰기",
+      "meeting": "회의 노트",
+      "transform": "변환"
+    },
+    "runNow": "지금 변환",
+    "snoozeOneHour": "1시간 동안 숨기기",
+    "hideDock": "엣지 독 숨기기"
   }
 }

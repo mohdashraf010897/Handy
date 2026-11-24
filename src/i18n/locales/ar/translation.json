@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "مفتاح المعالجة اللاحقة",
             "description": "اختياري: مفتاح اختصار مخصص يطبق دائماً المعالجة اللاحقة بالذكاء الاصطناعي على التفريغ الصوتي."
+          },
+          "transform": {
+            "name": "اختصار التحويل",
+            "description": "أعد صياغة النص المحدد مباشرةً (أو حوّل آخر إملاء صوتي) باستخدام الإعداد المسبق النشط."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "تم اكتشاف مكالمة"
+      },
+      "edgeDock": {
+        "title": "شريط الحافة",
+        "description": "ثبّت شريط وصول سريع مصغّر على الحافة اليسرى أو السفلية أو اليمنى. مرّر المؤشر للإملاء والاجتماع والتحويل، أو اسحبه لتغيير موضعه.",
+        "positions": {
+          "left": "الحافة اليسرى",
+          "bottom": "الحافة السفلية",
+          "right": "الحافة اليمنى",
+          "off": "مخفي"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "فتح ملاحظات الاجتماع",
     "minimizeMeetingPill": "تصغير إلى شريط القوائم",
     "meetingStopped": "توقّف مسجّل الملاحظات",
-    "dismissMeetingStopped": "حفظ وإغلاق"
+    "dismissMeetingStopped": "حفظ وإغلاق",
+    "transform": "تحويل",
+    "transformMenuAria": "إعدادات التحويل المسبقة",
+    "transformAutoApply": "إعادة صياغة الإملاء تلقائياً",
+    "transformPresetPolish": "تهذيب",
+    "transformPresetPromptEngineer": "مهندس الأوامر",
+    "transformConfigure": "ضبط التحويلات…",
+    "noticeTransformedCopied": "تم التحويل — اضغط ⌘V للصق",
+    "noticeTransformEmpty": "حدّد نصاً أو ابدأ الإملاء أولاً"
   },
   "secureInput": {
     "blockedWithCulprit_one": "قد يحظر {{name}} اختصارًا واحدًا",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "نبرة التطبيق والمقتطفات",
         "linguistEngine": "محرك الصياغة والأوامر"
-      }
+      },
+      "transformPresetsTitle": "الإعداد المسبق النشط للتحويل",
+      "transformPresetsHint": "يُطبَّق تلقائياً بعد الإملاء عند تفعيل إعادة الصياغة بالذكاء الاصطناعي، أو في أي وقت على النص المحدد عبر اختصار التحويل أو شريط التسجيل."
     },
     "settings": {
       "title": "الإعدادات",
@@ -1433,5 +1457,18 @@
         "debug": "تصحيح"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "فتح الإجراءات السريعة في lowyap",
+    "dragHint": "اسحب إلى الحافة اليسرى أو السفلية أو اليمنى",
+    "noBotBadge": "بلا بوت",
+    "actions": {
+      "dictate": "إملاء",
+      "meeting": "ملاحظات الاجتماع",
+      "transform": "تحويل"
+    },
+    "runNow": "تحويل الآن",
+    "snoozeOneHour": "تأجيل لمدة ساعة",
+    "hideDock": "إخفاء الشريط الجانبي"
   }
 }

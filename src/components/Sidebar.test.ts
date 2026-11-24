@@ -24,6 +24,10 @@ describe("Studio Sidebar navigation", () => {
     assert.deepEqual(resolveStudioNavigation("postprocessing"), {
       section: "voice",
     });
+    assert.deepEqual(resolveStudioNavigation("transforms"), {
+      section: "voice",
+      voiceTab: "linguistEngine",
+    });
     assert.deepEqual(resolveStudioNavigation("settings"), {
       section: "settings",
       settingsTab: "shortcuts",

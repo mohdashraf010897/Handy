@@ -102,6 +102,232 @@ async resumeRecording() : Promise<boolean> {
 async finishRecording() : Promise<boolean> {
     return await TAURI_INVOKE("finish_recording");
 },
+/**
+ * Resizes the non-activating recording overlay panel to fit the Transform popover.
+ */
+async setOverlayTransformMenuOpen(open: boolean) : Promise<void> {
+    await TAURI_INVOKE("set_overlay_transform_menu_open", { open });
+},
+/**
+ * Transforms currently highlighted text (replacing in-place) or the latest
+ * dictation (copied to clipboard) using `prompt_id` or the active preset.
+ */
+async runTransformNow(promptId: string | null) : Promise<Result<TransformOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_transform_now", { promptId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Opens the Studio window directly to the Voice & Transforms workspace.
+ */
+async openTransformsWorkspace() : Promise<void> {
+    await TAURI_INVOKE("open_transforms_workspace");
+},
+async getEdgeDockState() : Promise<EdgeDockUiState> {
+    return await TAURI_INVOKE("get_edge_dock_state");
+},
+async setEdgeDockExpanded(expanded: boolean) : Promise<void> {
+    await TAURI_INVOKE("set_edge_dock_expanded", { expanded });
+},
+async setEdgeDockMenuOpen(open: boolean) : Promise<void> {
+    await TAURI_INVOKE("set_edge_dock_menu_open", { open });
+},
+async beginEdgeDockDrag() : Promise<void> {
+    await TAURI_INVOKE("begin_edge_dock_drag");
+},
+async finishEdgeDockDrag(position: EdgeDockPosition | null) : Promise<Result<EdgeDockPosition, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("finish_edge_dock_drag", { position }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setEdgeDockPosition(position: EdgeDockPosition) : Promise<Result<FlowSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_edge_dock_position", { position }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async snoozeEdgeDock(minutes: number) : Promise<void> {
+    await TAURI_INVOKE("snooze_edge_dock", { minutes });
+},
+async hideEdgeDock() : Promise<Result<FlowSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("hide_edge_dock") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async triggerDockDictation() : Promise<void> {
+    await TAURI_INVOKE("trigger_dock_dictation");
+},
+async triggerDockMeeting() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trigger_dock_meeting") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async triggerDockTransform(promptId: string | null) : Promise<Result<TransformOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trigger_dock_transform", { promptId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getSessionBusStateJson() : Promise<string> {
+    return await TAURI_INVOKE("get_session_bus_state_json");
+},
+async undoCancelRecording(takeId: number | null) : Promise<boolean> {
+    return await TAURI_INVOKE("undo_cancel_recording", { takeId });
+},
+async confirmCancelRecording(takeId: number | null) : Promise<boolean> {
+    return await TAURI_INVOKE("confirm_cancel_recording", { takeId });
+},
+async setMeetingPillDismissed(dismissed: boolean) : Promise<boolean> {
+    return await TAURI_INVOKE("set_meeting_pill_dismissed", { dismissed });
+},
+async openMeetingsWorkspace() : Promise<void> {
+    await TAURI_INVOKE("open_meetings_workspace");
+},
+async getMeetingLiveState() : Promise<MeetingLiveState> {
+    return await TAURI_INVOKE("get_meeting_live_state");
+},
+async startMeetingNotes(title: string | null, template: MeetingTemplate | null, openWorkspace: boolean | null) : Promise<Result<MeetingLiveState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting_notes", { title, template, openWorkspace }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pauseMeetingNotes() : Promise<Result<MeetingLiveState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pause_meeting_notes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resumeMeetingNotes() : Promise<Result<MeetingLiveState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resume_meeting_notes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopMeetingNotes() : Promise<Result<MeetingDetail, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_meeting_notes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateLiveRoughNotes(roughNotes: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_live_rough_notes", { roughNotes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setMeetingAutoDetect(enabled: boolean) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_meeting_auto_detect", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async dismissDetectedCall(callId: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dismiss_detected_call", { callId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listMeetings(query: string | null) : Promise<Result<MeetingSummaryRecord[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_meetings", { query }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeetingDetail(meetingId: string) : Promise<Result<MeetingDetail, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_detail", { meetingId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateMeetingMeta(meetingId: string, title: string | null, template: MeetingTemplate | null, roughNotes: string | null) : Promise<Result<MeetingDetail, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_meta", { meetingId, title, template, roughNotes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async regenerateMeetingNotes(meetingId: string, template: MeetingTemplate | null) : Promise<Result<MeetingDetail, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("regenerate_meeting_notes", { meetingId, template }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async exportMeetingMarkdown(meetingId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_meeting_markdown", { meetingId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async copyMeetingMarkdown(meetingId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_meeting_markdown", { meetingId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteMeeting(meetingId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_meeting", { meetingId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getCalendarAccessStatus() : Promise<CalendarAccessStatus> {
+    return await TAURI_INVOKE("get_calendar_access_status");
+},
+async connectCalendarAccess() : Promise<Result<CalendarAccessStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("connect_calendar_access") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getActiveCalendarMeeting() : Promise<ActiveCalendarMeeting | null> {
+    return await TAURI_INVOKE("get_active_calendar_meeting");
+},
 async changeBinding(id: string, binding: string) : Promise<Result<BindingResponse, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_binding", { id, binding }) };
@@ -1091,14 +1317,6 @@ async retryHistoryEntryTranscription(id: number) : Promise<void> {
 async cancelHistoryEntryTranscription(id: number) : Promise<void> {
     await TAURI_INVOKE("cancel_history_entry_transcription", { id });
 },
-async correctHistoryEntryAndSaveWord(id: number, updatedText: string, dictionaryWord: string | null) : Promise<Result<HistoryEntry, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("correct_history_entry_and_save_word", { id, updatedText, dictionaryWord }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 /**
  * Adds an audio or video file to History and queues its transcription.
  * Fails without adding anything if the file has no audio Handy can read.
@@ -1122,6 +1340,14 @@ async updateHistoryLimit(limit: number) : Promise<Result<null, string>> {
 async updateRecordingRetentionPeriod(period: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_recording_retention_period", { period }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async correctHistoryEntryAndSaveWord(id: number, updatedText: string, dictionaryWord: string | null) : Promise<Result<HistoryEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("correct_history_entry_and_save_word", { id, updatedText, dictionaryWord }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1168,6 +1394,7 @@ transcriptionJob: "transcription-job"
 
 /** user-defined types **/
 
+export type ActiveCalendarMeeting = { title: string; attendees: string[] }
 /**
  * The container-level `serde(default)` (backed by the `Default` impl below)
  * guarantees every field — including ones added in the future — falls back to
@@ -1215,9 +1442,9 @@ selected_channel?: number | null; clamshell_microphone?: string | null; selected
  */
 spoken_languages?: string[]; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; brand_custom_words_seeded?: boolean; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; theme?: Theme; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; paste_delay_after_ms?: number; 
 /**
- * Debug-gated ("beta") receipt-sequenced paste: restore the clipboard only
- * after the target app actually reads the transcript, instead of after a
- * fixed delay. See `paste_tx`. macOS and Windows only.
+ * Receipt-sequenced paste: restore the clipboard only after the target app
+ * actually reads the transcript (or keep it on clipboard with a clear notice
+ * if no text cursor read `Cmd+V`), instead of blindly restoring after 60ms.
  */
 reliable_paste?: boolean; typing_tool?: TypingTool; external_script_path?: string | null; filler_word_removal_enabled?: boolean; custom_filler_words?: string[] | null; 
 /**
@@ -1251,12 +1478,36 @@ language_detection_window_secs?: number;
  * not gated on this — that follows model capability. Migrated from the old
  * `overlay_position` (position `none` → style `None`).
  */
-overlay_style?: OverlayStyle }
+overlay_style?: OverlayStyle; 
+/**
+ * One-time migration marker moving legacy `OverlayStyle::Live` defaults to
+ * `OverlayStyle::Minimal` (calm waveform pill) while preserving explicit
+ * `OverlayStyle::None` and later manual re-selection of `Live`.
+ */
+calm_pill_default_migrated?: boolean; 
+/**
+ * One-time Wave 6 Transform migration marker: normalizes legacy `'LOWYAP'`
+ * in `custom_words` to `'lowyap'`, seeds the built-in `Prompt Engineer`
+ * preset, and re-enables local Apple Intelligence Stage-B polish on arm64.
+ */
+wave6_transform_seeded?: boolean }
 /**
  * Maps an app (macOS bundle id or Windows exe name) to a tone. A trailing
  * `*` matches any suffix; matching ignores case and a `.exe` suffix.
  */
 export type AppToneRule = { app_id: string; tone: Tone }
+/**
+ * Whether the meeting is capturing both system audio + mic or fell back to mic-only.
+ */
+export type AudioCaptureMode = 
+/**
+ * Bot-free dual-stream capture (`Me` mic + `Others` macOS `CATapDescription` tap).
+ */
+"dual_stream" | 
+/**
+ * Graceful fallback when System Audio permission is not granted or unsupported OS.
+ */
+"mic_only_fallback"
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AutoUnavailableReason = 
@@ -1274,6 +1525,7 @@ export type AutoUnavailableReason =
 { kind: "no_match" }
 export type AvailableAccelerators = { transcribe: string[]; gpu_devices: GpuDeviceOption[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
+export type CalendarAccessStatus = "not_determined" | "authorized" | "denied" | "unsupported"
 /**
  * Script applied to Mandarin and Cantonese output. Traditional carries its region
  * (Taiwan vs Hong Kong forms, e.g. 裡/裏) rather than guessing it.
@@ -1293,18 +1545,34 @@ export type ChineseScript =
 "traditional_hk"
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
-export type DictationTelemetrySummaryDto = {
-  sample_count: number;
-  total_audio_s: number;
-  p50_release_to_done_ms: number | null;
-  p95_release_to_done_ms: number | null;
-  p50_asr_ms: number | null;
-  p95_cleanup_ms: number | null;
-  median_rtf: number | null;
-  live_predecoded_ratio: number | null;
-  polished_count: number;
-  bottleneck: string;
-};
+/**
+ * Active call detected on the system (microphone running in another app + call app open).
+ */
+export type DetectedCallInfo = { 
+/**
+ * Stable identifier for this active call episode so "Not now" snoozes it cleanly.
+ */
+call_id: string; app_bundle_id: string; app_name: string; output_route: OutputRouteKind; detected_at_ms: number }
+export type DictationTelemetrySummaryDto = { sample_count: number; total_audio_s: number; p50_release_to_done_ms: number | null; p95_release_to_done_ms: number | null; p50_asr_ms: number | null; p95_cleanup_ms: number | null; median_rtf: number | null; live_predecoded_ratio: number | null; polished_count: number; bottleneck: string }
+export type EdgeDockMode = "collapsed" | "expanded" | "dragging"
+/**
+ * Screen edge where the non-activating micro-launcher docks when idle.
+ */
+export type EdgeDockPosition = 
+/**
+ * Tucked flush against the left screen edge (vertical hairline).
+ */
+"left" | 
+/**
+ * Tucked centered near the bottom edge above the macOS Dock.
+ */
+"bottom" | 
+/**
+ * Tucked flush against the right screen edge (vertical hairline).
+ */
+"right"
+export type EdgeDockPresetItem = { id: string; name: string }
+export type EdgeDockUiState = { enabled: boolean; snoozed: boolean; position: EdgeDockPosition; mode: EdgeDockMode; menu_open: boolean; preview_position: EdgeDockPosition; dictate_shortcut: string; meeting_shortcut: string; transform_shortcut: string; auto_apply_enabled: boolean; selected_preset_id: string; active_preset_title: string; presets: EdgeDockPresetItem[]; cursor_rel_x: number | null; cursor_rel_y: number | null; theme: string }
 export type FlowSettings = { 
 /**
  * Adjust the cleanup prompt to the frontmost app. Off by default (opt-in,
@@ -1339,7 +1607,19 @@ mic_boost_target_percent: number;
 /**
  * Apply noise-gated automatic gain control (AGC) to soft/distant speech frames.
  */
-quiet_speech_agc_enabled: boolean }
+quiet_speech_agc_enabled: boolean; 
+/**
+ * Show the minimal non-activating 3-edge micro-dock launcher when idle.
+ */
+edge_dock_enabled: boolean; 
+/**
+ * Active screen edge (`left`, `bottom`, or `right`) for the micro-dock.
+ */
+edge_dock_position: EdgeDockPosition; 
+/**
+ * One-time migration marker ensuring pre-v2 `left` test defaults move to `bottom`.
+ */
+edge_dock_v2_seeded: boolean }
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
 /**
  * Preferred output script when speaking Hindi/Urdu (Hindustani).
@@ -1358,18 +1638,7 @@ language: string | null;
 /**
  * How that language was chosen; `None` before it was recorded.
  */
-language_source: LanguageSource | null;
-audio_duration_s?: number | null;
-asr_ms?: number | null;
-cleanup_ms?: number | null;
-paste_ms?: number | null;
-release_to_done_ms?: number | null;
-real_time_factor?: number | null;
-chunks_predecoded_live?: number | null;
-chunks_total?: number | null;
-asr_model_id?: string | null;
-linguist_provider_id?: string | null;
-linguist_stage?: string | null }
+language_source: LanguageSource | null; audio_duration_s: number | null; asr_ms: number | null; cleanup_ms: number | null; paste_ms: number | null; release_to_done_ms: number | null; real_time_factor: number | null; chunks_predecoded_live: number | null; chunks_total: number | null; asr_model_id: string | null; linguist_provider_id: string | null; linguist_stage: string | null }
 export type HistoryUpdatePayload = { action: "added"; entry: HistoryEntry } | { action: "updated"; entry: HistoryEntry } | { action: "deleted"; id: number } | { action: "toggled"; id: number }
 /**
  * Result of changing keyboard implementation
@@ -1461,6 +1730,38 @@ matched_rule: string | null;
  */
 user_rule: boolean }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
+/**
+ * Complete persisted meeting record including rough bullets, expanded Markdown notes, and transcript.
+ */
+export type MeetingDetail = { summary: MeetingSummaryRecord; rough_notes: string; expanded_notes_md: string; 
+/**
+ * `"llm"`, `"apple_intelligence"`, or `"local_extractive"` so source is always transparent.
+ */
+summary_source: string; segments: MeetingSegment[]; rollups: MeetingRollup[] }
+/**
+ * Real-time snapshot polled/subscribed by the Meetings workspace and Call-Detected pill.
+ */
+export type MeetingLiveState = { status: MeetingStatus; active_meeting_id: string | null; title: string; template: MeetingTemplate; elapsed_ms: number; capture_mode: AudioCaptureMode; output_route: OutputRouteKind; app_name: string | null; rough_notes: string; recent_segments: MeetingSegment[]; rollup_count: number; detected_call: DetectedCallInfo | null; auto_detect_enabled: boolean }
+/**
+ * Rolling 5-minute mini-summary persisted to SQLite so 60+ min meetings keep flat RAM.
+ */
+export type MeetingRollup = { id: number; meeting_id: string; window_index: number; start_ms: number; end_ms: number; summary_bullets: string }
+/**
+ * One transcribed utterance or pause marker inside a meeting.
+ */
+export type MeetingSegment = { id: number; meeting_id: string; speaker: SpeakerChannel; start_ms: number; end_ms: number; text: string; language: string | null; speaker_id?: string | null; speaker_label?: string | null }
+/**
+ * Lifecycle state of the meeting notetaker.
+ */
+export type MeetingStatus = "idle" | "recording" | "paused" | "summarizing"
+/**
+ * Compact row for the searchable Meetings archive list.
+ */
+export type MeetingSummaryRecord = { id: string; title: string; started_at_ms: number; ended_at_ms: number | null; duration_ms: number; template: MeetingTemplate; capture_mode: AudioCaptureMode; output_route: OutputRouteKind; app_name: string | null; segment_count: number; preview_snippet: string }
+/**
+ * Structured note templates for Granola-style hybrid note expansion.
+ */
+export type MeetingTemplate = "general" | "one_on_one" | "standup" | "language_lesson" | "client_call"
 export type ModelInfo = { id: string; name: string; description: string; filename: string; source: ModelSource; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean; supports_streaming: boolean; supports_language_detection: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 /**
@@ -1483,11 +1784,22 @@ sha256: string | null } } |
  */
 { HuggingFace: { repo_id: string; revision: string } } | 
 /**
- * Already present on disk — a user-provided custom model, or one discovered
- * in a shared cache. Nothing to download.
+ * Built into the OS or already present on disk. Nothing to download.
  */
 "Local"
 export type ModelUnloadTimeout = "never" | "immediately" | "min_2" | "min_5" | "min_10" | "min_15" | "hour_1" | "sec_15"
+/**
+ * Active output route detected on the host so speaker bleed can be suppressed.
+ */
+export type OutputRouteKind = 
+/**
+ * Wired headphones, AirPods, Bluetooth headset, or USB headset (`Mic = Me` cleanly).
+ */
+"headphones" | 
+/**
+ * Built-in speakers or external speakers (`SpeakerEchoGuard` active on `Me`).
+ */
+"speakers" | "unknown"
 export type OverlayPosition = "top" | "bottom"
 /**
  * Which recording overlay to display. `Minimal` and `Live` share one base
@@ -1594,6 +1906,18 @@ export type ShortcutActivation =
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
 export type SoundTheme = "marimba" | "pop" | "custom"
 /**
+ * Which audio channel produced a meeting transcript segment.
+ */
+export type SpeakerChannel = 
+/**
+ * Local microphone (`Me`).
+ */
+"me" | 
+/**
+ * Remote participants captured from macOS system audio (`Others`).
+ */
+"others"
+/**
  * Phase of the streaming overlay card, emitted to drive its UI state.
  */
 export type StreamPhase = 
@@ -1692,6 +2016,23 @@ export type TranscriptionOutcome =
  * Transcribing or pasting failed.
  */
 "failed"
+/**
+ * Outcome of an on-demand Transform invocation (`⌥1` or overlay/Studio menu).
+ */
+export type TransformOutcome = { 
+/**
+ * Transformed output text.
+ */
+text: string; 
+/**
+ * `"replaced_selection"` when highlighted text was replaced in-place, or
+ * `"copied_last_dictation"` when transformed onto the clipboard.
+ */
+target: string; 
+/**
+ * Active preset ID used for the transform.
+ */
+preset_id: string }
 export type TypingTool = "auto" | "wtype" | "kwtype" | "dotool" | "ydotool" | "xdotool"
 export type VadBackend = "silero" | "earshot"
 /**

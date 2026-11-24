@@ -10,6 +10,7 @@ mod chinese_script;
 pub mod cli;
 mod clipboard;
 mod commands;
+mod edge_dock;
 pub mod engine_supervisor;
 mod flow;
 mod helpers;
@@ -416,6 +417,9 @@ fn initialize_core_logic(app_handle: &AppHandle) {
 
     // Create the recording overlay window (hidden by default)
     utils::create_recording_overlay(app_handle);
+
+    // Create the non-activating 3-edge micro-dock launcher
+    edge_dock::create_edge_dock(app_handle);
 }
 
 #[tauri::command]
@@ -542,9 +546,13 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
                 );
             }
         }
-        if args.transcribe_file.is_none() {
+        if args.transcribe_file.is_none() && args.eval_batch.is_none() {
             return 0;
         }
+    }
+
+    if let Some(manifest_path) = args.eval_batch.as_deref() {
+        return run_headless_eval_batch(app, args, manifest_path);
     }
 
     let Some(wav) = args.transcribe_file.clone() else {
@@ -657,6 +665,53 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
         0.0
     };
 
+    let mut stage_a_text: Option<String> = None;
+    let mut final_text: Option<String> = None;
+    let mut linguist_stage: Option<String> = None;
+    let mut linguist_provider: Option<String> = None;
+    let mut cleanup_ms: Option<f64> = None;
+
+    if args.with_linguist {
+        let app_clone = app.clone();
+        let raw_for_flow = text.clone();
+        let model_for_snap = model_id.clone();
+        if let Ok((sa, fin, snap)) = tauri::async_runtime::block_on(async move {
+            tokio::spawn(async move {
+                let session_id = flow::on_release();
+                flow::timing::asr(session_id, || {});
+                let mut seen_sa: Option<String> = None;
+                let processed = flow::finalize_dictation(
+                    &app_clone,
+                    &raw_for_flow,
+                    audio_secs,
+                    true,
+                    |sa| {
+                        seen_sa = Some(sa.to_string());
+                    },
+                    || false,
+                )
+                .await;
+                let fin_txt = processed
+                    .as_ref()
+                    .map(|p| p.final_text.clone())
+                    .unwrap_or_else(|| raw_for_flow.clone());
+                let sa_txt = seen_sa.unwrap_or_else(|| fin_txt.clone());
+                let snap =
+                    flow::timing::snapshot_for_session(session_id, audio_secs, Some(model_for_snap));
+                (sa_txt, fin_txt, snap)
+            })
+            .await
+        }) {
+            stage_a_text = Some(sa);
+            final_text = Some(fin);
+            if let Some(s) = snap {
+                linguist_stage = Some(format!("{:?}", s.linguist_stage));
+                linguist_provider = s.linguist_provider_id;
+                cleanup_ms = s.cleanup_ms;
+            }
+        }
+    }
+
     if args.json {
         println!(
             "{}",
@@ -672,6 +727,11 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
                 "simulate_live": args.simulate_live,
                 "chunk_count": chunk_count,
                 "text": text,
+                "stage_a_text": stage_a_text,
+                "final_text": final_text,
+                "linguist_stage": linguist_stage,
+                "linguist_provider": linguist_provider,
+                "cleanup_ms": cleanup_ms,
             })
         );
     } else {
@@ -686,7 +746,357 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
             rtf,
         );
         println!("text: {}", text);
+        if let Some(fin) = final_text {
+            println!("final_text: {}", fin);
+        }
     }
+    0
+}
+
+fn run_headless_eval_batch(
+    app: &AppHandle,
+    args: &CliArgs,
+    manifest_path: &std::path::Path,
+) -> i32 {
+    use std::time::Instant;
+    let raw_manifest = match std::fs::read_to_string(manifest_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to read manifest {}: {}", manifest_path.display(), e);
+            return 2;
+        }
+    };
+    let manifest: serde_json::Value = match serde_json::from_str(&raw_manifest) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: invalid manifest JSON {}: {}", manifest_path.display(), e);
+            return 2;
+        }
+    };
+
+    let tm = app.state::<Arc<TranscriptionManager>>();
+    let model_id = args
+        .model
+        .clone()
+        .unwrap_or_else(|| get_settings(app).selected_model);
+    if model_id.is_empty() {
+        eprintln!("error: no model selected for --eval-batch");
+        return 2;
+    }
+
+    let load_start = Instant::now();
+    if let Err(e) = tm.load_model_with_device(&model_id, args.device_index) {
+        eprintln!("error: load_model('{}') failed: {}", model_id, e);
+        return 1;
+    }
+    let load_ms = load_start.elapsed().as_millis() as u64;
+    let bound_backend = tm.current_backend();
+
+    let clips = manifest
+        .get("clips")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut clip_results = Vec::with_capacity(clips.len());
+
+    for (idx, clip) in clips.iter().enumerate() {
+        let clip_id = clip.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let wav_str = clip.get("wav_path").and_then(|v| v.as_str()).unwrap_or("");
+        let lang_opt = clip
+            .get("language")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        crate::settings::set_cli_language_override(lang_opt.clone());
+
+        let wav_path = std::path::PathBuf::from(wav_str);
+        let samples = match crate::audio_toolkit::read_wav_samples(&wav_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[eval {}/{}] {}: read error: {}", idx + 1, clips.len(), clip_id, e);
+                clip_results.push(serde_json::json!({
+                    "id": clip_id,
+                    "error": format!("read_wav_samples failed: {e}"),
+                }));
+                continue;
+            }
+        };
+        let audio_secs = samples.len() as f64 / 16_000.0;
+
+        if !tm.is_model_loaded() {
+            if let Err(e) = tm.load_model_with_device(&model_id, args.device_index) {
+                eprintln!("error: reload failed on {}: {}", clip_id, e);
+                return 1;
+            }
+        }
+
+        let app_clone = app.clone();
+        let tm_clone = tm.inner().clone();
+        let model_for_snap = model_id.clone();
+
+        let eval_outcome = tauri::async_runtime::block_on(async move {
+            tokio::spawn(async move {
+                let session_id = flow::on_release();
+                let t_asr = Instant::now();
+                let asr_res = flow::timing::asr(session_id, || tm_clone.transcribe(samples));
+                let asr_ms = t_asr.elapsed().as_millis() as u64;
+                let chunk_count = crate::managers::transcription::last_decode_chunk_count();
+                let raw_text = asr_res?;
+
+                let mut seen_sa: Option<String> = None;
+                let t_clean = Instant::now();
+                let processed = flow::finalize_dictation(
+                    &app_clone,
+                    &raw_text,
+                    audio_secs,
+                    true,
+                    |sa| {
+                        seen_sa = Some(sa.to_string());
+                    },
+                    || false,
+                )
+                .await;
+                let cleanup_wall_ms = t_clean.elapsed().as_millis() as u64;
+                let final_text = processed
+                    .as_ref()
+                    .map(|p| p.final_text.clone())
+                    .unwrap_or_else(|| raw_text.clone());
+                let stage_a_text = seen_sa.unwrap_or_else(|| final_text.clone());
+                let snap = flow::timing::snapshot_for_session(
+                    session_id,
+                    audio_secs,
+                    Some(model_for_snap),
+                );
+                let cur_settings = get_settings(&app_clone);
+                let script_pref = crate::flow::multilingual::active_hindustani_script(&app_clone);
+                let meeting_segment_text = crate::meeting::session::normalize_meeting_segment_script(
+                    &raw_text,
+                    &cur_settings.spoken_languages,
+                    script_pref,
+                );
+                Ok::<_, anyhow::Error>((
+                    raw_text,
+                    stage_a_text,
+                    final_text,
+                    meeting_segment_text,
+                    asr_ms,
+                    cleanup_wall_ms,
+                    chunk_count,
+                    snap,
+                ))
+            })
+            .await
+        });
+
+        match eval_outcome {
+            Ok(Ok((
+                raw_text,
+                stage_a_text,
+                final_text,
+                meeting_segment_text,
+                asr_ms,
+                cleanup_wall_ms,
+                chunk_count,
+                snap,
+            ))) => {
+                let stage_str = snap
+                    .as_ref()
+                    .map(|s| format!("{:?}", s.linguist_stage))
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let provider_str = snap.as_ref().and_then(|s| s.linguist_provider_id.clone());
+                eprintln!(
+                    "[eval-clip {}/{}] {} ({:.1}s) -> asr={}ms clean={}ms stage={}",
+                    idx + 1,
+                    clips.len(),
+                    clip_id,
+                    audio_secs,
+                    asr_ms,
+                    cleanup_wall_ms,
+                    stage_str
+                );
+                let mut entry = clip.clone();
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.insert("eval_raw_text".into(), serde_json::json!(raw_text));
+                    obj.insert("eval_stage_a_text".into(), serde_json::json!(stage_a_text));
+                    obj.insert("eval_final_text".into(), serde_json::json!(final_text));
+                    obj.insert(
+                        "eval_meeting_segment_text".into(),
+                        serde_json::json!(meeting_segment_text),
+                    );
+                    obj.insert("eval_asr_ms".into(), serde_json::json!(asr_ms));
+                    obj.insert(
+                        "eval_cleanup_ms".into(),
+                        serde_json::json!(cleanup_wall_ms),
+                    );
+                    obj.insert("eval_chunk_count".into(), serde_json::json!(chunk_count));
+                    obj.insert("eval_linguist_stage".into(), serde_json::json!(stage_str));
+                    obj.insert(
+                        "eval_linguist_provider".into(),
+                        serde_json::json!(provider_str),
+                    );
+                }
+                clip_results.push(entry);
+            }
+            Ok(Err(e)) => {
+                eprintln!("[eval-clip {}/{}] {} failed: {}", idx + 1, clips.len(), clip_id, e);
+                clip_results.push(serde_json::json!({
+                    "id": clip_id,
+                    "error": e.to_string(),
+                }));
+            }
+            Err(e) => {
+                eprintln!("[eval-clip {}/{}] {} join failed: {}", idx + 1, clips.len(), clip_id, e);
+                clip_results.push(serde_json::json!({
+                    "id": clip_id,
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+
+    crate::settings::set_cli_language_override(None);
+
+    let meetings = manifest
+        .get("meetings")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut meeting_results = Vec::with_capacity(meetings.len());
+
+    if !meetings.is_empty() {
+        let ro_dir = std::env::temp_dir().join(format!("lowyap-eval-meetings-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&ro_dir);
+        if let Ok(app_data_dir) = crate::portable::app_data_dir(app) {
+            for suffix in ["meetings.db", "meetings.db-wal", "meetings.db-shm"] {
+                let src = app_data_dir.join(suffix);
+                if src.exists() {
+                    let _ = std::fs::copy(&src, ro_dir.join(suffix));
+                }
+            }
+        }
+        let ro_db_path = ro_dir.join("meetings.db");
+        match crate::meeting::store::MeetingStore::open_in_path(&ro_db_path) {
+            Ok(store) => {
+                let script_pref = crate::flow::settings::get(app).hindustani_script;
+                for (idx, m_item) in meetings.iter().enumerate() {
+                    let meeting_id = m_item
+                        .as_str()
+                        .or_else(|| m_item.get("meeting_id").and_then(|v| v.as_str()))
+                        .or_else(|| m_item.get("id").and_then(|v| v.as_str()))
+                        .unwrap_or("");
+                    match store.get_meeting_detail(meeting_id) {
+                        Ok(detail) => {
+                            let template = m_item
+                                .get("template")
+                                .and_then(|v| v.as_str())
+                                .map(crate::meeting::types::MeetingTemplate::from_db_str)
+                                .unwrap_or(detail.summary.template);
+                            let tail_start = detail.segments.len().saturating_sub(160);
+                            let tail_segments = &detail.segments[tail_start..];
+                            let distinct_remote: std::collections::BTreeSet<String> = detail
+                                .segments
+                                .iter()
+                                .filter(|s| {
+                                    s.speaker == crate::meeting::types::SpeakerChannel::Others
+                                })
+                                .filter_map(|s| s.speaker_label.clone())
+                                .collect();
+                            let t_sum = Instant::now();
+                            let sum_res = tauri::async_runtime::block_on(
+                                crate::meeting::summarizer::generate_hybrid_meeting_notes(
+                                    app,
+                                    &detail.summary.title,
+                                    template,
+                                    &detail.rough_notes,
+                                    &detail.rollups,
+                                    tail_segments,
+                                    script_pref,
+                                ),
+                            );
+                            let sum_ms = t_sum.elapsed().as_millis() as u64;
+                            eprintln!(
+                                "[eval-meeting {}/{}] {} ({} segs, {} rollups) -> source={} ({}ms, {}B)",
+                                idx + 1,
+                                meetings.len(),
+                                meeting_id,
+                                detail.segments.len(),
+                                detail.rollups.len(),
+                                sum_res.summary_source,
+                                sum_ms,
+                                sum_res.text.len()
+                            );
+                            let mut entry = if m_item.is_object() {
+                                m_item.clone()
+                            } else {
+                                serde_json::json!({ "meeting_id": meeting_id })
+                            };
+                            if let Some(obj) = entry.as_object_mut() {
+                                obj.insert(
+                                    "stored_title".into(),
+                                    serde_json::json!(detail.summary.title),
+                                );
+                                obj.insert(
+                                    "segment_count".into(),
+                                    serde_json::json!(detail.segments.len()),
+                                );
+                                obj.insert(
+                                    "rollup_count".into(),
+                                    serde_json::json!(detail.rollups.len()),
+                                );
+                                obj.insert(
+                                    "stored_distinct_remote_speakers".into(),
+                                    serde_json::json!(distinct_remote),
+                                );
+                                obj.insert(
+                                    "stored_summary_source".into(),
+                                    serde_json::json!(detail.summary_source),
+                                );
+                                obj.insert(
+                                    "stored_notes_bytes".into(),
+                                    serde_json::json!(detail.expanded_notes_md.len()),
+                                );
+                                obj.insert(
+                                    "eval_summary_source".into(),
+                                    serde_json::json!(sum_res.summary_source),
+                                );
+                                obj.insert(
+                                    "eval_summary_ms".into(),
+                                    serde_json::json!(sum_ms),
+                                );
+                                obj.insert(
+                                    "eval_notes_md".into(),
+                                    serde_json::json!(sum_res.text),
+                                );
+                            }
+                            meeting_results.push(entry);
+                        }
+                        Err(e) => {
+                            eprintln!("error: meeting {} lookup failed: {}", meeting_id, e);
+                            meeting_results.push(serde_json::json!({
+                                "meeting_id": meeting_id,
+                                "error": e,
+                            }));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("error: failed to open read-only meetings snapshot: {}", e);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&ro_dir);
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model": model_id,
+            "bound_backend": bound_backend,
+            "load_ms": load_ms,
+            "clips": clip_results,
+            "meetings": meeting_results,
+        }))
+        .unwrap_or_else(|_| "{}".to_string())
+    );
     0
 }
 
@@ -731,6 +1141,20 @@ pub fn run(cli_args: CliArgs) {
             flow::commands::pause_recording,
             flow::commands::resume_recording,
             flow::commands::finish_recording,
+            flow::commands::set_overlay_transform_menu_open,
+            flow::commands::run_transform_now,
+            flow::commands::open_transforms_workspace,
+            edge_dock::get_edge_dock_state,
+            edge_dock::set_edge_dock_expanded,
+            edge_dock::set_edge_dock_menu_open,
+            edge_dock::begin_edge_dock_drag,
+            edge_dock::finish_edge_dock_drag,
+            edge_dock::set_edge_dock_position,
+            edge_dock::snooze_edge_dock,
+            edge_dock::hide_edge_dock,
+            edge_dock::trigger_dock_dictation,
+            edge_dock::trigger_dock_meeting,
+            edge_dock::trigger_dock_transform,
             session_bus::get_session_bus_state_json,
             session_bus::undo_cancel_recording,
             session_bus::confirm_cancel_recording,
@@ -907,8 +1331,10 @@ pub fn run(cli_args: CliArgs) {
 
     // The headless path must run as its own instance (see the single-instance
     // note below), not forward to an already-running app.
-    let headless_mode =
-        cli_args.transcribe_file.is_some() || cli_args.list_devices || cli_args.list_models;
+    let headless_mode = cli_args.transcribe_file.is_some()
+        || cli_args.eval_batch.is_some()
+        || cli_args.list_devices
+        || cli_args.list_models;
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()

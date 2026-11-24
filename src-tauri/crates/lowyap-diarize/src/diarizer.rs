@@ -31,8 +31,8 @@ impl Default for DiarizerConfig {
     fn default() -> Self {
         Self {
             max_remote_speakers: 8,
-            remote_match_threshold: 0.82,
-            min_frames_for_new_speaker: 12,
+            remote_match_threshold: 0.80,
+            min_frames_for_new_speaker: 30,
             separate_single_mic_speakers: false,
             me_verification_threshold: 0.72,
         }
@@ -87,24 +87,36 @@ impl SpeakerCluster {
 
     fn similarity_with_f0_guard(&self, emb: &VoiceEmbedding) -> (f32, f32) {
         let cos = emb.cosine_similarity(&self.centroid);
-        let penalty = match (self.median_f0_hz, emb.median_f0_hz) {
+        let timbre_cos = if self.centroid.len() >= 36 && emb.vector.len() == self.centroid.len() {
+            slice_cosine_similarity(&self.centroid[18..36], &emb.vector[18..36])
+        } else {
+            cos
+        };
+        match (self.median_f0_hz, emb.median_f0_hz) {
             (Some(cluster_f0), Some(span_f0))
-                if self.voiced_observations >= 1 && emb.voiced_frames >= 6 =>
+                if self.voiced_observations >= 2 && emb.voiced_frames >= 16 =>
             {
                 let hi = cluster_f0.max(span_f0);
                 let lo = cluster_f0.min(span_f0).max(1.0);
                 let rel_diff = (hi / lo) - 1.0;
-                if rel_diff > F0_DIVERGENCE_RATIO_THRESHOLD {
+                // Single-speaker prosodic/melodic shift guard: when the 18-D cepstral/Mel
+                // vocal-tract formant envelope (`vector[18..36]`) matches strongly (`>= 0.88`)
+                // and F0 moved within normal intonation/recitation range (`<= 45%`, not a
+                // cross-sex octave jump), prevent pitch/tempo blocks from splitting one teacher.
+                if timbre_cos >= 0.88 && rel_diff <= 0.45 {
+                    return (cos, cos.max(timbre_cos - 0.05));
+                }
+                let penalty = if rel_diff > F0_DIVERGENCE_RATIO_THRESHOLD {
                     0.25 + (rel_diff - F0_DIVERGENCE_RATIO_THRESHOLD) * 0.60
                 } else if rel_diff > 0.20 {
                     (rel_diff - 0.20) * 1.25
                 } else {
                     0.0
-                }
+                };
+                (cos, cos - penalty)
             }
-            _ => 0.0,
-        };
-        (cos, cos - penalty)
+            _ => (cos, cos),
+        }
     }
 }
 
@@ -371,6 +383,26 @@ fn default_remote_label(speaker_id: &str) -> String {
     } else {
         "Speaker 1".to_owned()
     }
+}
+
+fn slice_cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0.0_f64;
+    let mut a_sq = 0.0_f64;
+    let mut b_sq = 0.0_f64;
+    for (&lhs, &rhs) in a.iter().zip(b.iter()) {
+        let l = f64::from(lhs);
+        let r = f64::from(rhs);
+        dot += l * r;
+        a_sq += l * l;
+        b_sq += r * r;
+    }
+    if a_sq <= 1e-24 || b_sq <= 1e-24 {
+        return 0.0;
+    }
+    (dot / (a_sq.sqrt() * b_sq.sqrt())).clamp(-1.0, 1.0) as f32
 }
 
 fn compute_median(values: &[f32]) -> Option<f32> {

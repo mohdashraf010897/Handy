@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Nachbearbeitungs-Tastenkürzel",
             "description": "Optional: Ein dediziertes Tastenkürzel, das immer die KI-Nachbearbeitung auf deine Transkription anwendet."
+          },
+          "transform": {
+            "name": "Transformieren-Kurzbefehl",
+            "description": "Markierten Text direkt ersetzen (oder das letzte Diktat umwandeln) mit der aktiven Vorlage."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Anruf erkannt"
+      },
+      "edgeDock": {
+        "title": "Kanten-Dock",
+        "description": "Dezente Schnellleiste am linken, unteren oder rechten Bildschirmrand. Beim Überfahren erscheinen Diktieren, Meeting und Transformieren; per Ziehen umplatzierbar.",
+        "positions": {
+          "left": "Linker Rand",
+          "bottom": "Unterer Rand",
+          "right": "Rechter Rand",
+          "off": "Ausgeblendet"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Meeting-Notizen öffnen",
     "minimizeMeetingPill": "In die Menüleiste minimieren",
     "meetingStopped": "Notizen gestoppt",
-    "dismissMeetingStopped": "Speichern & schließen"
+    "dismissMeetingStopped": "Speichern & schließen",
+    "transform": "Transformieren",
+    "transformMenuAria": "Transformations-Vorlagen",
+    "transformAutoApply": "Diktat automatisch umschreiben",
+    "transformPresetPolish": "Feinschliff",
+    "transformPresetPromptEngineer": "Prompt-Engineer",
+    "transformConfigure": "Transformationen konfigurieren…",
+    "noticeTransformedCopied": "Transformiert — mit ⌘V einfügen",
+    "noticeTransformEmpty": "Zuerst Text markieren oder diktieren"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} blockiert möglicherweise 1 Tastenkürzel",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App-Tonfall & Snippets",
         "linguistEngine": "Linguist-Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Aktive Transformations-Vorlage",
+      "transformPresetsHint": "Wird bei aktiviertem KI-Umschreiben automatisch nach dem Diktat ausgeführt oder jederzeit auf markierten Text per Kurzbefehl bzw. Aufnahmekapsel angewendet."
     },
     "settings": {
       "title": "Einstellungen",
@@ -1433,5 +1457,18 @@
         "debug": "Debug"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "lowyap-Schnellaktionen öffnen",
+    "dragHint": "An den linken, unteren oder rechten Rand ziehen",
+    "noBotBadge": "Ohne Bot",
+    "actions": {
+      "dictate": "Diktieren",
+      "meeting": "Meeting-Notizen",
+      "transform": "Transformieren"
+    },
+    "runNow": "Jetzt umwandeln",
+    "snoozeOneHour": "1 Stunde schlummern",
+    "hideDock": "Rand-Dock ausblenden"
   }
 }

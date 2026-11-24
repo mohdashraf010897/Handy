@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "पोस्ट-प्रोसेसिङ हटकी",
             "description": "वैकल्पिक: तपाईंको ट्रान्सक्रिप्सनमा सधैँ AI पोस्ट-प्रोसेसिङ लागू गर्ने छुट्टै हटकी।"
+          },
+          "transform": {
+            "name": "रूपान्तरण सर्टकट",
+            "description": "सक्रिय प्रिसेट प्रयोग गरी चयन गरिएको पाठलाई त्यहीँ पुनर्लेखन गर्नुहोस् (वा पछिल्लो डिक्टेशन रूपान्तरण गर्नुहोस्)।"
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "कल पत्ता लाग्यो"
+      },
+      "edgeDock": {
+        "title": "Edge Dock",
+        "description": "Tuck a minimal quick-action sliver onto the Left, Bottom, or Right screen edge. Hover for Dictate, Meeting, and Transform, or drag to snap edges.",
+        "positions": {
+          "left": "Left edge",
+          "bottom": "Bottom edge",
+          "right": "Right edge",
+          "off": "Hidden"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "बैठकका टिप्पणीहरू खोल्नुहोस्",
     "minimizeMeetingPill": "मेनु बारमा सानो पार्नुहोस्",
     "meetingStopped": "नोटटेकर रोकियो",
-    "dismissMeetingStopped": "सेभ गरी बन्द गर्नुहोस्"
+    "dismissMeetingStopped": "सेभ गरी बन्द गर्नुहोस्",
+    "transform": "रूपान्तरण",
+    "transformMenuAria": "रूपान्तरण प्रिसेटहरू",
+    "transformAutoApply": "डिक्टेशन स्वतः पुनर्लेखन गर्नुहोस्",
+    "transformPresetPolish": "परिमार्जन",
+    "transformPresetPromptEngineer": "प्रम्प्ट इन्जिनियर",
+    "transformConfigure": "रूपान्तरण कन्फिगर गर्नुहोस्…",
+    "noticeTransformedCopied": "रूपान्तरण गरियो — टाँस्न ⌘V थिच्नुहोस्",
+    "noticeTransformEmpty": "पहिले पाठ चयन गर्नुहोस् वा बोल्नुहोस्"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} ले 1 सर्टकट रोकिरहेको हुन सक्छ",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "सक्रिय रूपान्तरण प्रिसेट",
+      "transformPresetsHint": "AI पुनर्लेखन अन हुँदा डिक्टेशनपछि स्वतः प्रयोग हुन्छ, वा रूपान्तरण सर्टकट र रेकर्डिङ पिलबाट चयन गरिएको पाठमा जुनसुकै बेला प्रयोग गर्न सकिन्छ।"
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "डिबग"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Open lowyap quick actions",
+    "dragHint": "Drag to Left, Bottom, or Right edge",
+    "noBotBadge": "No bot",
+    "actions": {
+      "dictate": "Dictate",
+      "meeting": "Meeting notes",
+      "transform": "Transform"
+    },
+    "runNow": "अहिले रूपान्तरण गर्नुहोस्",
+    "snoozeOneHour": "१ घण्टा रोक्नुहोस्",
+    "hideDock": "एज डक लुकाउनुहोस्"
   }
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { type } from "@tauri-apps/plugin-os";
 import { RefreshCcw } from "lucide-react";
 import { commands, type PostProcessApiFormat } from "@/bindings";
 
@@ -190,7 +191,8 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
   const [draftText, setDraftText] = useState("");
 
   const prompts = getSetting("post_process_prompts") || [];
-  const selectedPromptId = getSetting("post_process_selected_prompt_id") || "";
+  const selectedPromptId =
+    getSetting("post_process_selected_prompt_id") || prompts[0]?.id || "";
   const selectedPrompt =
     prompts.find((prompt) => prompt.id === selectedPromptId) || null;
 
@@ -464,10 +466,18 @@ PostProcessingSettingsPrompts.displayName = "PostProcessingSettingsPrompts";
 
 export const PostProcessingSettings: React.FC = () => {
   const { t } = useTranslation();
+  const isLinux = type() === "linux";
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
       <SettingsGroup title={t("settings.postProcessing.hotkey.title")}>
+        {!isLinux && (
+          <ShortcutInput
+            shortcutId="transform"
+            descriptionMode="tooltip"
+            grouped={true}
+          />
+        )}
         <ShortcutInput
           shortcutId="transcribe_with_post_process"
           descriptionMode="tooltip"

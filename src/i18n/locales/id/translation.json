@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Pintasan Pascaproses",
             "description": "Opsional: pintasan khusus yang selalu menerapkan pascaproses AI pada transkripsi Anda."
+          },
+          "transform": {
+            "name": "Pintasan Transformasi",
+            "description": "Tulis ulang teks yang disorot secara langsung (atau ubah dikte terakhir Anda) memakai preset aktif."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Panggilan terdeteksi"
+      },
+      "edgeDock": {
+        "title": "Dok Tepi",
+        "description": "Sematkan tab aksi cepat tipis di tepi kiri, bawah, atau kanan layar. Arahkan kursor untuk Dikte, Rapat, dan Transformasi, atau seret untuk memindahkan.",
+        "positions": {
+          "left": "Tepi kiri",
+          "bottom": "Tepi bawah",
+          "right": "Tepi kanan",
+          "off": "Tersembunyi"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Buka catatan rapat",
     "minimizeMeetingPill": "Minimalkan ke bilah menu",
     "meetingStopped": "Pencatat berhenti",
-    "dismissMeetingStopped": "Simpan & tutup"
+    "dismissMeetingStopped": "Simpan & tutup",
+    "transform": "Transformasi",
+    "transformMenuAria": "Preset transformasi",
+    "transformAutoApply": "Tulis ulang dikte otomatis",
+    "transformPresetPolish": "Perhalus",
+    "transformPresetPromptEngineer": "Insinyur Prompt",
+    "transformConfigure": "Atur transformasi…",
+    "noticeTransformedCopied": "Ditransformasi — tekan ⌘V untuk menempel",
+    "noticeTransformEmpty": "Pilih teks atau dikte terlebih dahulu"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} mungkin memblokir 1 pintasan",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Preset Transformasi Aktif",
+      "transformPresetsHint": "Digunakan otomatis setelah dikte saat Penulisan Ulang AI aktif, atau kapan saja pada teks yang disorot lewat pintasan Transformasi atau kapsul perekaman."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Debug"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Buka aksi cepat lowyap",
+    "dragHint": "Seret ke tepi kiri, bawah, atau kanan",
+    "noBotBadge": "Tanpa bot",
+    "actions": {
+      "dictate": "Dikte",
+      "meeting": "Catatan rapat",
+      "transform": "Transformasi"
+    },
+    "runNow": "Transformasi sekarang",
+    "snoozeOneHour": "Tunda 1 jam",
+    "hideDock": "Sembunyikan Edge Dock"
   }
 }

@@ -396,13 +396,72 @@ pub fn normalize_script_output(
 /// Apple Intelligence summarization) and cross-channel echo deduplication.
 pub fn hindustani_to_roman_hinglish(text: &str) -> String {
     let after_dev = devanagari_to_roman_hinglish(text);
-    perso_arabic_to_roman_hinglish(&after_dev)
+    perso_arabic_to_roman_inner(&after_dev, false)
+}
+
+/// Converts Devanagari and conversational Urdu/English-loanword Perso-Arabic into
+/// colloquial Roman Hinglish while preserving unambiguous Classical Arabic tokens
+/// (vocalized harakat, `الـ` definite nouns, `ة`/`أ`/`إ`/`ى`, and core grammar
+/// particles/verbs like `بَلَىٰ`, `لَمْ`, `لَنْ`, `سَمِعْتَ`, `لَيَسْمَعَنَّ`) in Arabic script.
+pub fn hindustani_to_roman_preserving_arabic(text: &str) -> String {
+    let after_dev = devanagari_to_roman_hinglish(text);
+    perso_arabic_to_roman_inner(&after_dev, true)
+}
+
+/// Restores unambiguous phonetically transliterated English loanwords (such as
+/// `پوزیٹیو سنٹنس` -> `positive sentence`) back to clean Latin English inside
+/// Perso-Arabic Urdu/Arabic transcripts while leaving all Urdu and Arabic words intact.
+pub fn restore_english_loanwords_in_perso_arabic(text: &str) -> String {
+    if !contains_perso_arabic(text) {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if is_perso_arabic_word_char(ch) {
+            while chars
+                .peek()
+                .is_some_and(|&(_, c)| is_perso_arabic_word_char(c))
+            {
+                chars.next();
+            }
+            let end = chars.peek().map_or(text.len(), |&(index, _)| index);
+            let word = &text[start..end];
+            let cleaned: String = word
+                .chars()
+                .filter(|&c| !matches!(c, '\u{064B}'..='\u{065F}' | '\u{0670}' | '\u{0640}'))
+                .collect();
+            if let Some(eng) = english_loanword_from_perso_arabic(&cleaned) {
+                out.push_str(eng);
+            } else {
+                out.push_str(word);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Returns `true` if `text` contains letters specific to Urdu orthography
+/// (`ٹ ڈ ڑ ں ہ ھ پ چ ژ گ ے`) that do not occur in Modern Standard Arabic.
+pub fn contains_urdu_specific_perso_arabic(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(
+            c,
+            'ٹ' | 'ڈ' | 'ڑ' | 'ں' | 'ہ' | 'ھ' | 'پ' | 'چ' | 'ژ' | 'گ' | 'ے'
+        )
+    })
 }
 
 /// Deterministic Perso-Arabic Urdu to colloquial Roman Hinglish transliterator.
 /// Combines a high-frequency conversational Urdu/Hinglish word table (needed
 /// because Perso-Arabic omits short vowels) with a phonetic grapheme fallback.
 pub fn perso_arabic_to_roman_hinglish(text: &str) -> String {
+    perso_arabic_to_roman_inner(text, false)
+}
+
+fn perso_arabic_to_roman_inner(text: &str, preserve_classical_arabic: bool) -> String {
     if !contains_perso_arabic(text) {
         return text.to_string();
     }
@@ -420,6 +479,11 @@ pub fn perso_arabic_to_roman_hinglish(text: &str) -> String {
             }
             let end = chars.peek().map_or(text.len(), |&(index, _)| index);
             let word = &text[start..end];
+            if preserve_classical_arabic && is_classical_arabic_token(word) {
+                out.push_str(word);
+                at_sentence_start = false;
+                continue;
+            }
             let roman = transliterate_perso_arabic_word(word);
             if at_sentence_start {
                 push_capitalized_ascii(&mut out, &roman);
@@ -749,7 +813,126 @@ fn is_perso_arabic_word_char(c: char) -> bool {
     is_perso_arabic_char(c) && !matches!(c, '،' | '؛' | '؟' | '۔' | '٪' | '٫' | '٬')
 }
 
+fn english_loanword_from_perso_arabic(cleaned: &str) -> Option<&'static str> {
+    match cleaned {
+        "پوزیٹیو" | "پوزیٹیف" | "پازیٹو" | "پوزیٹو" => Some("positive"),
+        "نیگیٹیو" | "نیگیٹو" | "نیگیٹیف" => Some("negative"),
+        "سنٹنس" | "سینٹینس" | "سنٹینس" => Some("sentence"),
+        "سنٹنسز" | "سینٹینسز" => Some("sentences"),
+        "کویسچن" | "کوسچن" | "کویسچین" => Some("question"),
+        "کویسچنز" | "کوسچنز" => Some("questions"),
+        "انسر" | "آنسر" => Some("answer"),
+        "انسرز" | "آنسرز" => Some("answers"),
+        "پروناؤن" | "پروناون" => Some("pronoun"),
+        "پروناؤنز" | "پروناونز" => Some("pronouns"),
+        "ورب" => Some("verb"),
+        "وربز" => Some("verbs"),
+        "ناؤن" => Some("noun"),
+        "ایکٹیو" | "ایکٹو" => Some("active"),
+        "پیسیو" | "پیسو" => Some("passive"),
+        "پریزنٹ" => Some("present"),
+        "پاسٹ" => Some("past"),
+        "فیوچر" => Some("future"),
+        "سنگولر" => Some("singular"),
+        "ڈوئل" => Some("dual"),
+        "پلورل" => Some("plural"),
+        "میننگ" => Some("meaning"),
+        "فالونگ" | "فالوئنگ" => Some("following"),
+        "یوز" => Some("use"),
+        "شیئر" => Some("share"),
+        "وِد" => Some("with"),
+        "آؤٹ" => Some("out"),
+        "لوکنگ" => Some("looking"),
+        "سرٹنلی" => Some("certainly"),
+        "لسن" => Some("listen"),
+        "ڈیٹ" => Some("date"),
+        "فائنل" => Some("final"),
+        "پیج" => Some("page"),
+        "نمبر" => Some("number"),
+        "لیسن" => Some("lesson"),
+        "کلاس" => Some("class"),
+        "ایگزامپل" | "ایگزیمپل" => Some("example"),
+        "پوائنٹ" => Some("point"),
+        "ڈائریکٹ" => Some("direct"),
+        "کلیئر" => Some("clear"),
+        "سمپل" => Some("simple"),
+        "فرسٹ" => Some("first"),
+        "سیکنڈ" => Some("second"),
+        "تھرڈ" => Some("third"),
+        "نیکسٹ" => Some("next"),
+        "لاسٹ" => Some("last"),
+        "ٹائم" => Some("time"),
+        "اسٹیٹس" | "سٹیٹس" => Some("status"),
+        "اپڈیٹ" => Some("update"),
+        "ایڈیٹر" => Some("editor"),
+        "رول" => Some("rule"),
+        "بلڈر" => Some("builder"),
+        "میٹنگ" => Some("meeting"),
+        "میٹنگز" => Some("meetings"),
+        "سلاک" | "سلیک" => Some("slack"),
+        _ => None,
+    }
+}
+
+fn is_classical_arabic_token(word: &str) -> bool {
+    if contains_urdu_specific_perso_arabic(word) {
+        return false;
+    }
+    let cleaned: String = word
+        .chars()
+        .filter(|&c| !matches!(c, '\u{064B}'..='\u{065F}' | '\u{0670}' | '\u{0640}'))
+        .collect();
+    if english_loanword_from_perso_arabic(&cleaned).is_some() {
+        return false;
+    }
+    if matches!(
+        word,
+        "بلیٰ" | "بَلَىٰ" | "بلى" | "بَلَى"
+    ) {
+        return true;
+    }
+    // Common Urdu-shared unvocalized words stay Romanized unless explicitly vocalized with harakat.
+    if irregular_perso_arabic_word(&cleaned).is_some()
+        && !word
+            .chars()
+            .any(|c| matches!(c, '\u{064B}'..='\u{0652}' | '\u{0670}'))
+    {
+        return false;
+    }
+    let has_harakat = word
+        .chars()
+        .any(|c| matches!(c, '\u{064B}'..='\u{0652}' | '\u{0670}'));
+    let has_arabic_only_letter = word
+        .chars()
+        .any(|c| matches!(c, 'ة' | 'ى' | 'ٱ' | 'أ' | 'إ' | 'ؤ' | 'ي'));
+    let has_definite_article = cleaned.chars().count() >= 4
+        && ["ال", "وال", "بال", "فال", "كال"]
+            .iter()
+            .any(|p| cleaned.starts_with(p));
+    let is_known_grammar_form = matches!(
+        cleaned.as_str(),
+        "لم" | "لن"
+            | "نعم"
+            | "أما"
+            | "سمعت"
+            | "يسمع"
+            | "يسمعون"
+            | "تسمع"
+            | "تسمعون"
+            | "أسمع"
+            | "نسمع"
+            | "ليسمعن"
+            | "اذان"
+            | "الأذان"
+            | "الاذان"
+    );
+    has_harakat || has_arabic_only_letter || has_definite_article || is_known_grammar_form
+}
+
 fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
+    if let Some(eng) = english_loanword_from_perso_arabic(word) {
+        return Some(eng);
+    }
     match word {
         "اور" => Some("aur"),
         "بھائی" | "بھائ" => Some("bhai"),
@@ -763,6 +946,7 @@ fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
         "ہے" => Some("hai"),
         "ہیں" => Some("hain"),
         "ہوں" => Some("hoon"),
+        "ہو" => Some("ho"),
         "تھا" => Some("tha"),
         "تھی" => Some("thi"),
         "تھے" => Some("the"),
@@ -773,6 +957,7 @@ fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
         "آپ" => Some("aap"),
         "ہم" => Some("hum"),
         "تم" => Some("tum"),
+        "تمہیں" | "تمھیں" => Some("tumhein"),
         "مجھے" => Some("mujhe"),
         "ہمیں" => Some("humein"),
         "یہ" => Some("yeh"),
@@ -784,6 +969,7 @@ fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
         "ابھی" => Some("abhi"),
         "کل" => Some("kal"),
         "آج" => Some("aaj"),
+        "بعد" => Some("baad"),
         "پتہ" | "پتا" => Some("pata"),
         "چلا" => Some("chala"),
         "چھٹی" => Some("chhutti"),
@@ -813,6 +999,7 @@ fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
         "کرلو" => Some("karlo"),
         "کرتے" => Some("karte"),
         "کرنا" => Some("karna"),
+        "کریں" => Some("karein"),
         "لو" => Some("lo"),
         "دو" => Some("do"),
         "آشو" => Some("ashu"),
@@ -822,9 +1009,6 @@ fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
         "جا" => Some("ja"),
         "ساری" => Some("saari"),
         "رہتی" => Some("rehti"),
-        "میٹنگ" => Some("meeting"),
-        "میٹنگز" => Some("meetings"),
-        "سلاک" | "سلیک" => Some("slack"),
         "ٹھیک" => Some("theek"),
         "اچھا" => Some("accha"),
         "بہت" => Some("bahut"),
@@ -837,6 +1021,62 @@ fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
         "یہاں" => Some("yahan"),
         "وہاں" => Some("wahan"),
         "کون" => Some("kaun"),
+        "بالکل" | "بلکل" => Some("bilkul"),
+        "صحیح" => Some("sahi"),
+        "کہنا" => Some("kehna"),
+        "کہتے" => Some("kehte"),
+        "کہا" => Some("kaha"),
+        "چاہ" => Some("chah"),
+        "دیکھو" => Some("dekho"),
+        "دیکھیں" => Some("dekhein"),
+        "دیکھتے" => Some("dekhte"),
+        "سنا" => Some("suna"),
+        "سنی" => Some("suni"),
+        "سن" => Some("sun"),
+        "پا" => Some("paa"),
+        "آگے" => Some("aage"),
+        "پڑھیں" => Some("parhein"),
+        "پڑھتے" => Some("parhte"),
+        "پڑھو" => Some("parho"),
+        "مطلب" => Some("matlab"),
+        "یعنی" => Some("yaani"),
+        "صرف" => Some("sirf"),
+        "پھر" => Some("phir"),
+        "لیکن" => Some("lekin"),
+        "جب" => Some("jab"),
+        "تب" => Some("tab"),
+        "اب" => Some("ab"),
+        "سب" => Some("sab"),
+        "ہوتا" => Some("hota"),
+        "ہوتی" => Some("hoti"),
+        "ہوتے" => Some("hote"),
+        "ہوگا" => Some("hoga"),
+        "ہوگی" => Some("hogi"),
+        "والا" => Some("wala"),
+        "والے" => Some("wale"),
+        "والی" => Some("wali"),
+        "ساتھ" => Some("saath"),
+        "صیغہ" => Some("seegha"),
+        "صیغے" => Some("seeghe"),
+        "جمع" => Some("jama"),
+        "واحد" => Some("wahid"),
+        "تثنیہ" => Some("tasniya"),
+        "مذکر" => Some("muzakkir"),
+        "مونث" => Some("muannas"),
+        "غائب" => Some("ghaib"),
+        "حاضر" => Some("haazir"),
+        "متکلم" => Some("mutakallim"),
+        "فعل" => Some("fe'l"),
+        "فاعل" => Some("faa'il"),
+        "مفعول" => Some("maf'ool"),
+        "ماضی" => Some("maazi"),
+        "مضارع" => Some("muzaare"),
+        "امر" => Some("amr"),
+        "نفی" => Some("nafi"),
+        "اثبات" => Some("isbaat"),
+        "بلیٰ" | "بلى" => Some("balaa"),
+        "اذان" | "الأذان" | "الاذان" => Some("al-adhaan"),
+        "سمعت" => Some("sami'ta"),
         "شکریہ" => Some("shukriya"),
         "السلام" => Some("assalam"),
         "علیکم" => Some("alaikum"),
@@ -847,6 +1087,9 @@ fn irregular_perso_arabic_word(word: &str) -> Option<&'static str> {
 }
 
 fn transliterate_perso_arabic_word(word: &str) -> String {
+    if let Some(mapped) = irregular_perso_arabic_word(word) {
+        return mapped.to_string();
+    }
     let cleaned: String = word
         .chars()
         .filter(|&c| !matches!(c, '\u{064B}'..='\u{065F}' | '\u{0670}' | '\u{0640}'))

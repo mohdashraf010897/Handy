@@ -56,6 +56,23 @@ public func processTextWithSystemPrompt(
     _ userContent: UnsafePointer<CChar>,
     maxTokens: Int32
 ) -> UnsafeMutablePointer<AppleLLMResponse> {
+    return processTextWithOptions(
+        systemPrompt,
+        userContent,
+        maxTokens: maxTokens,
+        plainTextOnly: maxTokens < 0 ? 1 : 0,
+        timeoutMs: 0
+    )
+}
+
+@_cdecl("process_text_with_options_apple")
+public func processTextWithOptions(
+    _ systemPrompt: UnsafePointer<CChar>,
+    _ userContent: UnsafePointer<CChar>,
+    maxTokens: Int32,
+    plainTextOnly: Int32,
+    timeoutMs: Int32
+) -> UnsafeMutablePointer<AppleLLMResponse> {
     let swiftSystemPrompt = String(cString: systemPrompt)
     let swiftUserContent = String(cString: userContent)
     let responsePtr = ResponsePointer.allocate(capacity: 1)
@@ -76,6 +93,7 @@ public func processTextWithSystemPrompt(
         return responsePtr
     }
 
+    let usePlainText = plainTextOnly != 0 || maxTokens < 0
     let tokenLimit = max(0, Int(maxTokens))
     let semaphore = DispatchSemaphore(value: 0)
 
@@ -107,6 +125,8 @@ public func processTextWithSystemPrompt(
     }
     let box = ResultBox()
 
+    let effectiveTimeoutMs = timeoutMs > 0 ? Int(timeoutMs) : (usePlainText ? 4200 : 2800)
+
     let genTask = Task.detached(priority: .userInitiated) {
         defer { semaphore.signal() }
         do {
@@ -114,30 +134,42 @@ public func processTextWithSystemPrompt(
                 model: model,
                 instructions: swiftSystemPrompt
             )
+            let options = GenerationOptions(sampling: .greedy)
             var output: String
 
-            do {
-                let structured = try await session.respond(
+            if usePlainText {
+                // Direct greedy plain-text generation skips @Generable JSON
+                // string-escaping state-machine overhead (~2-3x faster on 3B).
+                let generation = try await session.respond(
                     to: swiftUserContent,
-                    generating: CleanedTranscript.self
+                    options: options
                 )
-                output = structured.content.cleanedText
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                try Task.checkCancellation()
-                // Never retry long utterances on the same session: Apple's on-device
-                // 4k context window overflows on guided JSON for multi-paragraph takes,
-                // and a second pass on a dirty session doubles wall-clock time to 50s+.
-                guard swiftUserContent.count <= 600 else {
-                    throw error
+                output = generation.content
+            } else {
+                do {
+                    let structured = try await session.respond(
+                        to: swiftUserContent,
+                        generating: CleanedTranscript.self,
+                        options: options
+                    )
+                    output = structured.content.cleanedText
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    try Task.checkCancellation()
+                    guard swiftUserContent.count <= 600 else {
+                        throw error
+                    }
+                    let fallbackSession = LanguageModelSession(
+                        model: model,
+                        instructions: swiftSystemPrompt
+                    )
+                    let fallbackGeneration = try await fallbackSession.respond(
+                        to: swiftUserContent,
+                        options: options
+                    )
+                    output = fallbackGeneration.content
                 }
-                let fallbackSession = LanguageModelSession(
-                    model: model,
-                    instructions: swiftSystemPrompt
-                )
-                let fallbackGeneration = try await fallbackSession.respond(to: swiftUserContent)
-                output = fallbackGeneration.content
             }
 
             if tokenLimit > 0 {
@@ -149,13 +181,12 @@ public func processTextWithSystemPrompt(
         }
     }
 
-    // Enforce interactive dictation SLA at the FFI boundary (3.4s max) so an
-    // overloaded Neural Engine / guided-decode stall cancels immediately.
-    let waitResult = semaphore.wait(timeout: .now() + .milliseconds(3400))
+    // Enforce interactive or batch SLA at the FFI boundary so stalls cancel cleanly.
+    let waitResult = semaphore.wait(timeout: .now() + .milliseconds(effectiveTimeoutMs))
     if waitResult == .timedOut {
         genTask.cancel()
         responsePtr.pointee.error_message = duplicateCString(
-            "Apple Intelligence exceeded 3.4s interactive budget; using instant local cleanup."
+            "Apple Intelligence exceeded \(Double(effectiveTimeoutMs) / 1000.0)s interactive budget; using instant local cleanup."
         )
         return responsePtr
     }

@@ -24,9 +24,9 @@ import {
   type MeetingTemplate,
   connect_calendar_access,
   formatDurationMmSs,
-  formatSegmentSpeakerBadge,
   get_active_calendar_meeting,
   get_calendar_access_status,
+  groupConsecutiveTranscriptTurns,
   isolateBidi,
   update_live_rough_notes,
 } from "./api";
@@ -74,6 +74,9 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
   const [activeCalendarEvent, setActiveCalendarEvent] =
     useState<ActiveCalendarMeeting | null>(null);
   const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
+  const [compactLivePane, setCompactLivePane] = useState<
+    "transcript" | "bullets"
+  >("transcript");
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const latestRoughNotesRef = useRef(liveState.rough_notes);
   const dirtyRoughNotesRef = useRef(false);
@@ -507,10 +510,48 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
             </div>
           </div>
 
-          {/* Granola-Style Split Live Workspace: Rough Bullets + Live Transcript */}
+          {/* Compact Side-Sheet Tab Switcher (<768px companion mode alongside Zoom/Meet/Preply) */}
+          <div
+            role="tablist"
+            aria-label="Live companion view"
+            className="flex md:hidden items-center gap-1 border-b border-line"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={compactLivePane === "transcript"}
+              onClick={() => setCompactLivePane("transcript")}
+              className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors cursor-pointer ${
+                compactLivePane === "transcript"
+                  ? "border-logo-primary text-text"
+                  : "border-transparent text-ink-3 hover:text-text"
+              }`}
+            >
+              {t("meetings.live.transcriptTitle")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={compactLivePane === "bullets"}
+              onClick={() => setCompactLivePane("bullets")}
+              className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors cursor-pointer ${
+                compactLivePane === "bullets"
+                  ? "border-logo-primary text-text"
+                  : "border-transparent text-ink-3 hover:text-text"
+              }`}
+            >
+              {t("meetings.live.roughBulletsTitle")}
+            </button>
+          </div>
+
+          {/* Granola-Style Split Live Workspace: Rough Bullets + Conversational Live Transcript */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Left: Your Rough Bullets */}
-            <div className="flex flex-col space-y-1.5">
+            <div
+              className={`${
+                compactLivePane === "bullets" ? "flex" : "hidden md:flex"
+              } flex-col space-y-1.5`}
+            >
               <div className="flex items-center justify-between">
                 <label
                   htmlFor={roughNotesId}
@@ -538,8 +579,12 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
               />
             </div>
 
-            {/* Right: Live Transcript Feed */}
-            <div className="flex flex-col space-y-1.5">
+            {/* Right: Conversational Live Transcript Feed */}
+            <div
+              className={`${
+                compactLivePane === "transcript" ? "flex" : "hidden md:flex"
+              } flex-col space-y-1.5`}
+            >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wide text-ink-2">
                   {t("meetings.live.transcriptTitle")}
@@ -554,55 +599,70 @@ export const LiveMeetingCard: React.FC<LiveMeetingCardProps> = ({
                 role="log"
                 aria-live="polite"
                 aria-label={t("meetings.live.transcriptTitle")}
-                className="flex-1 min-h-[160px] max-h-[220px] overflow-y-auto rounded-md border border-line bg-wash/50 p-3 space-y-2"
+                className="flex-1 min-h-[160px] max-h-[260px] overflow-y-auto rounded-md border border-line bg-wash/50 p-3 space-y-3"
               >
                 {liveState.recent_segments.length === 0 ? (
                   <p className="text-xs text-ink-3 italic">
                     {t("meetings.live.transcriptEmpty")}
                   </p>
                 ) : (
-                  liveState.recent_segments.map((seg) => {
-                    const isMe = seg.speaker === "me";
-                    const timeTag = `[${formatDurationMmSs(seg.start_ms)}]`;
+                  groupConsecutiveTranscriptTurns(
+                    liveState.recent_segments,
+                    t("meetings.speaker.me"),
+                    t("meetings.speaker.others"),
+                  ).map((turn) => {
+                    const isMe = turn.speaker === "me";
+                    const timeTag = formatDurationMmSs(turn.start_ms);
                     return (
                       <div
-                        key={seg.id}
-                        className="flex items-start gap-2 text-xs leading-relaxed"
+                        key={turn.key}
+                        className={`flex flex-col space-y-1 ${
+                          isMe ? "items-end" : "items-stretch"
+                        }`}
                       >
-                        <span className="font-mono text-ink-3 shrink-0 tabular-nums">
-                          {timeTag}
-                        </span>
-                        <span
-                          title={formatSegmentSpeakerBadge(
-                            seg,
-                            t("meetings.speaker.me"),
-                            t("meetings.speaker.others"),
-                          )}
-                          className={`px-1.5 py-0.5 rounded font-semibold shrink-0 max-w-44 truncate ${
+                        <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
+                          <span
+                            title={turn.speakerBadge}
+                            className={`px-1.5 py-0.5 rounded font-semibold max-w-44 truncate ${
+                              isMe
+                                ? "bg-logo-primary/20 text-text"
+                                : "bg-line text-ink-2"
+                            }`}
+                          >
+                            {isolateBidi(turn.speakerBadge)}
+                          </span>
+                          <span className="font-mono tabular-nums">
+                            [{timeTag}]
+                          </span>
+                        </div>
+                        <div
+                          className={
                             isMe
-                              ? "bg-logo-primary/20 text-text"
-                              : "bg-line text-ink-2"
-                          }`}
+                              ? "max-w-[92%] rounded-2xl rounded-tr-sm border border-logo-primary/25 bg-logo-primary/12 px-3 py-2 space-y-1"
+                              : "w-full space-y-1 ps-0.5"
+                          }
                         >
-                          {isolateBidi(
-                            formatSegmentSpeakerBadge(
-                              seg,
-                              t("meetings.speaker.me"),
-                              t("meetings.speaker.others"),
-                            ),
-                          )}
-                        </span>
-                        <p
-                          dir="auto"
-                          className="text-text flex-1 break-words"
-                        >
-                          {isolateBidi(seg.text)}
-                        </p>
+                          {turn.segments.map((seg) => (
+                            <p
+                              key={seg.id}
+                              dir="auto"
+                              className="text-xs text-text leading-relaxed break-words"
+                            >
+                              {seg.text}
+                            </p>
+                          ))}
+                        </div>
                       </div>
                     );
                   })
                 )}
               </div>
+              <p className="text-[11px] text-ink-3 leading-snug">
+                {t("meetings.live.refinementHint", {
+                  defaultValue:
+                    "Live draft — speakers & structured notes refine automatically when you finish.",
+                })}
+              </p>
             </div>
           </div>
         </div>

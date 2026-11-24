@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Tecla de post procesamiento",
             "description": "Opcional: Una tecla de acceso rápido dedicada que siempre aplica post procesamiento con IA a tu transcripción."
+          },
+          "transform": {
+            "name": "Atajo de transformación",
+            "description": "Reescribe el texto seleccionado al instante (o transforma tu último dictado) usando el ajuste activo."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Llamada detectada"
+      },
+      "edgeDock": {
+        "title": "Muelle de borde",
+        "description": "Ancla una pestaña mínima en el borde izquierdo, inferior o derecho. Pasa el cursor para Dictar, Reunión y Transformar, o arrástrala entre bordes.",
+        "positions": {
+          "left": "Borde izquierdo",
+          "bottom": "Borde inferior",
+          "right": "Borde derecho",
+          "off": "Oculto"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Abrir notas de la reunión",
     "minimizeMeetingPill": "Minimizar a la barra de menús",
     "meetingStopped": "Notas detenidas",
-    "dismissMeetingStopped": "Guardar y cerrar"
+    "dismissMeetingStopped": "Guardar y cerrar",
+    "transform": "Transformar",
+    "transformMenuAria": "Ajustes de transformación",
+    "transformAutoApply": "Reescribir dictado automáticamente",
+    "transformPresetPolish": "Pulir",
+    "transformPresetPromptEngineer": "Ingeniero de prompts",
+    "transformConfigure": "Configurar transformaciones…",
+    "noticeTransformedCopied": "Transformado — pulsa ⌘V para pegar",
+    "noticeTransformEmpty": "Selecciona texto o dicta primero"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} puede estar bloqueando 1 atajo",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "Tono por app y fragmentos",
         "linguistEngine": "Motor lingüístico y prompts"
-      }
+      },
+      "transformPresetsTitle": "Ajuste de transformación activo",
+      "transformPresetsHint": "Se aplica automáticamente tras dictar cuando la reescritura con IA está activa, o en cualquier momento sobre texto seleccionado mediante el atajo o la cápsula de grabación."
     },
     "settings": {
       "title": "Ajustes",
@@ -1433,5 +1457,18 @@
         "debug": "Depuración"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Abrir acciones rápidas de lowyap",
+    "dragHint": "Arrastra al borde izquierdo, inferior o derecho",
+    "noBotBadge": "Sin bot",
+    "actions": {
+      "dictate": "Dictar",
+      "meeting": "Notas de reunión",
+      "transform": "Transformar"
+    },
+    "runNow": "Transformar ahora",
+    "snoozeOneHour": "Posponer 1 hora",
+    "hideDock": "Ocultar barra de borde"
   }
 }

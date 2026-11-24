@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import "./RecordingOverlay.css";
 import { commands, events } from "@/bindings";
 import type {
+  LLMPrompt,
   StreamPhase,
   StreamPhaseEvent,
   StreamTextEvent,
@@ -64,7 +65,12 @@ type OverlayNoticeKind =
   | "mic_permission"
   | "no_mic"
   | "copied_to_clipboard"
+  | "transformed_copied"
+  | "transform_empty"
   | "call_detected";
+
+const BUILTIN_POLISH_ID = "default_improve_transcriptions";
+const BUILTIN_PROMPT_ENGINEER_ID = "builtin_prompt_engineer";
 
 interface DetectedCallPayload {
   call_id: string;
@@ -234,6 +240,47 @@ const RecordingOverlay: React.FC = () => {
   const [meetingTogglePending, setMeetingTogglePending] = useState(false);
   const [meetingStopPending, setMeetingStopPending] = useState(false);
 
+  // Wave 6: Tactile Transform trigger + non-activating preset popover
+  const [transformMenuOpen, setTransformMenuOpen] = useState(false);
+  const transformMenuOpenRef = useRef(false);
+  const [postProcessEnabled, setPostProcessEnabled] = useState(true);
+  const [transformPrompts, setTransformPrompts] = useState<LLMPrompt[]>([]);
+  const [selectedPromptId, setSelectedPromptId] =
+    useState<string>(BUILTIN_POLISH_ID);
+  const [transformShortcut, setTransformShortcut] = useState<string>("⌥1");
+  const [domHovered, setDomHovered] = useState(false);
+  const [nativeHovered, setNativeHovered] = useState(false);
+  const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleCardHoverEnter = () => {
+    if (hoverLeaveTimerRef.current) {
+      clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
+    setDomHovered(true);
+  };
+
+  const handleCardHoverLeave = () => {
+    if (hoverLeaveTimerRef.current) {
+      clearTimeout(hoverLeaveTimerRef.current);
+    }
+    hoverLeaveTimerRef.current = setTimeout(() => {
+      hoverLeaveTimerRef.current = undefined;
+      if (!transformMenuOpenRef.current) {
+        setDomHovered(false);
+      }
+    }, 140);
+  };
+
+  const closeTransformMenu = (notifyBackend = true) => {
+    const wasOpen = transformMenuOpenRef.current;
+    transformMenuOpenRef.current = false;
+    setTransformMenuOpen(false);
+    if (wasOpen && notifyBackend) {
+      void commands.setOverlayTransformMenuOpen(false).catch(() => {});
+    }
+  };
+
   const latestSeqRef = useRef(0);
   const latestSnapshotRef = useRef<SessionBusSnapshot | null>(null);
   const clockSkewRef = useRef(0);
@@ -286,6 +333,25 @@ const RecordingOverlay: React.FC = () => {
           setPosition(
             settings.data.overlay_position === "top" ? "top" : "bottom",
           );
+          setPostProcessEnabled(Boolean(settings.data.post_process_enabled));
+          const prompts = settings.data.post_process_prompts ?? [];
+          setTransformPrompts(prompts);
+          setSelectedPromptId(
+            settings.data.post_process_selected_prompt_id ||
+              prompts[0]?.id ||
+              BUILTIN_POLISH_ID,
+          );
+          const rawBinding =
+            settings.data.bindings?.transform?.current_binding ?? "";
+          setTransformShortcut(
+            rawBinding
+              ? rawBinding
+                  .replace(/^option\+/i, "⌥")
+                  .replace(/^alt\+/i, "Alt+")
+                  .replace(/^command\+/i, "⌘")
+                  .replace(/^ctrl\+/i, "Ctrl+")
+              : "",
+          );
         }
       } catch {
         // Keep the previous/default placement if settings can't be read.
@@ -327,6 +393,10 @@ const RecordingOverlay: React.FC = () => {
       const overlay = snapshot.overlay;
       if (overlay.mode !== "hidden" && !isVisibleRef.current) {
         void refreshPlacementAndLanguage();
+      }
+
+      if (overlay.mode !== "dictation_recording") {
+        closeTransformMenu(true);
       }
 
       switch (overlay.mode) {
@@ -372,6 +442,7 @@ const RecordingOverlay: React.FC = () => {
               stateRef.current = "recording";
             }
           } else if (isNewTake) {
+            closeTransformMenu(true);
             softCancelledTakeIdRef.current = null;
             preSoftCancelStreamingRef.current = false;
             if (stateRef.current !== "streaming") {
@@ -561,6 +632,11 @@ const RecordingOverlay: React.FC = () => {
         setIsPaused(false);
         pausePendingRef.current = false;
         finishPendingRef.current = false;
+        if (!isResumingSoftCancelledSameTake) {
+          closeTransformMenu(false);
+          setDomHovered(false);
+          setNativeHovered(false);
+        }
         if (resolvedState === "recording" || resolvedState === "streaming") {
           if (isResumingSoftCancelledSameTake) {
             setCaptureReady(true);
@@ -647,6 +723,9 @@ const RecordingOverlay: React.FC = () => {
       });
 
       const unlistenHide = await listen("hide-overlay", () => {
+        closeTransformMenu(true);
+        setDomHovered(false);
+        setNativeHovered(false);
         setCaptureReady(false);
         setIsPaused(false);
         pausePendingRef.current = false;
@@ -791,6 +870,7 @@ const RecordingOverlay: React.FC = () => {
         const payload: StreamPhaseEvent = event.payload;
         setPhase(payload.phase);
         if (payload.phase === "working") {
+          closeTransformMenu(true);
           setIsPaused(false);
         }
         if (payload.kind) setWorkKind(payload.kind);
@@ -834,6 +914,20 @@ const RecordingOverlay: React.FC = () => {
         },
       );
 
+      const unlistenTransformSettings = await listen(
+        "transform-settings-changed",
+        () => {
+          void refreshPlacementAndLanguage();
+        },
+      );
+
+      const unlistenOverlayHover = await listen<boolean>(
+        "overlay-cursor-hover",
+        (event) => {
+          setNativeHovered(Boolean(event.payload));
+        },
+      );
+
       const initialSnapshot = await fetchSessionBusSnapshot();
       if (!disposed && initialSnapshot) {
         applySessionBusSnapshot(initialSnapshot, true);
@@ -853,7 +947,10 @@ const RecordingOverlay: React.FC = () => {
         unlistenNotice();
         unlistenCallDetected();
         unlistenModel();
+        unlistenTransformSettings();
+        unlistenOverlayHover();
         clearTimeout(modelLoadTimerRef.current);
+        clearTimeout(hoverLeaveTimerRef.current);
       };
     };
 
@@ -1277,13 +1374,105 @@ const RecordingOverlay: React.FC = () => {
   const doneLabel = t("overlay.done", { defaultValue: "Finish dictation" });
   const cancelLabel = t("common.cancel", { defaultValue: "Cancel" });
   const dismissLabel = t("overlay.dismiss", { defaultValue: "Dismiss" });
+  const transformBaseLabel = t("overlay.transform", {
+    defaultValue: "Transform",
+  });
+
+  const formatPresetDisplayName = (id: string, rawName: string): string => {
+    if (
+      id === BUILTIN_POLISH_ID &&
+      (rawName === "Polish" || rawName === "Improve Transcriptions")
+    ) {
+      return t("overlay.transformPresetPolish", { defaultValue: "Polish" });
+    }
+    if (id === BUILTIN_PROMPT_ENGINEER_ID && rawName === "Prompt Engineer") {
+      return t("overlay.transformPresetPromptEngineer", {
+        defaultValue: "Prompt Engineer",
+      });
+    }
+    return rawName;
+  };
+
+  const effectivePrompts: LLMPrompt[] =
+    transformPrompts.length > 0
+      ? transformPrompts
+      : [
+          {
+            id: BUILTIN_POLISH_ID,
+            name: "Polish",
+            prompt: "",
+          },
+          {
+            id: BUILTIN_PROMPT_ENGINEER_ID,
+            name: "Prompt Engineer",
+            prompt: "",
+          },
+        ];
+
+  const activePreset =
+    effectivePrompts.find((p) => p.id === selectedPromptId) ??
+    effectivePrompts[0];
+  const activePresetLabel = activePreset
+    ? formatPresetDisplayName(activePreset.id, activePreset.name)
+    : t("overlay.transformPresetPolish", { defaultValue: "Polish" });
+  const isNonDefaultPreset =
+    postProcessEnabled && activePreset?.id !== BUILTIN_POLISH_ID;
+  const transformTooltip = postProcessEnabled
+    ? `${transformBaseLabel} · ${activePresetLabel}`
+    : transformBaseLabel;
+
+  const handleToggleTransformMenu = () => {
+    const nextOpen = !transformMenuOpenRef.current;
+    transformMenuOpenRef.current = nextOpen;
+    setTransformMenuOpen(nextOpen);
+    void commands.setOverlayTransformMenuOpen(nextOpen).catch(() => {});
+  };
+
+  const handleToggleAutoTransform = async () => {
+    const nextEnabled = !postProcessEnabled;
+    setPostProcessEnabled(nextEnabled);
+    try {
+      await commands.changePostProcessEnabledSetting(nextEnabled);
+    } catch {
+      setPostProcessEnabled(!nextEnabled);
+    }
+  };
+
+  const handleSelectTransformPreset = async (promptId: string) => {
+    setSelectedPromptId(promptId);
+    const shouldEnable = !postProcessEnabled;
+    if (shouldEnable) {
+      setPostProcessEnabled(true);
+    }
+    closeTransformMenu(true);
+    try {
+      await commands.setPostProcessSelectedPrompt(promptId);
+      if (shouldEnable) {
+        await commands.changePostProcessEnabledSetting(true);
+      }
+    } catch {
+      // Settings listener restores authoritative state if write fails.
+    }
+  };
+
+  const handleOpenConfigureTransforms = async () => {
+    closeTransformMenu(true);
+    try {
+      await commands.openTransformsWorkspace();
+    } catch {
+      // Ignore in isolated test harnesses without Studio window.
+    }
+  };
 
   const cancelBtn = (
     <button
       type="button"
       className="sx"
       aria-label={cancelLabel}
-      onClick={() => commands.cancelOperation()}
+      onClick={() => {
+        closeTransformMenu(true);
+        void commands.cancelOperation();
+      }}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path
@@ -1335,6 +1524,127 @@ const RecordingOverlay: React.FC = () => {
     </button>
   );
 
+  const transformBtn = (
+    <button
+      type="button"
+      data-testid="overlay-transform-btn"
+      className={`sctrl-btn is-transform ${
+        transformMenuOpen ? "is-open" : postProcessEnabled ? "is-armed" : ""
+      } ${isNonDefaultPreset ? "has-preset-dot" : ""}`}
+      aria-label={transformTooltip}
+      aria-expanded={transformMenuOpen}
+      aria-haspopup="dialog"
+      title={transformTooltip}
+      onClick={handleToggleTransformMenu}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M3 5.25H13M3 10.75H13"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <circle cx="6.25" cy="5.25" r="1.75" fill="currentColor" />
+        <circle cx="9.75" cy="10.75" r="1.75" fill="currentColor" />
+      </svg>
+      {isNonDefaultPreset && !transformMenuOpen && (
+        <span className="stransform-preset-pip" aria-hidden="true" />
+      )}
+    </button>
+  );
+
+  const transformPopover = (
+    <div
+      role="dialog"
+      data-testid="overlay-transform-popover"
+      aria-label={t("overlay.transformMenuAria", {
+        defaultValue: "Transform presets",
+      })}
+      className="stransform-popover"
+    >
+      <div className="stransform-head">
+        <span className="stransform-head-label">
+          {t("overlay.transformAutoApply", {
+            defaultValue: "Auto-rewrite dictation",
+          })}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          data-testid="overlay-transform-toggle"
+          aria-checked={postProcessEnabled}
+          aria-label={t("overlay.transformAutoApply", {
+            defaultValue: "Auto-rewrite dictation",
+          })}
+          className={`stransform-switch ${postProcessEnabled ? "is-on" : ""}`}
+          onClick={() => void handleToggleAutoTransform()}
+        >
+          <span className="stransform-switch-thumb" />
+        </button>
+      </div>
+
+      <div
+        role="radiogroup"
+        aria-label={t("overlay.transformMenuAria", {
+          defaultValue: "Transform presets",
+        })}
+        className="stransform-list"
+      >
+        {effectivePrompts.map((prompt) => {
+          const isSelected = prompt.id === activePreset?.id;
+          return (
+            <button
+              key={prompt.id}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              data-testid={`overlay-transform-preset-${prompt.id}`}
+              className={`stransform-item ${isSelected ? "is-selected" : ""}`}
+              onClick={() => void handleSelectTransformPreset(prompt.id)}
+            >
+              <span className="stransform-item-name">
+                {formatPresetDisplayName(prompt.id, prompt.name)}
+              </span>
+              {isSelected && (
+                <svg
+                  className="stransform-check"
+                  viewBox="0 0 16 16"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3.5 8.5L6.5 11.5L12.5 4.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="stransform-foot">
+        <button
+          type="button"
+          data-testid="overlay-transform-configure-btn"
+          className="stransform-config-btn"
+          onClick={() => void handleOpenConfigureTransforms()}
+        >
+          {t("overlay.transformConfigure", {
+            defaultValue: "Configure transforms…",
+          })}
+        </button>
+        {transformShortcut && (
+          <kbd className="stransform-kbd">{transformShortcut}</kbd>
+        )}
+      </div>
+    </div>
+  );
+
   const doneBtn = (
     <button
       type="button"
@@ -1342,7 +1652,10 @@ const RecordingOverlay: React.FC = () => {
       className="sctrl-btn is-done"
       aria-label={doneLabel}
       title={doneLabel}
-      onClick={handleFinishRecording}
+      onClick={() => {
+        closeTransformMenu(true);
+        void handleFinishRecording();
+      }}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path
@@ -1357,32 +1670,30 @@ const RecordingOverlay: React.FC = () => {
     </button>
   );
 
-  // dot (left) | waveform + stage label (center) | timer + pause/resume + done + cancel (right)
-  const listeningRow = (showCancel: boolean, showStageLabel = false) => (
-    <div className={`sbase ${captureReady ? "is-capturing" : ""}`}>
+  // Kinetic sound-bars row at rest; expands smoothly on hover, pause, or open Transform menu.
+  // "Listening" text is intentionally omitted so only the moving sound bars occupy screen space.
+  const listeningRow = (showCancel: boolean, controlsExpanded: boolean) => (
+    <div
+      className={`sbase is-listening-row ${captureReady ? "is-capturing" : "is-arming"}`}
+      data-controls-expanded={controlsExpanded ? "true" : "false"}
+    >
       <div className="sbase-l">
         <span className={`sdot ${captureReady ? "ready" : "arming"}`} />
       </div>
       <div className="sbase-mid">
         {waveform}
-        {captureReady &&
-          (isPaused ? (
-            <span data-testid="overlay-stage-label" className="spaused-label">
-              {t("overlay.paused", { defaultValue: "Paused" })}
-            </span>
-          ) : (
-            showStageLabel && (
-              <span data-testid="overlay-stage-label" className="sstage-label">
-                {listeningLabel}
-              </span>
-            )
-          ))}
+        {captureReady && isPaused && (
+          <span data-testid="overlay-stage-label" className="spaused-label">
+            {t("overlay.paused", { defaultValue: "Paused" })}
+          </span>
+        )}
       </div>
       <div className="sbase-r">
         {captureReady && (
           <>
             <span className="stimer">{formatElapsed(elapsed)}</span>
             {pauseResumeBtn}
+            {transformBtn}
             {doneBtn}
           </>
         )}
@@ -1428,54 +1739,66 @@ const RecordingOverlay: React.FC = () => {
     const collapsed = working && !hasText;
     const capturingCard = !working && captureReady;
     const pausedCard = capturingCard && isPaused;
+    const controlsExpanded =
+      open || domHovered || nativeHovered || isPaused || transformMenuOpen;
 
     return (
       <div dir={direction} className={`ov-stage ${position}`}>
         <div
-          key={session}
-          className={`scard ${open ? "open" : ""} ${
-            capturingCard ? "is-capturing" : ""
-          } ${pausedCard ? "cpaused" : ""} ${collapsed ? "working" : ""} ${
-            showPasteRaw ? "has-paste-raw" : ""
-          } ${isVisible ? "" : "leaving"}`}
+          className="ov-pill-stack"
+          onPointerEnter={handleCardHoverEnter}
+          onMouseEnter={handleCardHoverEnter}
+          onMouseLeave={handleCardHoverLeave}
         >
-          <div className="stext">
-            <div className="stext-clip">
-              <div
-                className={`stext-cap ${overflowing ? "overflowing" : ""}`}
-                ref={capRef}
-                onScroll={handleStreamScroll}
-              >
-                <p dir="auto">
-                  {loadingNotice && (
-                    <span className="sloading">
-                      {t("overlay.loadingModel")}
+          {capturingCard && transformMenuOpen && transformPopover}
+          <div
+            key={session}
+            data-testid="overlay-listening-pill"
+            data-controls-expanded={controlsExpanded ? "true" : "false"}
+            className={`scard ${open ? "open" : ""} ${
+              capturingCard ? "is-capturing" : !working ? "is-arming" : ""
+            } ${pausedCard ? "cpaused" : ""} ${collapsed ? "working" : ""} ${
+              showPasteRaw ? "has-paste-raw" : ""
+            } ${isVisible ? "" : "leaving"}`}
+          >
+            <div className="stext">
+              <div className="stext-clip">
+                <div
+                  className={`stext-cap ${overflowing ? "overflowing" : ""}`}
+                  ref={capRef}
+                  onScroll={handleStreamScroll}
+                >
+                  <p dir="auto">
+                    {loadingNotice && (
+                      <span className="sloading">
+                        {t("overlay.loadingModel")}
+                      </span>
+                    )}
+                    <span className="committed">
+                      {streamText.committed
+                        ? `\u2068${streamText.committed}\u2069 `
+                        : ""}
                     </span>
-                  )}
-                  <span className="committed">
-                    {streamText.committed
-                      ? `\u2068${streamText.committed}\u2069 `
-                      : ""}
-                  </span>
-                  <span className="tentative">
-                    {streamText.tentative
-                      ? `\u2068${streamText.tentative}\u2069`
-                      : ""}
-                  </span>
-                  {/* Drop the blinking caret once finalizing — it's no longer
-                      capturing, and a static spinner conveys the work. */}
-                  {!working && !loadingNotice && <span className="scaret" />}
-                </p>
+                    <span className="tentative">
+                      {streamText.tentative
+                        ? `\u2068${streamText.tentative}\u2069`
+                        : ""}
+                    </span>
+                    {/* Drop the blinking caret once finalizing — it's no longer
+                        capturing, and a static spinner conveys the work. */}
+                    {!working && !loadingNotice && <span className="scaret" />}
+                  </p>
+                </div>
               </div>
             </div>
+            {working
+              ? workingRow(
+                  workKind === "polishing" ? polishingLabel : transcribingLabel,
+                  true,
+                  showPasteRaw,
+                )
+              : listeningRow(true, controlsExpanded)}
           </div>
-          {working
-            ? workingRow(
-                workKind === "polishing" ? polishingLabel : transcribingLabel,
-                true,
-                showPasteRaw,
-              )
-            : listeningRow(true, false)}
         </div>
       </div>
     );
@@ -1531,6 +1854,14 @@ const RecordingOverlay: React.FC = () => {
       case "copied_to_clipboard":
         return t("overlay.noticeCopiedToClipboard", {
           defaultValue: "Copied — press ⌘V to paste",
+        });
+      case "transformed_copied":
+        return t("overlay.noticeTransformedCopied", {
+          defaultValue: "Transformed — press ⌘V to paste",
+        });
+      case "transform_empty":
+        return t("overlay.noticeTransformEmpty", {
+          defaultValue: "Select text or dictate first",
         });
       case "transcription_failed":
       default:
@@ -2195,7 +2526,14 @@ const RecordingOverlay: React.FC = () => {
                   )}
                 </span>
               ) : (
-                <span className="sdot notice" />
+                <span
+                  className={`sdot ${
+                    noticeKind === "copied_to_clipboard" ||
+                    noticeKind === "transformed_copied"
+                      ? "success"
+                      : "notice"
+                  }`}
+                />
               )}
             </div>
             {isCallDetectedNotice ? (
@@ -2267,6 +2605,8 @@ const RecordingOverlay: React.FC = () => {
   const capturingCard = !working && captureReady;
   const pausedCard = capturingCard && isPaused;
   const workLabel = state === "processing" ? polishingLabel : transcribingLabel;
+  const controlsExpanded =
+    domHovered || nativeHovered || isPaused || transformMenuOpen;
 
   return (
     <div
@@ -2274,15 +2614,25 @@ const RecordingOverlay: React.FC = () => {
       className={`ov-stage ${position} ov-fade ${isVisible ? "show" : ""}`}
     >
       <div
-        className={`scard compact ${capturingCard ? "is-capturing" : ""} ${
-          pausedCard ? "cpaused" : ""
-        } ${working && isVisible ? "cworking" : ""} ${
-          showPasteRaw ? "has-paste-raw" : ""
-        }`}
+        className="ov-pill-stack"
+        onPointerEnter={handleCardHoverEnter}
+        onMouseEnter={handleCardHoverEnter}
+        onMouseLeave={handleCardHoverLeave}
       >
-        {working
-          ? workingRow(workLabel, true, showPasteRaw)
-          : listeningRow(true, true)}
+        {capturingCard && transformMenuOpen && transformPopover}
+        <div
+          data-testid="overlay-listening-pill"
+          data-controls-expanded={controlsExpanded ? "true" : "false"}
+          className={`scard compact ${
+            capturingCard ? "is-capturing" : !working ? "is-arming" : ""
+          } ${pausedCard ? "cpaused" : ""} ${
+            working && isVisible ? "cworking" : ""
+          } ${showPasteRaw ? "has-paste-raw" : ""}`}
+        >
+          {working
+            ? workingRow(workLabel, true, showPasteRaw)
+            : listeningRow(true, controlsExpanded)}
+        </div>
       </div>
     </div>
   );

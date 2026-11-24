@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Гаряча клавіша постобробки",
             "description": "Необов'язково: Спеціальна гаряча клавіша, яка завжди застосовує AI-постобробку до вашої транскрипції."
+          },
+          "transform": {
+            "name": "Скорочення трансформації",
+            "description": "Переписати виділений текст на місці (або перетворити останнє диктування) за допомогою активного пресету."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Виявлено дзвінок"
+      },
+      "edgeDock": {
+        "title": "Крайова панель",
+        "description": "Компактний ярлик біля лівого, нижнього або правого краю екрана. Наведіть курсор для диктування, зустрічі й перетворення або перетягніть до іншого краю.",
+        "positions": {
+          "left": "Лівий край",
+          "bottom": "Нижній край",
+          "right": "Правий край",
+          "off": "Приховано"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Відкрити нотатки зустрічі",
     "minimizeMeetingPill": "Згорнути в рядок меню",
     "meetingStopped": "Запис нотаток зупинено",
-    "dismissMeetingStopped": "Зберегти й закрити"
+    "dismissMeetingStopped": "Зберегти й закрити",
+    "transform": "Трансформувати",
+    "transformMenuAria": "Пресети трансформації",
+    "transformAutoApply": "Автоматично переписувати диктування",
+    "transformPresetPolish": "Шліфування",
+    "transformPresetPromptEngineer": "Промпт-інженер",
+    "transformConfigure": "Налаштувати трансформації…",
+    "noticeTransformedCopied": "Трансформовано — натисніть ⌘V, щоб вставити",
+    "noticeTransformEmpty": "Спочатку виділіть текст або надиктуйте"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} може блокувати 1 комбінацію клавіш",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Активний пресет трансформації",
+      "transformPresetsHint": "Застосовується автоматично після диктування, коли ввімкнено ШІ-переписування, або будь-коли до виділеного тексту через скорочення чи капсулу запису."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Дебаг"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Відкрити швидкі дії lowyap",
+    "dragHint": "Перетягніть до лівого, нижнього чи правого краю",
+    "noBotBadge": "Без бота",
+    "actions": {
+      "dictate": "Диктувати",
+      "meeting": "Нотатки зустрічі",
+      "transform": "Перетворити"
+    },
+    "runNow": "Перетворити зараз",
+    "snoozeOneHour": "Відкласти на 1 годину",
+    "hideDock": "Сховати бічну панель"
   }
 }

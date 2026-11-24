@@ -27,6 +27,17 @@ function makeEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     source_name: null,
     language: "en",
     language_source: null,
+    audio_duration_s: null,
+    asr_ms: null,
+    cleanup_ms: null,
+    paste_ms: null,
+    release_to_done_ms: null,
+    real_time_factor: null,
+    chunks_predecoded_live: null,
+    chunks_total: null,
+    asr_model_id: null,
+    linguist_provider_id: null,
+    linguist_stage: null,
     ...overrides,
   };
 }

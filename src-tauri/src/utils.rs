@@ -20,8 +20,8 @@ pub fn redact_text(text: &str) -> &str {
 /// Main window's opening size, in logical pixels.
 pub const MAIN_WINDOW_SIZE: (f64, f64) = (960.0, 660.0);
 
-/// Main window's minimum size, in logical pixels.
-pub const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (820.0, 560.0);
+/// Main window's minimum size, in logical pixels (allows narrow 440px side-by-side companion sheet next to Zoom/Meet/Preply).
+pub const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (440.0, 480.0);
 
 /// Title bar height in logical pixels (macOS draws it inside the inner size).
 /// Call on the main thread.

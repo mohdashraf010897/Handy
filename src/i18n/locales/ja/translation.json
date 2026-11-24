@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "後処理のショートカット",
             "description": "文字起こしに常に AI 後処理を適用するキーボードショートカット。 (任意)"
+          },
+          "transform": {
+            "name": "変換ショートカット",
+            "description": "選択中のテキストをその場で書き換えます（未選択時は直前の音声入力を現在のプリセットで変換）。"
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "通話を検出"
+      },
+      "edgeDock": {
+        "title": "エッジドック",
+        "description": "画面の左・下・右端に最小限のクイックアクションタブを配置します。ホバーで音声入力・会議・変換を表示し、ドラッグで移動できます。",
+        "positions": {
+          "left": "左端",
+          "bottom": "下端",
+          "right": "右端",
+          "off": "非表示"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "会議ノートを開く",
     "minimizeMeetingPill": "メニューバーに最小化",
     "meetingStopped": "ノート記録を停止しました",
-    "dismissMeetingStopped": "保存して閉じる"
+    "dismissMeetingStopped": "保存して閉じる",
+    "transform": "変換",
+    "transformMenuAria": "変換プリセット",
+    "transformAutoApply": "音声入力を自動リライト",
+    "transformPresetPolish": "ブラッシュアップ",
+    "transformPresetPromptEngineer": "プロンプトエンジニア",
+    "transformConfigure": "変換を設定…",
+    "noticeTransformedCopied": "変換しました — ⌘V で貼り付け",
+    "noticeTransformEmpty": "テキストを選択するか先に音声入力してください"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} が1個のショートカットをブロックしている可能性があります",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "アプリ別トーンとスニペット",
         "linguistEngine": "言語エンジンとプロンプト"
-      }
+      },
+      "transformPresetsTitle": "有効な変換プリセット",
+      "transformPresetsHint": "AIリライトがオンのときは音声入力後に自動適用され、選択テキストには変換ショートカットや録音ピルからいつでも実行できます。"
     },
     "settings": {
       "title": "設定",
@@ -1433,5 +1457,18 @@
         "debug": "デバッグ"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "lowyap クイックアクションを開く",
+    "dragHint": "左・下・右端へドラッグして配置",
+    "noBotBadge": "ボット不要",
+    "actions": {
+      "dictate": "音声入力",
+      "meeting": "会議ノート",
+      "transform": "変換"
+    },
+    "runNow": "今すぐ変換",
+    "snoozeOneHour": "1時間スヌーズ",
+    "hideDock": "エッジドックを隠す"
   }
 }

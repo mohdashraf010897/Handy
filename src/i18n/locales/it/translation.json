@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Tasto di post-elaborazione",
             "description": "Facoltativo: Un tasto di scelta rapida dedicato che applica sempre la post-elaborazione IA alla trascrizione."
+          },
+          "transform": {
+            "name": "Scorciatoia di trasformazione",
+            "description": "Riscrive sul posto il testo selezionato (o trasforma l’ultima dettatura) usando il preset attivo."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Chiamata rilevata"
+      },
+      "edgeDock": {
+        "title": "Dock laterale",
+        "description": "Fissa una linguetta minimale sul bordo sinistro, inferiore o destro. Passa il mouse per Dettare, Riunione e Trasforma, o trascinala tra i bordi.",
+        "positions": {
+          "left": "Bordo sinistro",
+          "bottom": "Bordo inferiore",
+          "right": "Bordo destro",
+          "off": "Nascosto"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Apri note della riunione",
     "minimizeMeetingPill": "Riduci nella barra dei menu",
     "meetingStopped": "Prendi-appunti fermato",
-    "dismissMeetingStopped": "Salva e chiudi"
+    "dismissMeetingStopped": "Salva e chiudi",
+    "transform": "Trasforma",
+    "transformMenuAria": "Preset di trasformazione",
+    "transformAutoApply": "Riscrivi dettatura automaticamente",
+    "transformPresetPolish": "Rifinisci",
+    "transformPresetPromptEngineer": "Prompt Engineer",
+    "transformConfigure": "Configura trasformazioni…",
+    "noticeTransformedCopied": "Trasformato — premi ⌘V per incollare",
+    "noticeTransformEmpty": "Seleziona del testo o detta prima"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} potrebbe bloccare 1 scorciatoia",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Preset di trasformazione attivo",
+      "transformPresetsHint": "Usato automaticamente dopo la dettatura quando la riscrittura IA è attiva, o in qualsiasi momento sul testo selezionato tramite scorciatoia o pillola di registrazione."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Debug"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Apri azioni rapide di lowyap",
+    "dragHint": "Trascina sul bordo sinistro, inferiore o destro",
+    "noBotBadge": "Zero bot",
+    "actions": {
+      "dictate": "Detta",
+      "meeting": "Note riunione",
+      "transform": "Trasforma"
+    },
+    "runNow": "Trasforma ora",
+    "snoozeOneHour": "Posticipa di 1 ora",
+    "hideDock": "Nascondi barra laterale"
   }
 }

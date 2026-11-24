@@ -51,8 +51,16 @@ impl RecentDictations {
     }
 }
 
+struct TransformLineage {
+    raw_source: String,
+    outputs: Vec<String>,
+}
+
+const MAX_LINEAGE_OUTPUTS: usize = 8;
+
 static STATE: Mutex<PolishingState> = Mutex::new(PolishingState::new());
 static RECENT_DICTATIONS: Mutex<RecentDictations> = Mutex::new(RecentDictations::new());
+static TRANSFORM_LINEAGE: Mutex<Option<TransformLineage>> = Mutex::new(None);
 
 #[cfg(test)]
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -178,6 +186,100 @@ pub fn latest_dictation_id() -> Option<u32> {
         .map(|(id, _)| *id)
 }
 
+fn normalize_lineage_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Records a completed dictation alongside its un-rewritten raw source so
+/// switching Transform presets later (e.g. `Prompt Engineer` -> `Polish`)
+/// re-runs from the full raw dictation instead of re-polishing condensed bullets.
+pub fn remember_dictation_with_raw(raw_source: &str, final_text: &str) -> Option<u32> {
+    let id = remember_last_dictation(final_text)?;
+    let raw_trimmed = raw_source.trim();
+    let final_trimmed = final_text.trim();
+    let canonical_raw = if raw_trimmed.is_empty() {
+        final_trimmed.to_owned()
+    } else {
+        raw_trimmed.to_owned()
+    };
+    let mut outputs = vec![final_trimmed.to_owned()];
+    if normalize_lineage_ws(&canonical_raw) != normalize_lineage_ws(final_trimmed) {
+        outputs.push(canonical_raw.clone());
+    }
+    *TRANSFORM_LINEAGE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(TransformLineage {
+        raw_source: canonical_raw,
+        outputs,
+    });
+    Some(id)
+}
+
+/// If `candidate_source` matches the output of a prior Transform or dictation
+/// rewrite, returns the preserved original `raw_source` so style switching is lossless.
+pub fn resolve_transform_source(candidate_source: &str) -> String {
+    let trimmed = candidate_source.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let norm = normalize_lineage_ws(trimmed);
+    let guard = TRANSFORM_LINEAGE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(lineage) = guard.as_ref() {
+        if normalize_lineage_ws(&lineage.raw_source) == norm
+            || lineage
+                .outputs
+                .iter()
+                .any(|prev| normalize_lineage_ws(prev) == norm)
+        {
+            return lineage.raw_source.clone();
+        }
+    }
+    trimmed.to_owned()
+}
+
+/// Records a Transform result while preserving `raw_source` across subsequent
+/// preset switches (`Prompt Engineer` <-> `Polish` <-> custom prompts).
+pub fn record_transform_output(raw_source: &str, transformed_output: &str) {
+    let raw_trimmed = raw_source.trim();
+    let out_trimmed = transformed_output.trim();
+    if out_trimmed.is_empty() {
+        return;
+    }
+    let _ = remember_last_dictation(out_trimmed);
+    let raw_norm = normalize_lineage_ws(raw_trimmed);
+    let out_norm = normalize_lineage_ws(out_trimmed);
+
+    let mut guard = TRANSFORM_LINEAGE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    match guard.as_mut() {
+        Some(lineage) if normalize_lineage_ws(&lineage.raw_source) == raw_norm => {
+            if !lineage
+                .outputs
+                .iter()
+                .any(|prev| normalize_lineage_ws(prev) == out_norm)
+            {
+                if lineage.outputs.len() >= MAX_LINEAGE_OUTPUTS {
+                    lineage.outputs.remove(0);
+                }
+                lineage.outputs.push(out_trimmed.to_owned());
+            }
+        }
+        _ => {
+            *guard = Some(TransformLineage {
+                raw_source: if raw_trimmed.is_empty() {
+                    out_trimmed.to_owned()
+                } else {
+                    raw_trimmed.to_owned()
+                },
+                outputs: vec![out_trimmed.to_owned()],
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Barrier;
@@ -192,6 +294,9 @@ mod tests {
             .unwrap_or_else(PoisonError::into_inner)
             .entries
             .clear();
+        *TRANSFORM_LINEAGE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     #[test]
@@ -310,5 +415,35 @@ mod tests {
             get_dictation(Some(second_id)).as_deref(),
             Some("Updated dictation")
         );
+    }
+
+    #[test]
+    fn transform_lineage_recovers_raw_source_when_switching_prompt_engineer_back_to_polish() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        reset_for_test();
+
+        let full_raw = "We need the Chrome button to go straight to the extension link instead of multiple reroutes, and the WhatsApp share link should copy the extension link rather than the landing page. Also, can GitHub Pages store form responses or should we keep a static poll?";
+        let compressed_pe = "- Point Chrome button directly to extension.\n- Fix WhatsApp share link.";
+
+        remember_dictation_with_raw(full_raw, compressed_pe);
+        // Whether the user highlights the pasted Prompt Engineer bullets or invokes
+        // Transform on `get_last_dictation()`, switching back to Polish recovers `full_raw`.
+        let last = get_last_dictation().expect("last");
+        assert_eq!(last, compressed_pe);
+        assert_eq!(resolve_transform_source(&last), full_raw);
+        assert_eq!(
+            resolve_transform_source("- Point Chrome button directly to extension.  \n - Fix WhatsApp share link."),
+            full_raw
+        );
+
+        let polished = "We need the Chrome button to go straight to the extension link instead of multiple reroutes, and the WhatsApp share link should copy the extension link rather than the landing page. Also, can GitHub Pages store form responses, or should we keep a static poll?";
+        record_transform_output(full_raw, polished);
+
+        // Switching back to Prompt Engineer again still resolves `full_raw`.
+        assert_eq!(resolve_transform_source(polished), full_raw);
+
+        // Unrelated newly highlighted editor text is transformed verbatim, not replaced by stale lineage.
+        let unrelated = "Completely separate paragraph selected in another file.";
+        assert_eq!(resolve_transform_source(unrelated), unrelated);
     }
 }

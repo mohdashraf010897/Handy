@@ -390,6 +390,10 @@
           "transcribe_with_post_process": {
             "name": "Klávesa pro následné zpracování",
             "description": "Volitelné: Vyhrazená klávesová zkratka, která vždy použije AI následné zpracování na váš přepis."
+          },
+          "transform": {
+            "name": "Zkratka transformace",
+            "description": "Přepište označený text přímo na místě (nebo transformujte poslední diktování) pomocí aktivní předvolby."
           }
         },
         "errors": {
@@ -699,6 +703,16 @@
       },
       "previewNotices": {
         "callDetected": "Detekován hovor"
+      },
+      "edgeDock": {
+        "title": "Okrajový dok",
+        "description": "Připněte nenápadný proužek k levému, dolnímu nebo pravému okraji obrazovky. Najetím zobrazíte Diktovat, Schůzku a Transformovat, přetažením změníte okraj.",
+        "positions": {
+          "left": "Levý okraj",
+          "bottom": "Dolní okraj",
+          "right": "Pravý okraj",
+          "off": "Skrytý"
+        }
       }
     },
     "postProcessing": {
@@ -1137,7 +1151,15 @@
     "openMeetingNotes": "Otevřít poznámky ze schůzky",
     "minimizeMeetingPill": "Minimalizovat do řádku nabídek",
     "meetingStopped": "Zápis zastaven",
-    "dismissMeetingStopped": "Uložit a zavřít"
+    "dismissMeetingStopped": "Uložit a zavřít",
+    "transform": "Transformovat",
+    "transformMenuAria": "Předvolby transformace",
+    "transformAutoApply": "Automaticky přepisovat diktování",
+    "transformPresetPolish": "Vyladit",
+    "transformPresetPromptEngineer": "Prompt inženýr",
+    "transformConfigure": "Nastavit transformace…",
+    "noticeTransformedCopied": "Transformováno — vložte pomocí ⌘V",
+    "noticeTransformEmpty": "Nejprve označte text nebo nadiktujte"
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} může blokovat 1 zkratku",
@@ -1420,7 +1442,9 @@
       "tabs": {
         "toneAndSnippets": "App Tone & Snippets",
         "linguistEngine": "Linguist Engine & Prompts"
-      }
+      },
+      "transformPresetsTitle": "Aktivní předvolba transformace",
+      "transformPresetsHint": "Použije se automaticky po diktování při zapnutém AI přepisování, nebo kdykoli na označený text přes zkratku transformace či nahrávací lištu."
     },
     "settings": {
       "title": "Settings",
@@ -1433,5 +1457,18 @@
         "debug": "Ladění"
       }
     }
+  },
+  "edgeDock": {
+    "openQuickActions": "Otevřít rychlé akce lowyap",
+    "dragHint": "Přetáhněte k levému, dolnímu nebo pravému okraji",
+    "noBotBadge": "Bez bota",
+    "actions": {
+      "dictate": "Diktovat",
+      "meeting": "Poznámky ze schůzky",
+      "transform": "Transformovat"
+    },
+    "runNow": "Transformovat nyní",
+    "snoozeOneHour": "Odložit o 1 hodinu",
+    "hideDock": "Skrýt postranní dok"
   }
 }
